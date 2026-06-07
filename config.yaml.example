@@ -1,0 +1,23 @@
+# === 人设配置 ===
+persona: "xiaoya"           # 选择人设模板（xiaoya / suchi / qiuyao）
+her_name: "小雅"             # 她的名字
+your_name: "你"              # 她怎么称呼你
+location: "上海"             # 地理位置（影响天气、话题）
+
+# === 个性标签（可选）===
+tags: []
+  # 可选: 话痨 / 嘴硬心软 / 粘人 / 独立 / 浪漫主义 / 闷骚 / 工作狂
+
+# === 选填 ===
+# zodiac: ""                 # 星座
+# mbti: ""                   # MBTI
+# relationship_background: "" # 你们怎么认识的（给她的故事一个起点）
+
+# === 用户→人设映射（选填，QQ 模式专用）===
+# 不同 QQ 号对应不同人设。未在此映射中的用户使用上方默认 persona。
+# user_personas:
+#   123456789: "qiuyao"
+
+# === 系统配置 ===
+message_frequency_limit: 10  # 每分钟最大消息数（防封号）
+log_level: "info"            # debug / info / warn / error
