@@ -5,6 +5,7 @@
  */
 
 import { pickQQFace, toCqFace } from "../persona/emoji-map.js";
+import { insertToneMarkers, ToneConfig, ToneContext } from "./tone-insertion.js";
 
 /** 根据情绪向量 + 冲动强度选择 QQ 表情分类 */
 function pickCategoryByMood(emotion: number, intensity: number): string {
@@ -30,6 +31,8 @@ export interface RenderConfig {
   isChatty: boolean;
   /** P1-d: 输出模式 — CLI 用 kaomoji，QQ 用 qqface */
   stickerMode?: "kaomoji" | "qqface";
+  /** 语气词配置 */
+  tone?: ToneConfig;
 }
 
 export interface RenderedMessage {
@@ -69,6 +72,17 @@ export function renderExpression(
   let qqFace: string | undefined;
   let willWithdraw: boolean | undefined;
   let burstParts: string[] | undefined;
+
+  if (config.tone) {
+    const toneContext: ToneContext = {
+      emotionVector: state.emotionVector,
+      closeness: 5,
+      impulseIntensity: state.impulseIntensity,
+      guilt: state.guilt,
+      busyLevel: state.busyLevel,
+    };
+    content = insertToneMarkers(content, config.tone, toneContext);
+  }
 
   // 颜文字自动匹配
   kaomoji = Math.random() < 0.2 ? pickKaomoji(content, config.emojiStyle) : undefined;

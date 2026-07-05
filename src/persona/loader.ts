@@ -64,6 +64,8 @@ export interface SpeakingStyle {
   typingHabit: string;
   addressUser: string;
   dialect: string;
+  toneStyle?: string;
+  toneFrequency?: number;
 }
 
 export interface EmotionalPatterns {

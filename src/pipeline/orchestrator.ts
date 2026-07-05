@@ -596,6 +596,10 @@ export async function processMessage(
     stickerFrequency: 0.3,
     isChatty: persona.speaking.catchphrases.some(p => p.includes("跟你说")),
     stickerMode: state.stickerMode,
+    tone: {
+      style: persona.speaking.toneStyle || "natural",
+      frequency: persona.speaking.toneFrequency ?? 0.5,
+    },
   }, {
     impulseIntensity,
     hasInternalStruggle: gate.type === "reply" && gate.delayMs > 5000,
@@ -904,6 +908,10 @@ export async function* processMessageStream(
     emojiStyle: "动物系", stickerFrequency: 0.3,
     isChatty: persona.speaking.catchphrases.some(p => p.includes("跟你说")),
     stickerMode: state.stickerMode,
+    tone: {
+      style: persona.speaking.toneStyle || "natural",
+      frequency: persona.speaking.toneFrequency ?? 0.5,
+    },
   }, {
     impulseIntensity,
     hasInternalStruggle: false,
@@ -1128,6 +1136,10 @@ export async function processProactive(
     stickerFrequency: 0.3,
     isChatty: persona.speaking.catchphrases.some(p => p.includes("跟你说")),
     stickerMode: state.stickerMode,
+    tone: {
+      style: persona.speaking.toneStyle || "natural",
+      frequency: persona.speaking.toneFrequency ?? 0.5,
+    },
   }, {
     impulseIntensity: picked.intensity,
     hasInternalStruggle: picked.source === "情绪" && emotionState.vector < 0,
