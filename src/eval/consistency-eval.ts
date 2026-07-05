@@ -211,13 +211,39 @@ ${personaDescription}
  */
 export function parseJudgeResponse(raw: string): JudgeResult | null {
   try {
-    // 尝试提取 JSON 块
-    const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/) ?? raw.match(/(\{[\s\S]*\})/);
-    if (!jsonMatch) return null;
-    const parsed = JSON.parse(jsonMatch[1]);
+    // 尝试多种 JSON 提取策略
+    let jsonStr: string | null = null;
+
+    // 策略1: ```json ... ``` 代码块
+    const fenced = raw.match(/```json\s*([\s\S]*?)```/);
+    if (fenced) jsonStr = fenced[1].trim();
+
+    // 策略2: 纯 JSON 对象（从第一个 { 到最后一个 }）
+    if (!jsonStr) {
+      const firstBrace = raw.indexOf("{");
+      const lastBrace = raw.lastIndexOf("}");
+      if (firstBrace >= 0 && lastBrace > firstBrace) {
+        jsonStr = raw.slice(firstBrace, lastBrace + 1);
+      }
+    }
+
+    if (!jsonStr) return null;
+
+    const parsed = JSON.parse(jsonStr);
+    // 处理 dimensions 可能是数组或对象的情况
+    const dims = Array.isArray(parsed.dimensions) ? parsed.dimensions
+      : (parsed.dimensions ? Object.values(parsed.dimensions) : []);
+
     return {
-      dimensions: parsed.dimensions ?? [],
-      overallScore: parsed.overallScore ?? 0,
+      dimensions: dims.map((d: any) => ({
+        name: d.name ?? "",
+        score: typeof d.score === "number" ? d.score : parseInt(d.score, 10) || 3,
+        reason: d.reason ?? "",
+      })),
+      overallScore: typeof parsed.overallScore === "number" ? parsed.overallScore
+        : parseInt(parsed.overallScore, 10) || (dims.length > 0
+          ? Math.round(dims.reduce((s: number, d: any) => s + (typeof d.score === "number" ? d.score : 3), 0) / dims.length)
+          : 3),
       summary: parsed.summary ?? "",
       rawResponse: raw,
     };
