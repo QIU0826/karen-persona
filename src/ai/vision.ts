@@ -7,9 +7,10 @@
  * - 先把图片下载为 base64 data URL 再请求：QQ/NapCat 的图片 URL 常为私有/临时地址，
  *   DeepSeek 服务端无法访问（实测直传私有 URL 返回 400 Failed to download image）；
  *   下载失败再回退直接传 URL（兼容公网可访问地址）。
- * - detail:"low"（缩放到 512×512）：实测一张 2000×1500 图 prompt tokens 从 1015 降到 208。
+ * - 图片细节用 `detail:"high"`：截图/文字类图片在 low（缩放到 512×512）下 OCR 会失真；
+ *   高清单图约 1000 prompt tokens（flash 成本约 ¥0.002/张），值得为「看懂截图」付这个钱。
  * - 关闭思考模式：视觉描述不需要思维链，避免 max_tokens 被 reasoning 吃光。
- * - 描述长度 30–60 字（15 字版本会让她的回应泛化成"好看"）。
+ * - 描述：截图类逐字转述（≤200 字），画面类 40-80 字（15 字版本会让回应泛化成"好看"）。
  * - 无 Key / 下载失败 / 请求失败一律静默返回 null（调用方降级为 [图片]，不阻塞聊天）。
  * - Qwen / DashScope Key 不再用于视觉，仅保留给语义嵌入（见 router.getEmbeddingConfig）。
  */
@@ -28,15 +29,18 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
  * 输出预算：目标 30–50 字（约 60–100 tokens），留足余量避免截断；
  * 关闭思考后 reasoning 不占预算。
  */
-const VISION_MAX_TOKENS = 240;
+const VISION_MAX_TOKENS = 600;
 /** 描述最大字数（超过才截断；默认目标 30–50 字，给"她"足够细节可回应）。 */
-const VISION_MAX_DESC_CHARS = 60;
+const VISION_MAX_DESC_CHARS = 220;
 /**
  * 视觉提示词：要求 30–50 字、有细节、可带氛围、有文字优先转述。
  * 15 字版本在真机复盘中导致她只能"还挺好看"，看不到主体/场景细节。
  */
 const VISION_PROMPT =
-  '用 30-50 个中文字描述这张图片：先说画面主体和场景，再补充氛围或细节；图里有文字请优先转述。不要加前缀如"图中是"，不要分点，不要评价。';
+  '先判断图片类型：\n' +
+  '1) 如果是截图、聊天记录、推文、表格等含文字的图片：尽可能完整地转述其中的文字内容（最多 200 字，保留关键原文，不要只概括）；\n' +
+  '2) 如果是照片/插画等画面：用 40-80 个中文字描述主体、场景、氛围与细节。\n' +
+  '不要加前缀如"图中是"，不要分点，不要评价。';
 /** 支持的图片 MIME（官方：JPEG、PNG、GIF、WebP，按文件内容判断）。 */
 const SUPPORTED_IMAGE_MIME = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
@@ -119,7 +123,7 @@ async function downloadAsDataUrl(imageUrl: string): Promise<string | null> {
 }
 
 /**
- * 用 DeepSeek Flash 识别图片内容，返回 30–60 字中文描述（主体+场景+氛围/细节）。
+ * 用 DeepSeek Flash 识别图片内容：截图优先转述文字，画面给 40-80 字描述。
  * 失败时返回 null，调用方应降级为 [图片] 占位符。
  */
 export async function describeImage(imageUrl: string): Promise<string | null> {
@@ -151,8 +155,8 @@ export async function describeImage(imageUrl: string): Promise<string | null> {
           content: [
             {
               type: "image_url",
-              // detail:"low" 会先缩放到 512×512，更快更省 token
-              image_url: { url: imagePayload, detail: "low" },
+              // high 保留原图分辨率：截图/文字类图片需要它才能准确 OCR
+              image_url: { url: imagePayload, detail: "high" },
             },
             { type: "text", text: VISION_PROMPT },
           ],

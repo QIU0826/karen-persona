@@ -61,14 +61,14 @@ afterEach(() => {
 });
 
 describe("describeImage：DeepSeek Flash 视觉", () => {
-  it("下载图片成功 → 以 base64 data URL + detail low 请求，返回可用的详细描述", async () => {
+  it("下载图片成功 → 以 base64 data URL + detail high 请求，返回可用的详细描述", async () => {
     fetchMock.mockResolvedValue(imageResponse(PNG_BYTES));
     createMock.mockResolvedValue(completion("蓝天白云下有一座小房子"));
 
     const desc = await describeImage("http://qq.example.com/private/image.png");
 
     expect(desc).toBe("蓝天白云下有一座小房子");
-    expect(Array.from(desc ?? "").length).toBeLessThanOrEqual(60);
+    expect(Array.from(desc ?? "").length).toBeLessThanOrEqual(220);
 
     // 先下载再请求（QQ 图片 URL 常为私有地址，服务端无法访问）
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -87,11 +87,11 @@ describe("describeImage：DeepSeek Flash 视觉", () => {
       messages: Array<{ content: Array<{ type: string; image_url?: { url: string; detail?: string } }> }>;
     };
     expect(request.model).toBe("deepseek-flash");
-    expect(request.max_tokens).toBe(240);
+    expect(request.max_tokens).toBe(600);
     expect(request.thinking).toEqual({ type: "disabled" });
 
     const imagePart = request.messages[0].content.find((part) => part.type === "image_url");
-    expect(imagePart?.image_url?.detail).toBe("low");
+    expect(imagePart?.image_url?.detail).toBe("high");
     expect(imagePart?.image_url?.url).toMatch(/^data:image\/png;base64,/);
   });
 
@@ -149,13 +149,13 @@ describe("describeImage：DeepSeek Flash 视觉", () => {
     expect(await describeImage("http://qq.example.com/a.png")).toBeNull();
   });
 
-  it("模型返回超长描述 → 截断到 60 字", async () => {
+  it("模型返回超长描述 → 截断到 220 字", async () => {
     fetchMock.mockResolvedValue(imageResponse(PNG_BYTES));
-    createMock.mockResolvedValue(completion("很".repeat(80)));
+    createMock.mockResolvedValue(completion("很".repeat(300)));
 
     const desc = await describeImage("http://qq.example.com/a.png");
 
-    expect(Array.from(desc ?? "").length).toBe(60);
+    expect(Array.from(desc ?? "").length).toBe(220);
   });
 
   it("data URL 输入 → 跳过下载直接请求", async () => {
