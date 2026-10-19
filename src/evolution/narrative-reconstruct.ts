@@ -16,6 +16,7 @@ import type { MetabolizedMemory } from "./memory-decay.js";
 import type { DriftState } from "./baseline-drift.js";
 import { getVectorDb } from "../data/vector.js";
 import OpenAI from "openai";
+import { withThinking } from "../ai/chat.js";
 import { getChatModel } from "../ai/router.js";
 
 // ── 翻阅日记（P2-1）─────────────────────────────
@@ -77,15 +78,15 @@ export async function flipThroughDiary(): Promise<string | null> {
   ].join("\n");
 
   try {
-    const response = await client.chat.completions.create({
+    const response = await client.chat.completions.create(withThinking({
       model: modelConfig.model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
       temperature: 0.85,
-      max_tokens: 80,
-    });
+      max_tokens: 300,
+    }));
 
     const text = response.choices[0]?.message?.content?.trim() ?? "";
     if (!text || text === "没什么特别的" || text === "没什么特别的。" || text.length < 2) {

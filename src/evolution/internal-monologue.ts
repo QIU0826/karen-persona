@@ -11,6 +11,7 @@
  * - 她是在"遇见自己"，不是在"修正自己"
  */
 import OpenAI from "openai";
+import { withThinking } from "../ai/chat.js";
 import { getChatModel } from "../ai/router.js";
 import { insertEpisodeWithEmbedding } from "../data/vector.js";
 import { generateEmbedding } from "../data/embedding.js";
@@ -85,15 +86,15 @@ export async function generateMonologue(params: MonologueParams): Promise<Monolo
   ].join("\n");
 
   try {
-    const response = await client.chat.completions.create({
+    const response = await client.chat.completions.create(withThinking({
       model: modelConfig.model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
       temperature: 0.9,
-      max_tokens: 120,
-    });
+      max_tokens: 300,
+    }));
 
     const text = response.choices[0]?.message?.content?.trim() ?? "";
     if (!text) {
@@ -189,15 +190,15 @@ export async function generateNightMonologue(
   ].join("\n");
 
   try {
-    const response = await client.chat.completions.create({
+    const response = await client.chat.completions.create(withThinking({
       model: modelConfig.model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
       temperature: 0.9,
-      max_tokens: 80,
-    });
+      max_tokens: 240,
+    }));
 
     const text = response.choices[0]?.message?.content?.trim() ?? "";
     return text || null;

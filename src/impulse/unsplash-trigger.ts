@@ -8,6 +8,7 @@
  */
 import OpenAI from "openai";
 import { getChatModel } from "../ai/router.js";
+import { withThinking } from "../ai/chat.js";
 import { fetchUnsplashPhoto } from "../ai/image-gen.js";
 import { describeEmotion } from "../persona/emotion.js";
 import type { ConversationState } from "../pipeline/orchestrator.js";
@@ -61,7 +62,7 @@ async function generateQuery(
       baseURL: modelConfig.baseUrl,
     });
     const response = await Promise.race([
-      client.chat.completions.create({
+      client.chat.completions.create(withThinking({
         model: modelConfig.model,
         messages: [
           {
@@ -71,8 +72,8 @@ async function generateQuery(
           { role: "user", content: prompt },
         ],
         temperature: 0.7,
-        max_tokens: 30,
-      }),
+        max_tokens: 80,
+      })),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("QUERY_TIMEOUT")), QUERY_TIMEOUT_MS),
       ),

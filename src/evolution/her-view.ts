@@ -13,6 +13,7 @@
  */
 
 import OpenAI from "openai";
+import { withThinking } from "../ai/chat.js";
 import { getChatModel } from "../ai/router.js";
 import type { Persona } from "../persona/loader.js";
 
@@ -113,15 +114,15 @@ export async function generateHerView(input: HerViewInput): Promise<string | nul
       baseURL: modelConfig.baseUrl,
     });
 
-    const response = await client.chat.completions.create({
+    const response = await client.chat.completions.create(withThinking({
       model: modelConfig.model,
       messages: [
         { role: "system", content: "你是一个角色内心独白生成器。只输出角色的内心想法，不要解释，不要引号。" },
         { role: "user", content: prompt },
       ],
       temperature: 0.8,
-      max_tokens: 120,
-    });
+      max_tokens: 300,
+    }));
 
     const content = response.choices[0]?.message?.content;
     if (!content || content.trim().length === 0) return null;

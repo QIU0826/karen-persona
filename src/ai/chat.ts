@@ -1,9 +1,11 @@
 import OpenAI from "openai";
 import {
   getChatModel,
+  getThinkingConfig,
   COMPLEXITY_TOKENS,
   type MessageComplexity,
   type ModelConfig,
+  type ThinkingConfig,
 } from "./router.js";
 import type { Persona } from "../persona/loader.js";
 
@@ -23,12 +25,20 @@ const RETRY_BASE_DELAY_MS = 500;
 const RETRY_MAX_DELAY_MS = 8_000;
 /** 错误信息落日志前的截断长度，避免整段 HTML/JSON 刷屏。 */
 const ERROR_MESSAGE_MAX_CHARS = 300;
+/**
+ * 非思考模式下的采样温度。
+ * 官方文档：思考模式不支持 temperature / presence_penalty / frequency_penalty，
+ * 传入不会报错但也不会生效；因此只在关闭思考时发送，避免误导。
+ */
+const CHAT_TEMPERATURE = 0.9;
 
 /** 累计 token 用量（进程内），供日志/后续指标接入使用。 */
 interface UsageTotals {
   calls: number;
   promptTokens: number;
   completionTokens: number;
+  reasoningTokens: number;
+  cacheHitTokens: number;
   totalTokens: number;
 }
 
@@ -36,6 +46,8 @@ const usageTotals: UsageTotals = {
   calls: 0,
   promptTokens: 0,
   completionTokens: 0,
+  reasoningTokens: 0,
+  cacheHitTokens: 0,
   totalTokens: 0,
 };
 
@@ -185,21 +197,31 @@ function recordUsage(
     prompt_tokens?: number;
     completion_tokens?: number;
     total_tokens?: number;
+    /** DeepSeek：思考模式消耗的 tokens，已包含在 completion_tokens 内（按输出计费）。 */
+    completion_tokens_details?: { reasoning_tokens?: number | null } | null;
+    /** DeepSeek：自动 prompt 缓存命中/未命中的输入 tokens。 */
+    prompt_cache_hit_tokens?: number | null;
+    prompt_cache_miss_tokens?: number | null;
   } | null | undefined
 ): void {
   if (!usage) return;
   const promptTokens = usage.prompt_tokens ?? 0;
   const completionTokens = usage.completion_tokens ?? 0;
   const totalTokens = usage.total_tokens ?? promptTokens + completionTokens;
+  const reasoningTokens = usage.completion_tokens_details?.reasoning_tokens ?? 0;
+  const cacheHitTokens = usage.prompt_cache_hit_tokens ?? 0;
 
   usageTotals.calls += 1;
   usageTotals.promptTokens += promptTokens;
   usageTotals.completionTokens += completionTokens;
+  usageTotals.reasoningTokens += reasoningTokens;
+  usageTotals.cacheHitTokens += cacheHitTokens;
   usageTotals.totalTokens += totalTokens;
 
   console.log(
-    `[LLM] usage(${kind}, ${model}): prompt=${promptTokens} completion=${completionTokens} total=${totalTokens}` +
-      ` | 累计 total=${usageTotals.totalTokens} (${usageTotals.calls} 次)`
+    `[LLM] usage(${kind}, ${model}): prompt=${promptTokens} (cache_hit=${cacheHitTokens})` +
+      ` completion=${completionTokens} (reasoning=${reasoningTokens}) total=${totalTokens}` +
+      ` | 累计 total=${usageTotals.totalTokens} (${usageTotals.calls} 次, cache_hit=${usageTotals.cacheHitTokens})`
   );
 }
 
@@ -229,13 +251,109 @@ function nextChunkWithTimeout(
 }
 
 /**
+ * DeepSeek 在 OpenAI 兼容接口上的扩展请求体字段。
+ *
+ * 官方文档（思考模式）：OpenAI 格式下 `thinking` 属于 `extra_body`；Python SDK 用
+ * `extra_body=` 传入。Node SDK 没有 extra_body——直接把字段放进请求对象即可：
+ * SDK 用 JSON.stringify 序列化整个 body，不会过滤未知字段（已用真实 Key 实测生效）。
+ */
+interface DeepSeekChatBody {
+  model: string;
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+  max_tokens: number;
+  /** DeepSeek 扩展字段：思考模式开关 */
+  thinking: { type: "enabled" | "disabled" };
+  /** 仅非思考模式发送（思考模式官方会忽略 temperature） */
+  temperature?: number;
+  /** DeepSeek 思考强度，仅思考模式发送 */
+  reasoning_effort?: "low" | "high" | "max";
+}
+
+/**
+ * 组装 DeepSeek 请求体。
+ * - 默认（DEEPSEEK_THINKING 未开）发送 `thinking:{type:"disabled"}` + temperature；
+ * - DEEPSEEK_THINKING=enabled 时发送 `thinking:{type:"enabled"}` + reasoning_effort，
+ *   不发送 temperature（官方文档：思考模式不支持该参数）。
+ */
+function buildChatBody(args: {
+  modelConfig: ModelConfig;
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  maxTokens: number;
+  thinking: ThinkingConfig;
+}): DeepSeekChatBody {
+  const { modelConfig, messages, maxTokens, thinking } = args;
+  const body: DeepSeekChatBody = {
+    model: modelConfig.model,
+    messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+    max_tokens: maxTokens,
+    thinking: thinking.thinking,
+  };
+  if (thinking.enabled) {
+    body.reasoning_effort = thinking.reasoningEffort;
+  } else {
+    body.temperature = CHAT_TEMPERATURE;
+  }
+  return body;
+}
+
+/**
+ * 给「直接调用 openai SDK」的旁路 LLM 调用补上 DeepSeek 思考模式参数。
+ *
+ * 背景：DeepSeek 思考模式默认开启，且 reasoning_content 与正文共用 max_tokens；
+ * 旁路调用（内心独白/T3/hers view/进化日志/热点摘要等）没有统一入口，
+ * 若不显式关闭思考，小 max_tokens 会得到空正文（实测复现）。
+ *
+ * 用法：client.chat.completions.create(withThinking({ model, messages, max_tokens }))
+ * 返回类型保持入参类型，运行时额外携带 thinking / reasoning_effort。
+ */
+export function withThinking(
+  params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
+  complexity: MessageComplexity = "normal",
+): OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming {
+  const thinking = getThinkingConfig(complexity);
+  const body: Record<string, unknown> = { ...params, thinking: thinking.thinking };
+  if (thinking.enabled) {
+    body.reasoning_effort = thinking.reasoningEffort;
+    // 官方文档：思考模式不支持 temperature，传了也不生效
+    delete body.temperature;
+  }
+  return body as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
+}
+
+/**
+ * 取出正文；空回复时抛出可读错误。
+ * 思考模式下 reasoning_content 与 content 共用 max_tokens：若预算被思考耗尽，
+ * content 会是 null（实测复现）。这里给出明确的排查提示。
+ */
+function extractContentOrThrow(response: OpenAI.Chat.Completions.ChatCompletion): string {
+  const message = response.choices[0]?.message;
+  const content = message?.content;
+  if (content) return content;
+
+  const reasoning = (message as { reasoning_content?: string | null } | undefined)?.reasoning_content;
+  if (reasoning) {
+    const reasoningChars = Array.from(reasoning).length;
+    throw new Error(
+      `AI 思考占满 max_tokens（reasoning ≈ ${reasoningChars} 字），没有产出正文；` +
+        "请关闭思考模式（DEEPSEEK_THINKING=disabled）或提高 max_tokens"
+    );
+  }
+  throw new Error("AI 返回了空回复");
+}
+
+/**
  * 发送消息到 AI 模型并获取回复。
  * Phase 2: 支持 RAG 上下文注入。
  *
  * 健壮性（M0）：
  * - 显式 30s 超时（LLM_TIMEOUT_MS 可配）
  * - 关闭 SDK 内置重试，自行对 429/5xx/网络错误做指数退避重试（最多 3 次）
- * - 打印 token usage；错误信息可读
+ * - 打印 token usage（含 reasoning / prompt 缓存命中）；错误信息可读
+ *
+ * DeepSeek 思考模式（2026-10）：
+ * - 默认发送 thinking:{type:"disabled"}（可用 DEEPSEEK_THINKING=enabled 覆盖）；
+ * - 思考模式默认开启时 max_tokens 会被 reasoning_content 耗尽 → content=null 空回复，
+ *   这是本次修复的生产 bug。
  */
 export async function chat(
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
@@ -247,6 +365,7 @@ export async function chat(
   const finalMessages = buildFinalMessages(messages, options);
   const client = createChatClient(modelConfig);
   const maxTokens = COMPLEXITY_TOKENS[complexity];
+  const thinking = getThinkingConfig(complexity);
   const startMs = Date.now();
 
   let lastError: unknown;
@@ -254,12 +373,11 @@ export async function chat(
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
     const attemptStartMs = Date.now();
     try {
-      const response = await client.chat.completions.create({
-        model: modelConfig.model,
-        messages: finalMessages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-        temperature: 0.9,
-        max_tokens: maxTokens,
-      });
+      const body = buildChatBody({ modelConfig, messages: finalMessages, maxTokens, thinking });
+      const response = await client.chat.completions.create(
+        // 类型断言：thinking/reasoning_effort 是 DeepSeek 扩展字段，OpenAI SDK 类型未声明
+        body as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
+      );
 
       const attemptMs = Date.now() - attemptStartMs;
       const totalMs = Date.now() - startMs;
@@ -268,12 +386,7 @@ export async function chat(
       }
 
       recordUsage("chat", modelConfig.model, response.usage);
-
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        throw new Error("AI 返回了空回复");
-      }
-      return content;
+      return extractContentOrThrow(response);
     } catch (err) {
       lastError = err;
 
@@ -305,6 +418,9 @@ export async function chat(
  * - 流式 usage 用 stream_options.include_usage 采集；provider 不支持时静默降级
  * - 未产出任何 token 前可对 429/5xx/网络错误重试；已产出后不重试（避免重复内容）
  * - 错误信息可读
+ *
+ * DeepSeek 思考模式（2026-10）：与非流式一致，默认发送 thinking:{type:"disabled"}；
+ * 思考模式下 delta.reasoning_content 会先于正文到达，本函数只透传正文（不影响 QQ 打字效果）。
  */
 export async function* chatStream(
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
@@ -316,6 +432,7 @@ export async function* chatStream(
   const finalMessages = buildFinalMessages(messages, options);
   const client = createChatClient(modelConfig);
   const maxTokens = COMPLEXITY_TOKENS[complexity];
+  const thinking = getThinkingConfig(complexity);
   const timeoutMs = getLlmTimeoutMs();
   const startMs = Date.now();
 
@@ -329,23 +446,28 @@ export async function* chatStream(
     const controller = new AbortController();
     let emitted = false;
     let firstTokenAt = 0;
+    let reasoningChars = 0;
 
     try {
-      const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
-        model: modelConfig.model,
-        messages: finalMessages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-        temperature: 0.9,
-        max_tokens: maxTokens,
+      const params: DeepSeekChatBody & {
+        stream: true;
+        stream_options?: OpenAI.Chat.Completions.ChatCompletionStreamOptions;
+      } = {
+        ...buildChatBody({ modelConfig, messages: finalMessages, maxTokens, thinking }),
         stream: true,
       };
       if (includeUsage) {
         params.stream_options = { include_usage: true };
       }
 
-      const stream = await client.chat.completions.create(params, {
-        signal: controller.signal,
-        timeout: timeoutMs,
-      });
+      const stream = await client.chat.completions.create(
+        // 类型断言：thinking/reasoning_effort 是 DeepSeek 扩展字段，OpenAI SDK 类型未声明
+        params as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+        {
+          signal: controller.signal,
+          timeout: timeoutMs,
+        }
+      );
       const iterator = stream[Symbol.asyncIterator]();
 
       for (;;) {
@@ -358,15 +480,29 @@ export async function* chatStream(
           recordUsage("chatStream", modelConfig.model, chunk.usage);
         }
 
-        const delta = chunk.choices?.[0]?.delta?.content;
-        if (!delta) continue;
+        const delta = chunk.choices?.[0]?.delta;
+        // 思考模式的思维链：不输出给用户（QQ 里只发正文），仅计数用于诊断
+        const reasoningDelta = (delta as { reasoning_content?: string | null } | undefined)
+          ?.reasoning_content;
+        if (reasoningDelta) reasoningChars += Array.from(reasoningDelta).length;
+
+        const contentDelta = delta?.content;
+        if (!contentDelta) continue;
 
         emitted = true;
         if (!firstTokenAt) {
           firstTokenAt = Date.now();
           console.log(`[LLM] 首 token: ${firstTokenAt - startMs}ms (attempt ${attempts})`);
         }
-        yield delta;
+        yield contentDelta;
+      }
+
+      if (!emitted) {
+        // 思考模式可能把 max_tokens 全花在 reasoning_content 上 → 用户收不到任何回复
+        console.log(
+          `[LLM] 警告：流式响应未产出正文（thinking=${thinking.enabled ? "enabled" : "disabled"}，` +
+            `reasoning≈${reasoningChars} 字）；若已开启思考模式请提高 max_tokens`
+        );
       }
 
       const totalMs = Date.now() - startMs;

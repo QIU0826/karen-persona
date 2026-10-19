@@ -12,6 +12,7 @@
  */
 
 import OpenAI from "openai";
+import { withThinking } from "../ai/chat.js";
 import { getChatModel } from "../ai/router.js";
 import { getVectorDb, getCurrentPersona, insertEpisode, getRecentSnapshots, type T1Snapshot } from "../data/vector.js";
 import { generateEmbedding } from "../data/embedding.js";
@@ -135,15 +136,15 @@ async function generateJournalNarrative(
   ].filter(Boolean).join("\n");
 
   try {
-    const response = await client.chat.completions.create({
+    const response = await client.chat.completions.create(withThinking({
       model: modelConfig.model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
       temperature: 0.8,
-      max_tokens: 200,
-    });
+      max_tokens: 400,
+    }));
 
     const text = response.choices[0]?.message?.content?.trim() ?? "";
     return text || null;
