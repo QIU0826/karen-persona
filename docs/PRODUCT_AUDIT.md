@@ -1,8 +1,8 @@
 # Karen Persona — 产品审计报告
 
 > 审计对象：`QIU0826/karen-persona`（master，最后提交 2026-07-05，共 3 个 commit）
-> 审计方式：全量静态代码精读 + 8 个领域并行深挖 + 文档逐条核对 + 调用链/引用图分析。
-> 运行时状态：本机无预装 Node/npm，依赖安装受网络限制未完成，**测试与 `tsc` 未实际执行**；文中运行时结论均为「高置信度静态结论」，已标注「待实测」。
+> 审计方式：全量静态代码精读 + 8 个领域并行深挖 + 文档逐条核对 + 调用链/引用图分析 + 关键结论实测复现。
+> 运行时状态：已用内置 Node 24 + pnpm 完成依赖安装并实测——**`tsc --noEmit` 通过（0 错误）、178 个测试全部通过（11 文件，210ms）**；**P0-1（data 目录缺失 → CANTOPEN）与 P0-2（t2 表缺 embedding 列 → SQLITE_ERROR）均已复现**。macOS 上 better-sqlite3 11.10 无 Node 24 预编译包，需升级到 12.11+（12.11.1 实测可加载）。
 > 图例：✅ 已实现且在主路径可用 ｜ 🟡 已实现但有明显限制/瑕疵 ｜ 🔴 半成品或未接入主路径 ｜ 💀 死代码/无调用 ｜ 📄 仅文档宣称
 
 ---
@@ -15,7 +15,7 @@
 
 **它离「完美产品」有多远**：三条硬伤决定了它现在**更像作品集而不是产品**：
 
-1. **新装即坏（阻断级）**：全新克隆后没有 `data/` 目录，SQLite 打不开；`t2_episodes` 表缺少代码正在读写的 `embedding` 列。按代码路径，首次运行必崩，记忆/演化链路全断。作者本机显然有历史数据库，所以从未暴露。
+1. **新装即坏（阻断级，已实测复现）**：全新克隆后没有 `data/` 目录，SQLite 报 `Cannot open database because the directory does not exist`；手动建 `data/` 后，`t2_episodes` 表缺少代码正在读写的 `embedding` 列，`backfillEpisodeVectors()` 抛 `SQLITE_ERROR: no such column: embedding`。这两步正卡在 CLI/QQ 启动路径上，首次运行必崩，记忆/演化链路全断。作者本机显然有历史数据库，所以从未暴露。
 2. **「人格/记忆/演化」的主卖点大部分没有闭环**：QQ 私聊主路径走的是精简版流式管线，跳过 6 个演化模块；所有演化运行时状态不落盘，重启即归零；亲密度 `closeness` 永远不变；多用户记忆/会话隔离实质失效；`user_personas` 配置被 `loadConfig` 丢弃，文档宣传的「不同好友不同人设」根本不存在。
 3. **文档与实现系统性脱节**：语义嵌入实际全程用 n-gram 哈希；sqlite-vec 只建表不读写；「数据不上传」与实际调用 DeepSeek/Qwen 矛盾；测试数 133/178 两套；作品集里 99/100、Recall 99.4%、63.2% 等指标无法由当前代码复现。
 
@@ -166,6 +166,11 @@ QQ 好友消息
 | 4-13 | 人设创建（脚手架） | 生成完整 persona.json | ✅ | `create.ts` |
 | 4-14 | 人设叙事创建（5 入口） | 自由文本 → 正则推导字段 → 草稿 + 待补充清单 | 🟡 | `narrate.ts`；**不是 LLM 分析**（入口 5 却写「AI 会分析」），推导靠正则 |
 | 4-15 | 三个内置人设 | 小雅/苏迟/秋瑶 | ✅ | 字段丰富；但大量字段不进 prompt（见 2.3） |
+| 4-16 | 行为脚本触发覆盖 | 7 个 trigger | 🔴 | `negative_venting` / `after_silence` **永不可达**；`exception_moment` 依赖不可达的 guilty；`media_shared` 因 QQ 侧 `[图片：` 与 `^\[图片\]` 不匹配而失效 |
+| 4-17 | 负债闭环 | guilt 产生 → 偿还 → 行为 | 🔴 | `incurGuilt` 仅两处：一处要求 `guilt>0.3`（循环依赖）、一处要求 `impulse>0.3`（实际典型 0.03–0.07）→ **guilt 恒≈0**；`dailyDecay` 名为每日、实为每消息 |
+| 4-18 | 硬编码串味 | 时间感知/关系措辞 | 🟡 | `time-awareness.ts:111` 写死「咖啡店应该正忙」→ 苏迟（插画师）/秋瑶（学生）也这么想；`buildRelationshipPart` 写死「她眼里」，男性人设苏迟不适用 |
+| 4-19 | 产物校验 | create/narrate | 🟡 | 生成后人设**没有**再过 `validatePersona`；narrate 入口写「AI 会分析」，实际是正则推导 |
+| 4-20 | SKILL.md / persona.md | 人设文档资产 | 📄 | loader 只检查 `SKILL.md` 是否存在，内容不进 prompt；`persona.md` 全仓零引用 |
 
 #### 域五：演化引擎（src/evolution）
 
@@ -301,6 +306,10 @@ QQ 好友消息
 | 3-13 | 端口 `18080`（README/.env） | 代码默认 `8080`（`qq.ts:76`）；漏配 `.env` 就连不上且无提示 | 🟡 中 |
 | 3-14 | MIT 许可证 | 仓库无 LICENSE 文件 | 🟡 低 |
 | 3-15 | 「Node.js 22+」但 `engines: >=18` | 声明不一致 | 🟡 低 |
+| 3-16 | PERSONA_GUIDE：「出生年份/半衰期会被校验」「dailyRhythm 直接影响消息门」「narrate/create 数据结构一致」 | 校验器无这些规则；消息门只做粗匹配；两者输出结构不同 | 🟡 低 |
+| 3-17 | 「L1 弹性裁决统一」「负债偿还」「纠正层」 | L1 只在非流式路径；偿还函数 0 调用；纠正结果被丢弃 | 🔴 高 |
+| 3-18 | 「语气系统 / 表情 / 撤回」 | tone 链只覆盖 CLI/群聊；emojiStyle 恒「动物系」；`isChatty` 靠口头禅是否含「跟你说」；撤回无消费者 | 🟡 中 |
+| 3-19 | 「SKILL.md 七段模板」 | 运行时只检查文件存在，内容不注入 | 🟡 低 |
 
 **建议**：建立「单一事实源」——README 面向用户、`docs/ARCHITECTURE.md` 面向开发者、所有数字由 `npm run eval:*` 生成并附产物；把无法复现的指标从作品集里删掉或重跑。诚实感本身就是产品力。
 
@@ -361,6 +370,7 @@ QQ 好友消息
 5. **记忆不精确**：n-gram 检索让「她记得你说过」经常变成张冠李戴；没有「记住这件事」/「忘掉这件事」的用户控制。
 6. **主动消息不可控**：没有免打扰、没有频率上限、没有「今天不想聊」；对情感陪伴产品这是致命体验。
 7. **人设创作门槛高**：narrate 是正则推导，不是对话式 LLM 共创；写完 100+ 字段后一半不生效。
+8. **三个人设被引擎同质化**：真实差异只剩 attachmentStyle（阈值/社交分寸）、静态 closeness、chainRules/behavioralScripts、photoShare 与口头禅；L4 情感文本、hardRules、goals 等差异不进运行逻辑，「三个不同的人」在实际对话中的区分度低于文档宣称。
 
 ### 4.6 P1：首次体验与可安装性
 
@@ -408,7 +418,7 @@ QQ 好友消息
 
 | ID | 任务 | 关键改动 | 验收标准 | 估时 |
 |---|---|---|---|---|
-| M0-1 | 新装可用 | `ensureDataDir()`；建表补 `embedding BLOB`；`PRAGMA user_version` + 迁移；启动 smoke test | 全新 clone + `npm run setup` + `npm run dev` 10 分钟内可对话；重启后记忆还在 | 0.5–1d |
+| M0-1 | 新装可用 | `ensureDataDir()`；建表补 `embedding BLOB`；`PRAGMA user_version` + 迁移；升级 `better-sqlite3` 到 12.11+（Node 22/24 有预编译，避免 C++ 编译门槛）；启动 smoke test | 全新 clone + `npm run setup` + `npm run dev` 10 分钟内可对话；重启后记忆还在；Node 22/24 均无需本地编译 | 0.5–1d |
 | M0-2 | 配置链路修复 | `loadConfig` 返回并校验 `user_personas`/端口/频率；端口统一 18080；README 补 `cp config.yaml.example`；删除 `setup:minimal` | 配置错误有清晰报错；多好友映射生效（一人设一记忆桶） | 0.5–1d |
 | M0-3 | 消息不丢失 | delay/silence 消息落库；延迟队列 + 下轮补发或定时补发；合并窗口保留全部 pending；`message_id` 去重；中断时落已发片段 | 睡眠时段发消息，第二天能收到；连续打断不丢消息 | 1d |
 | M0-4 | 安全加固 | WS 绑 `127.0.0.1`（可配）、握手 token、path 校验；`allowed_users` 白名单；CQ 转义；`/stats` 仅 owner；`.dockerignore` | 局域网未授权连接被拒；模型输出 `[CQ:...]` 不会被执行 | 0.5d |
@@ -478,16 +488,19 @@ QQ 好友消息
 ## 附录 A：审计方法与限制
 
 - 全量阅读 61 个非测试源文件中的核心链路 + 8 个领域并行深挖；用调用链 grep 区分「有代码」与「真接入」。
-- 本地环境无 Node/npm；依赖安装通过 harness 内置 Node 24 + pnpm 11 进行，npm registry 下载速度约 20–40 KB/s，未能在本轮完成。因此 **178 个测试、`tsc` 均未实际运行**；「新装即坏」「流式缺能力」等结论为高置信度静态结论，M0-1 的首要任务就是实测确认。
-- 数据目录、`config.yaml`、`.env` 不在仓库中（被 gitignore），无法观察作者本机历史数据库，故「旧库有 embedding 列」为推断。
+- **实测环境**：内置 Node 24.21 + pnpm 11 安装依赖成功（446 packages）；`tsc --noEmit` **0 错误**；`vitest run` **11 文件 / 178 用例全部通过**（210ms）。macOS 下 better-sqlite3 11.10 无 Node 24 预编译包，审计时临时替换为 12.11.1 + 预编译二进制并绕过签名限制后跑通；升级 12.11+ 已列入 M0-1。
+- **P0-1 / P0-2 已用真实代码路径复现**：在空目录执行 `getVectorDb()` → `Cannot open database because the directory does not exist`；补 `data/` 后执行 `backfillEpisodeVectors()` → `SQLITE_ERROR: no such column: embedding`。
+- 数据目录、`config.yaml`、`.env` 不在仓库中（被 gitignore），无法观察作者本机历史数据库，故「作者旧库有 embedding 列」为推断。
+- 依赖安装与测试在 macOS（arm64）完成；QQ 桥接、NapCat、真实 LLM 调用未在本轮验证（无 QQ 小号 / API Key）。
 
 ## 附录 B：最小修复清单（可直接开工）
 
 1. `src/data/vector.ts`：`ensureDataDir()` + 建表补 `embedding TEXT` + 迁移 + 索引 + `busy_timeout`。
-2. `src/data/store.ts`：返回/校验 `user_personas`、`one_bot_ws_port/path`、`allowed_users`；补 `message_frequency_limit` 校验。
-3. `src/bridge/qq.ts`：`host: "127.0.0.1"` + token + path 校验 + 白名单 + `try/catch` + `await handleGroupMessage` + 保留 pending + 去重。
-4. `src/pipeline/orchestrator.ts`：抽 `buildGateContext` / `postTurnEvolution`；delay 消息落库；流式复用完整门控/T1/独白。
-5. `src/ai/chat.ts`：超时（AbortSignal）、429/5xx 指数退避、`usage` 采集。
-6. `src/world/weather.ts`：中英 condition 映射 + 30min TTL；`trending-fetcher.ts` 人设化/真实来源。
-7. `src/persona/prompt-builder.ts` + `correction.ts`：接未消费字段；修纠正覆盖注入。
-8. 根目录：`LICENSE`、`.dockerignore`、`.github/workflows/ci.yml`、`README` 真话 pass。
+2. `package.json`：`better-sqlite3` 升级到 `^12.11.1`（Node 22/24 预编译可用）；删除零引用的 `node-cron`。
+3. `src/data/store.ts`：返回/校验 `user_personas`、`one_bot_ws_port/path`、`allowed_users`；补 `message_frequency_limit` 校验。
+4. `src/bridge/qq.ts`：`host: "127.0.0.1"` + token + path 校验 + 白名单 + `try/catch` + `await handleGroupMessage` + 保留 pending + 去重。
+5. `src/pipeline/orchestrator.ts`：抽 `buildGateContext` / `postTurnEvolution`；delay 消息落库；流式复用完整门控/T1/独白。
+6. `src/ai/chat.ts`：超时（AbortSignal）、429/5xx 指数退避、`usage` 采集。
+7. `src/world/weather.ts`：中英 condition 映射 + 30min TTL；`trending-fetcher.ts` 人设化/真实来源。
+8. `src/persona/prompt-builder.ts` + `correction.ts`：接未消费字段；修纠正覆盖注入。
+9. 根目录：`LICENSE`、`.dockerignore`、`.github/workflows/ci.yml`、`README` 真话 pass。
