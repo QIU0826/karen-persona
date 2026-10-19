@@ -15,7 +15,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 
 - **运行时**：Node.js 22+（`engines: >=22`）、TypeScript 5.6（strict，NodeNext）、tsx 直跑 TS、vitest 4
 - **对话模型**：DeepSeek V4.1 `deepseek-flash` / `deepseek-v4-pro`，按复杂度规则路由（真实主路径；`deepseek-v4-flash` 是仍可调用的旧别名）
-- **图片识别**：DeepSeek Flash 多模态（真实，用同一个 DEEPSEEK_API_KEY；先下载图片转 base64，兼容 NapCat 私有 URL；`detail=low`）
+- **图片识别**：DeepSeek Flash 多模态（真实，用同一个 DEEPSEEK_API_KEY；先下载图片转 base64，兼容 NapCat 私有 URL；`detail=high`，截图逐字转述 ≤200 字）
 - **思考模式**：默认关闭（`thinking:{type:"disabled"}`）；不关闭时 reasoning 会吃掉 max_tokens 导致空回复（2026-10 实测修复）
 - **语义嵌入**：Qwen `text-embedding-v3` 代码已实现，**但未接入主路径**；当前实际使用字符 n-gram 哈希（`src/data/embedding.ts`）
 - **向量库**：`sqlite-vec` 已引入并建 `t2_vec` 表，**检索实际是 JS 层全量 JSON 解析 + 余弦**，未使用 sqlite-vec
@@ -76,7 +76,7 @@ npm run setup      # 交互式配置向导
 - **M1-4 免打扰可配置**：`quiet_hours_start/end`（默认 23:00–07:00，支持 "23:30"；start==end 关闭），消息门按配置延迟并给出剩余时长；真机测试期间临时设为 02:00–07:00。
 - **边界与修复动力学（BUG-1 修复）**：新增 `src/persona/boundary.ts`（越界内容粗筛 + 道歉识别）；关系事件增加「越界→轻微降温/记录冲突」「道歉→24h 内修复」；`buildConflictNote` 把未化解冲突注入下一轮 prompt；「分享生活」规则要求真实自我/生活信号，避免纯话题切换涨亲密。
 - **BUG-2 延迟补发持久化**：新增 `src/data/pending-queue.ts`（SQLite 队列；失败 60s×attempts 退避）；桥接在 NapCat 重连后自动恢复并补发，退出只清 timer 保留记录；实测「预置 10s 后到期 → 重启桥接 → 到点补发成功」。
-- **IMP-1 图片描述增强**：视觉 prompt 改为 30–50 字（主体/场景/氛围/文字），max_tokens 240、截断 60 字，解决「只能回好看」。
+- **IMP-1 图片描述增强**：视觉改用 `detail:"high"`（low 下截图 OCR 失真），prompt 区分类型：截图/文字类逐字转述（≤200 字），照片/插画 40–80 字；max_tokens 600。真实中文会议截图 OCR 实测四行原文全部正确。
 - **M1-7 记忆检索 P0**：`src/data/embedding.ts` 统一 embedder（Qwen text-embedding-v3 + ngram 降级，修 768 截断 bug）；`vector.ts` schema v2（embedding_model/semantic_embedding/semantic_model、FTS5 中文 BM25、sqlite-vec vec0 cosine + metadata）；`retriever.ts` RRF 混合 + 阈值/去重/source 过滤 + confidence 修正；orchestrator 仅 2 处改 async 检索。真实库 22 条记忆迁移验证通过（v2、FTS 22 行、幂等）。
 - **问题记录**：真机联调问题与修复清单见 [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md)。
 

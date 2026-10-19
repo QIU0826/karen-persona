@@ -195,7 +195,7 @@ npm run dev
 | 真实天气（OpenWeatherMap） | ✅ | 需 `OPENWEATHER_API_KEY`；无 Key 时降级 mock |
 | 时间感知 | ✅ | 结构化时刻标签注入 Prompt |
 | 网络热点 | 🚧 | 本地硬编码话题池，无真实抓取 |
-| 图片识别 | ✅ | 由 DeepSeek Flash 多模态完成（无需 Qwen-VL）；先用本地下载转 base64，兼容 NapCat 私有图片 URL；`detail=low` 省 token |
+| 图片识别 | ✅ | 由 DeepSeek Flash 多模态完成（无需 Qwen-VL）；本地下载转 base64 兼容 NapCat 私有 URL；`detail=high` 保留分辨率；截图/文字类逐字转述（≤200 字），照片/插画 40–80 字描述 |
 | 主动发图（Unsplash） | 🚧 | 仅 CLI 非流式会展示；QQ 私聊/群聊不发图 |
 | 图片生成（即梦）/ 表情包 | 🗺 | 未实现（仅有 Key 占位） |
 
