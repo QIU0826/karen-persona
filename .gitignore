@@ -12,3 +12,6 @@ data/qq/
 .DS_Store
 personas/*/corrections.md
 personas/*/memory.md
+
+# 便携 Node 运行时（本地部署用，不入库）
+.runtime/

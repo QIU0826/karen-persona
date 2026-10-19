@@ -40,7 +40,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
 | 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入未接线；TTS/即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | 🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M0 修复 data 目录自动创建、embedding 列迁移、`KAREN_DATA_DIR`；检索是 n-gram 非语义；多用户隔离未完成；T1/T3 链路不完整 |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 21 个测试文件 / 330 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai 测试），`tsc --noEmit` 0 错误，CI 已接入；仍缺真实 QQ 集成测试与覆盖率；eval 多为实验代码、无产品入口，历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 23 个测试文件 / 347 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai 测试），`tsc --noEmit` 0 错误，CI 已接入；仍缺真实 QQ 集成测试与覆盖率；eval 多为实验代码、无产品入口，历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -64,7 +64,7 @@ npm run setup      # 交互式配置向导
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 统一为 `>=22`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm test` 21 文件 / 330 用例通过（审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm test` 23 文件 / 347 用例通过（审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -72,7 +72,10 @@ npm run setup      # 交互式配置向导
 - **M1-2 关系成长**：新增 `src/persona/relationship.ts`。亲密度由结构性事件驱动（深度对话、连续互动、主动分享生活细节），每日上限 +0.1、只增不减、带 reason 与里程碑（开始熟络/开始在意/很亲近/重要的人）；运行时同步到 `persona.relationship.closeness`（门控/发图/herView 等立即生效）；`/stats` 展示亲密度、连续互动、关系事件与里程碑。
 - **M1-3 演化可见化**：新增 `src/evolution/journal-view.ts` + CLI 命令 `/journal`（她的独白/进化日志/T3 摘要）、`/timeline`（关系事件与里程碑）、`/herview`（她眼中的你）、`/evolution`（心理阶段/漂移/情绪/关系）。数据来自持久化快照与 T2，重启后可见。
 - **DeepSeek 能力落地**：思考模式默认关闭（修复「空回复/半句话」生产 bug，实测 reasoning=0）；模型名 canonical；图片识别从 Qwen-VL 切换到 DeepSeek Flash（同一个 Key、先下载转 base64 兼容 NapCat 私有 URL、`detail=low`）；旁路 LLM 调用（独白/T3/日志/herView/发图 query）统一注入 thinking 参数；prompt 缓存可命中（静态人设前缀）。
-- **端到端实测（真实 Key）**：3 轮真实对话回复自然、无空回复；第 2 轮命中缓存 768 tokens；关系事件正确触发（3.00→3.05）并重启保持。成本 <¥0.1。
+- **端到端实测（真实 Key + 真实 QQ）**：NapCat 原生 macOS → Karen → DeepSeek 全链路跑通；首 token 0.4–1.2s，prompt 缓存命中 1024–1536 tokens/轮；图片识别（DeepSeek Flash 多模态）实测成功；亲密度/情绪/独白真实运转。
+- **M1-4 免打扰可配置**：`quiet_hours_start/end`（默认 23:00–07:00，支持 "23:30"；start==end 关闭），消息门按配置延迟并给出剩余时长；真机测试期间临时设为 02:00–07:00。
+- **边界与修复动力学（BUG-1 修复）**：新增 `src/persona/boundary.ts`（越界内容粗筛 + 道歉识别）；关系事件增加「越界→轻微降温/记录冲突」「道歉→24h 内修复」；`buildConflictNote` 把未化解冲突注入下一轮 prompt；「分享生活」规则要求真实自我/生活信号，避免纯话题切换涨亲密。
+- **问题记录**：真机联调问题与修复清单见 [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md)。
 
 ### 已知问题（M0 之后继续修）
 
@@ -80,7 +83,10 @@ npm run setup      # 交互式配置向导
 - 演化模块尚未全部接入 QQ 流式主路径（herView/叙事/独白等仍只在完整管线生效）
 - 多用户隔离未完成：会话/记忆按人设隔离，同一人设多好友共享（架构级）
 - 主动消息：M0 已加单日上限 4 条、两次最小间隔 30 分钟、连续沉默 3 次强制回复；仍无免打扰/暂停开关（M1-4）
-- 记忆检索是 n-gram，非语义；sqlite-vec 未启用（M1-7）
+- 记忆检索是 n-gram，非语义；sqlite-vec 未启用（M1-7，技术雷达已给出落地方案）
+- 延迟补发 timer 不持久化，重启会丢（M1_BACKLOG BUG-2，待修）
+- 视觉描述 ≤15 字过短，图片回应偏泛化（M1_BACKLOG IMP-1，待修）
+- 主动消息/夜间补发仍需真机长跑验证
 - 测试覆盖率低；无 lint/coverage
 - QQ 桥接跨平台验证不完整（Windows 已验，macOS 方案已文档化但未实机验证）；平台/封号风险是结构性风险
 - 隐私合规缺口：无 AI 披露、年龄门、危机干预；QQ 桥接日志已脱敏（只打印长度/摘要），但 orchestrator 等其他模块仍可能打印消息片段
@@ -134,6 +140,9 @@ npm run setup      # 交互式配置向导
 - [docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md) — 产品审计报告：功能清单、文档差异、P0/P1 风险、M0–M3 路线图、附录 B 最小修复清单
 - [docs/DEEPSEEK_CAPABILITY_AUDIT.md](docs/DEEPSEEK_CAPABILITY_AUDIT.md) — DeepSeek V4 能力审计：思考模式/视觉/缓存/价格/不支持能力/本项目配置建议
 - [docs/QQ_BRIDGE_CROSS_PLATFORM.md](docs/QQ_BRIDGE_CROSS_PLATFORM.md) — macOS/Windows/Linux QQ 桥接方案、原生 NapCat/Docker/SSH 隧道、安全基线
+- [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md) — 真机联调问题与已批准修复清单
+- [docs/TECH_RADAR_AI.md](docs/TECH_RADAR_AI.md) — AI/记忆/RAG/评测技术雷达（换什么/不换什么）
+- [docs/TECH_RADAR_INFRA.md](docs/TECH_RADAR_INFRA.md) — IM/多模态/前端/基础设施技术雷达
 - [README.md](README.md) — 对外介绍、功能状态表、隐私与安全、已知限制
 - [QUICKSTART.md](QUICKSTART.md) — 5 分钟安装与故障排查
 - [PERSONA_GUIDE.md](PERSONA_GUIDE.md) — 人设创作指南（注意：部分规则尚未与代码对齐，以 `npm run persona:check` 为准）
