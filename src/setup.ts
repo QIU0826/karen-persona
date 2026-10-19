@@ -8,12 +8,24 @@
  * - Setup 过程本身就是你们关系的第一段对话
  * - 收集的是故事起点，不是参数
  *
+ * M0-2 行为：
+ * - 数字输入严格校验（非法输入有清晰提示，不会静默取错编号）
+ * - 询问并写入 QQ 桥接端口 / 白名单，完成后打印安全提示
+ * - 已存在 config.yaml 时保留未知/扩展字段，只更新向导负责的键
+ *
  * 用法: npm run setup
  */
 import * as readline from "node:readline";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { listPersonas } from "./persona/loader.js";
+import {
+  parseAllowedUsers,
+  DEFAULT_ONE_BOT_WS_HOST,
+  DEFAULT_ONE_BOT_WS_PORT,
+  DEFAULT_ONE_BOT_WS_PATH,
+} from "./data/store.js";
 
 const CONFIG_PATH = path.resolve("config.yaml");
 const DOTENV_PATH = path.resolve(".env");
@@ -36,6 +48,65 @@ function loadPersonaJson(personaId: string): Record<string, unknown> | null {
   const p = path.join(PERSONAS_DIR, personaId, "persona.json");
   if (!fs.existsSync(p)) return null;
   return JSON.parse(fs.readFileSync(p, "utf-8"));
+}
+
+/**
+ * 反复询问直到解析成功；连续 3 次非法则回退默认值。
+ * parse 返回 null 表示非法输入。
+ */
+async function askValidated<T>(
+  rl: readline.Interface,
+  prompt: string,
+  parse: (raw: string) => T | null,
+  errorMessage: string,
+  fallback: T,
+): Promise<T> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const raw = await ask(rl, prompt);
+    const parsed = parse(raw);
+    if (parsed !== null) return parsed;
+    console.log(`❌ ${errorMessage}`);
+  }
+  console.log(`⚠️  连续输入无效，使用默认值: ${JSON.stringify(fallback)}`);
+  return fallback;
+}
+
+interface ExistingConfig {
+  data: Record<string, unknown>;
+  error: string | null;
+}
+
+function loadExistingConfig(): ExistingConfig {
+  if (!fs.existsSync(CONFIG_PATH)) return { data: {}, error: null };
+  try {
+    const parsed = parseYaml(fs.readFileSync(CONFIG_PATH, "utf-8"));
+    if (parsed === null || parsed === undefined) return { data: {}, error: null };
+    if (typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { data: {}, error: "顶层不是映射（key: value）" };
+    }
+    return { data: parsed as Record<string, unknown>, error: null };
+  } catch (err) {
+    return { data: {}, error: err instanceof Error ? err.message.split("\n")[0] : "未知 YAML 错误" };
+  }
+}
+
+function existingPort(data: Record<string, unknown>): number {
+  const value = data.one_bot_ws_port;
+  const num = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  return Number.isInteger(num) && num >= 1 && num <= 65535 ? num : DEFAULT_ONE_BOT_WS_PORT;
+}
+
+function existingAllowedUsers(data: Record<string, unknown>): number[] {
+  try {
+    return parseAllowedUsers(data.allowed_users);
+  } catch {
+    return [];
+  }
+}
+
+function existingString(data: Record<string, unknown>, key: string, fallback: string): string {
+  const value = data[key];
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
 }
 
 // ── 主流程 ──────────────────────────────────────
@@ -87,15 +158,23 @@ async function main() {
   }
 
   console.log();
-  const choiceStr = await ask(rl, `选一个（1-${personaCards.length}）: `);
-  const choiceIdx = parseInt(choiceStr, 10) - 1;
-  if (isNaN(choiceIdx) || choiceIdx < 0 || choiceIdx >= personaCards.length) {
-    console.log("无效选择。");
+  const selected = await askValidated<{ id: string; name: string; intro: string } | null>(
+    rl,
+    `选一个（1-${personaCards.length}）: `,
+    (raw) => {
+      if (!/^\d+$/.test(raw)) return null;
+      const index = Number(raw) - 1;
+      return index >= 0 && index < personaCards.length ? personaCards[index] : null;
+    },
+    `请输入 1-${personaCards.length} 之间的数字编号。`,
+    null,
+  );
+  if (!selected) {
+    console.log("已取消。");
     rl.close();
     return;
   }
 
-  const selected = personaCards[choiceIdx];
   const herName = selected.name;
   const personaId = selected.id;
 
@@ -147,33 +226,104 @@ async function main() {
     console.log(`\x1b[36m${herName}\x1b[0m: （看了眼标签）...行吧。\n`);
   }
 
-  // ── Step 4: 生成 config.yaml ──
-  const configLines = [
-    `# Karen Persona — 由 Setup Wizard 生成`,
-    `# 可以随时手动编辑此文件`,
-    ``,
-    `persona: "${personaId}"`,
-    `her_name: "${herName}"`,
-    `your_name: "${yourName}"`,
-    `location: "${finalLocation}"`,
-  ];
-  if (tags.length > 0) {
-    configLines.push(`tags: [${tags.map((t) => `"${t}"`).join(", ")}]`);
-  } else {
-    configLines.push(`tags: []`);
+  // ── Step 4: QQ 桥接配置（端口 / 白名单）──
+  // 先读取已有 config.yaml：既能给端口/白名单提供默认值，
+  // 也能在合并写回时保留用户手动添加的扩展字段。
+  const existing = loadExistingConfig();
+  let hadExistingConfig = fs.existsSync(CONFIG_PATH);
+
+  if (existing.error) {
+    if (hadExistingConfig) {
+      fs.copyFileSync(CONFIG_PATH, CONFIG_PATH + ".bak");
+      console.log(`⚠️  config.yaml 已存在但无法解析（${existing.error}）。`);
+      console.log("   为避免覆盖丢失你的扩展字段，已备份为 config.yaml.bak，本次不写回。");
+      console.log("   请手动修复 config.yaml 后重新运行 npm run setup。");
+    }
+    rl.close();
+    return;
   }
 
-  const configContent = configLines.join("\n") + "\n";
+  const defaultPort = existingPort(existing.data);
+  const defaultAllowed = existingAllowedUsers(existing.data);
+  const defaultAllowedText = defaultAllowed.join(",");
+  const host = existingString(existing.data, "one_bot_ws_host", DEFAULT_ONE_BOT_WS_HOST);
+  const wsPath = existingString(existing.data, "one_bot_ws_path", DEFAULT_ONE_BOT_WS_PATH);
 
-  if (fs.existsSync(CONFIG_PATH)) {
-    console.log(`⚠️  config.yaml 已存在，备份为 config.yaml.bak`);
+  console.log("── QQ 桥接（可选，直接回车用默认值）──");
+  const port = await askValidated<number>(
+    rl,
+    `NapCat 反向 WS 端口（默认 ${defaultPort}）: `,
+    (raw) => {
+      if (raw === "") return defaultPort;
+      if (!/^\d+$/.test(raw)) return null;
+      const num = Number(raw);
+      return Number.isInteger(num) && num >= 1 && num <= 65535 ? num : null;
+    },
+    "端口必须是 1-65535 的整数，请重新输入。",
+    defaultPort,
+  );
+
+  const allowedText = await askValidated<string>(
+    rl,
+    `允许和她聊天的 QQ 号（逗号分隔；留空 = 允许所有人${defaultAllowedText ? `，默认 ${defaultAllowedText}` : ""}）: `,
+    (raw) => {
+      const value = raw === "" ? defaultAllowedText : raw;
+      try {
+        parseAllowedUsers(value);
+        return value;
+      } catch {
+        return null;
+      }
+    },
+    "QQ 号格式不对（应为逗号分隔的 5-12 位数字），请重新输入。",
+    defaultAllowedText,
+  );
+  const allowedUsers = parseAllowedUsers(allowedText);
+
+  // ── Step 5: 生成 config.yaml（保留已有扩展字段）──
+  const config: Record<string, unknown> = { ...existing.data };
+  config.persona = personaId;
+  config.her_name = herName;
+  config.your_name = yourName;
+  config.location = finalLocation;
+  config.tags = tags;
+  config.one_bot_ws_port = port;
+  config.allowed_users = allowedUsers;
+  // 老配置文件可能没有这些键：补上默认值，方便用户手动改
+  if (config.message_frequency_limit === undefined) config.message_frequency_limit = 10;
+  if (config.log_level === undefined) config.log_level = "info";
+
+  const header = [
+    "# Karen Persona — 由 Setup Wizard 生成，可随时手动编辑",
+    "# 向导会保留你手动添加的扩展字段；one_bot_* / allowed_users 见下方 QQ 桥接配置",
+    "",
+  ].join("\n");
+
+  if (hadExistingConfig) {
+    console.log(`⚠️  config.yaml 已存在，先备份为 config.yaml.bak`);
     fs.copyFileSync(CONFIG_PATH, CONFIG_PATH + ".bak");
   }
 
-  fs.writeFileSync(CONFIG_PATH, configContent, "utf-8");
-  console.log(`✅ config.yaml 已生成\n`);
+  fs.writeFileSync(CONFIG_PATH, header + stringifyYaml(config), "utf-8");
+  console.log(`✅ config.yaml 已生成（保留已有扩展字段）\n`);
 
-  // ── Step 5: API Key 引导 ──
+  console.log("── QQ 桥接安全提示 ──");
+  console.log(`  反向 WS 地址: ws://${host}:${port}${wsPath}`);
+  console.log(`  NapCat 配置: 网络配置 → 新建「WebSocket 客户端」→ 填入上面的地址`);
+  if (config.one_bot_token) {
+    console.log("  token 校验: 已配置 one_bot_token（NapCat 侧需填同样的 access_token）");
+  } else {
+    console.log(`  默认只监听 ${host}；如需跨机/对外暴露，请设置 ONE_BOT_TOKEN 或 config.yaml 的 one_bot_token。`);
+  }
+  if (allowedUsers.length === 0) {
+    console.log("⚠️  allowed_users 为空：任何 QQ 号都能和她聊天。");
+    console.log("   个人使用请编辑 config.yaml，把 allowed_users 改成你自己的 QQ 号。");
+  } else {
+    console.log(`✅ 白名单已写入 config.yaml：${allowedUsers.length} 个 QQ 号`);
+  }
+  console.log("  （config.yaml 的端口/白名单优先于 .env 中的同名变量）\n");
+
+  // ── Step 6: API Key 引导 ──
   console.log("── API Key 配置 ──");
 
   let hasDotEnv = fs.existsSync(DOTENV_PATH);
@@ -219,18 +369,18 @@ async function main() {
       console.log(`\n需要配置以下 API Key（编辑 .env 文件）：`);
       for (const m of missing) console.log(m);
       console.log(`\n没有 DeepSeek API Key？去 https://platform.deepseek.com 注册即可。`);
-      console.log(`💡 只想先聊聊看？运行 npm run setup:minimal 使用离线模式。`);
+      console.log(`💡 配好 DEEPSEEK_API_KEY 后运行 npm run dev 就能开始聊天（离线模式不存在，必须先有 Key）。`);
     } else {
       console.log(`\n✅ 所有 API Key 已就绪`);
     }
   }
 
-  // ── Step 6: 完成 ──
+  // ── Step 7: 完成 ──
   console.log("\n╔══════════════════════════════════════╗");
   console.log("║           设置完成！                ║");
   console.log("╚══════════════════════════════════════╝\n");
 
-  console.log(`📱 所有记忆和日记都存在你的电脑上，不会上传。`);
+  console.log(`📱 会话记录、记忆和日记都存在你的电脑上（对话内容会发送给 DeepSeek，图片会发送给 Qwen）。`);
   console.log(`👤 ${herName} 是一个有独立生活的人，不是你的助手。\n`);
 
   console.log(`启动方式:`);

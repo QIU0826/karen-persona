@@ -1,8 +1,26 @@
 /**
  * OneBot 11 协议编解码
- * 处理来自 NapCatQQ 的事件解析和 API 调用构造
+ * 处理来自 NapCatQQ 的事件解析和 API 调用构造。
+ *
+ * 安全约定（M0-4）：
+ * - 入站事件必须经 parseEvent() 校验/归一化，畸形事件返回 null，不抛异常；
+ * - 出站文本一律做 CQ 码转义，模型输出里的 [CQ:...] 不会被当成 CQ 码执行；
+ * - 仅允许受控的 QQ 表情 CQ 码（[CQ:face,id=N]），其余 CQ 码直接丢弃；
+ * - 超长消息按 QQ 单条上限切分后逐条发送。
  */
 import type { WebSocket } from "ws";
+import type { IncomingMessage } from "node:http";
+import { timingSafeEqual } from "node:crypto";
+
+// ── 常量 ────────────────────────────────────────
+
+/** QQ 单条文本消息的保守长度上限（字符数）。可用 ONE_BOT_MAX_MESSAGE_LENGTH 覆盖。 */
+export const QQ_MAX_MESSAGE_LENGTH = 1000;
+
+/** 唯一允许绕过 CQ 转义的受控 CQ 码：QQ 内置表情 */
+const ALLOWED_CQ_PATTERN = /^\[CQ:face,id=\d{1,4}\]$/;
+
+const VALID_POST_TYPES = new Set(["message", "notice", "request", "meta_event"]);
 
 // ── OneBot 11 入站事件 ──────────────────────────
 
@@ -50,6 +68,272 @@ export interface GroupMessageEvent extends OneBotEvent {
 interface MessageSegment {
   type: string;
   data: Record<string, string>;
+}
+
+// ── 事件字段容错 ────────────────────────────────
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/** 从结构化消息段中尽量还原纯文本（仅 text 段） */
+function textFromSegments(segments: unknown[]): string {
+  const parts: string[] = [];
+  for (const seg of segments) {
+    if (!isRecord(seg) || seg.type !== "text") continue;
+    const data = isRecord(seg.data) ? seg.data : null;
+    if (data && typeof data.text === "string") parts.push(data.text);
+  }
+  return parts.join("");
+}
+
+/**
+ * 解析并归一化一条入站事件。
+ * 畸形/缺关键字段的事件返回 null（绝不抛异常），可选字段给出安全默认值。
+ */
+export function parseEvent(data: string): OneBotEvent | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed)) return null;
+
+  const postType = parsed.post_type;
+  if (typeof postType !== "string" || !VALID_POST_TYPES.has(postType)) return null;
+
+  // 非消息事件：只保证顶层是对象即可，交给调用方按需处理
+  if (postType !== "message") {
+    return { ...parsed, post_type: postType } as unknown as OneBotEvent;
+  }
+
+  const messageType = parsed.message_type;
+  if (messageType !== "private" && messageType !== "group") return null;
+
+  // 路由所必需的字段：缺了就没法处理，直接丢弃
+  if (!isFiniteNumber(parsed.user_id)) return null;
+  if (!isFiniteNumber(parsed.message_id)) return null;
+  if (messageType === "group" && !isFiniteNumber(parsed.group_id)) return null;
+
+  const rawMessageSegments = Array.isArray(parsed.message) ? parsed.message : null;
+  const message: string | MessageSegment[] =
+    typeof parsed.message === "string"
+      ? parsed.message
+      : rawMessageSegments
+        ? (rawMessageSegments as MessageSegment[])
+        : "";
+
+  const rawMessage =
+    typeof parsed.raw_message === "string"
+      ? parsed.raw_message
+      : typeof message === "string"
+        ? message
+        : textFromSegments(rawMessageSegments ?? []);
+
+  const rawSender = isRecord(parsed.sender) ? parsed.sender : {};
+  const sender = {
+    user_id: isFiniteNumber(rawSender.user_id) ? rawSender.user_id : parsed.user_id,
+    nickname: typeof rawSender.nickname === "string" ? rawSender.nickname : "",
+    card: typeof rawSender.card === "string" ? rawSender.card : "",
+    sex: typeof rawSender.sex === "string" ? rawSender.sex : "unknown",
+    age: isFiniteNumber(rawSender.age) ? rawSender.age : 0,
+    role: typeof rawSender.role === "string" ? rawSender.role : "member",
+  };
+
+  const subType =
+    typeof parsed.sub_type === "string"
+      ? parsed.sub_type
+      : messageType === "private"
+        ? "friend"
+        : "normal";
+
+  return {
+    ...parsed,
+    post_type: "message",
+    message_type: messageType,
+    sub_type: subType,
+    message,
+    raw_message: rawMessage,
+    sender,
+  } as unknown as OneBotEvent;
+}
+
+export function isPrivateMessage(
+  event: OneBotEvent | null | undefined,
+): event is PrivateMessageEvent {
+  return (
+    !!event &&
+    typeof event === "object" &&
+    event.post_type === "message" &&
+    (event as { message_type?: unknown }).message_type === "private"
+  );
+}
+
+export function isGroupMessage(
+  event: OneBotEvent | null | undefined,
+): event is GroupMessageEvent {
+  return (
+    !!event &&
+    typeof event === "object" &&
+    event.post_type === "message" &&
+    (event as { message_type?: unknown }).message_type === "group"
+  );
+}
+
+// ── 出站消息安全编码 ────────────────────────────
+
+/**
+ * 转义文本中的 CQ 码元字符。
+ * OneBot 规定 & [ ] 需要转义；转义后 NapCat/QQ 会还原成普通文本，
+ * 因此模型输出里的 `[CQ:at,qq=all]` 只会被当成一句普通的话。
+ */
+export function escapeCqText(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/\[/g, "&#91;")
+    .replace(/\]/g, "&#93;");
+}
+
+/** 是否为受控的 qqFace CQ 码（仅允许 [CQ:face,id=数字]） */
+export function isAllowedCqCode(cq: string): boolean {
+  return ALLOWED_CQ_PATTERN.test(cq.trim());
+}
+
+/** 读取单条消息长度上限（环境变量可覆盖，非法值回退默认并警告一次） */
+let warnedBadMaxLength = false;
+function getMaxMessageLength(): number {
+  const raw = process.env.ONE_BOT_MAX_MESSAGE_LENGTH;
+  if (!raw || raw.trim() === "") return QQ_MAX_MESSAGE_LENGTH;
+  const value = Number(raw.trim());
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 50 || value > 5000) {
+    if (!warnedBadMaxLength) {
+      warnedBadMaxLength = true;
+      console.warn(
+        `[配置] ONE_BOT_MAX_MESSAGE_LENGTH 无效（当前: ${raw}），应为 50-5000 的整数，已回退默认 ${QQ_MAX_MESSAGE_LENGTH}`,
+      );
+    }
+    return QQ_MAX_MESSAGE_LENGTH;
+  }
+  return value;
+}
+
+/** 在尽量自然的位置（换行/句末标点）切一刀；找不到合适位置则硬切 */
+function findSplitIndex(text: string, maxChars: number): number {
+  const window = text.slice(0, maxChars);
+  let cut = -1;
+  const pattern = /\n|[。！？!?…；;]/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(window)) !== null) {
+    cut = match.index + 1;
+  }
+  // 切点太靠前会造成过多碎片：至少保留 40%
+  if (cut >= Math.floor(maxChars * 0.4) && cut < maxChars) return cut;
+  // 不要把代理对（emoji）切成两半
+  let hard = maxChars;
+  const code = text.charCodeAt(hard - 1);
+  if (code >= 0xd800 && code <= 0xdbff && hard > 1) hard -= 1;
+  return hard;
+}
+
+/** 找一个切点，使切出部分的「转义后长度」不超过上限（CQ 转义会膨胀字符数） */
+function findEncodedSplitIndex(text: string, limit: number): number {
+  // 二分：最大的 cut 使 escapeCqText(text.slice(0, cut)).length <= limit
+  let lo = 1;
+  let hi = Math.min(text.length, limit);
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (escapeCqText(text.slice(0, mid)).length <= limit) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  let hard = Math.max(1, lo);
+  // 不切坏代理对
+  const code = text.charCodeAt(hard - 1);
+  if (code >= 0xd800 && code <= 0xdbff && hard > 1) hard -= 1;
+
+  // 在可接受范围内优先找自然断点
+  const window = text.slice(0, hard);
+  let cut = -1;
+  const pattern = /\n|[。！？!?…；;]/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(window)) !== null) {
+    cut = match.index + 1;
+  }
+  if (cut >= Math.floor(limit * 0.4) && cut < hard) return cut;
+  return hard;
+}
+
+/**
+ * 按 QQ 单条长度上限切分文本。
+ * 优先在换行/句末标点处断开；每段都非空。
+ */
+export function splitMessage(text: string, maxChars: number = QQ_MAX_MESSAGE_LENGTH): string[] {
+  const limit = Number.isFinite(maxChars) && maxChars >= 1 ? Math.floor(maxChars) : QQ_MAX_MESSAGE_LENGTH;
+  const normalized = text.replace(/\r\n/g, "\n");
+  if (normalized.length === 0) return [];
+  if (normalized.length <= limit) return [normalized];
+
+  const parts: string[] = [];
+  let remaining = normalized;
+  while (remaining.length > limit) {
+    const cut = findSplitIndex(remaining, limit);
+    const chunk = remaining.slice(0, cut);
+    if (chunk.trim().length > 0) parts.push(chunk);
+    remaining = remaining.slice(cut);
+  }
+  if (remaining.trim().length > 0) parts.push(remaining);
+  return parts;
+}
+
+/**
+ * 切分并转义：保证每段「在协议线上」的长度也不超过上限
+ * （CQ 转义会把 [ ] & 各膨胀成 5 个字符）。
+ */
+function splitAndEscape(text: string, limit: number): string[] {
+  const normalized = text.replace(/\r\n/g, "\n");
+  if (normalized.length === 0) return [];
+  const parts: string[] = [];
+  let remaining = normalized;
+  while (remaining.length > 0) {
+    const escapedAll = escapeCqText(remaining);
+    if (escapedAll.length <= limit) {
+      if (remaining.trim().length > 0) parts.push(escapedAll);
+      break;
+    }
+    const cut = findEncodedSplitIndex(remaining, limit);
+    const chunk = remaining.slice(0, cut);
+    if (chunk.trim().length > 0) parts.push(escapeCqText(chunk));
+    remaining = remaining.slice(cut);
+  }
+  return parts;
+}
+
+export interface EncodedOutbound {
+  /** 待发送的 CQ 字符串（文本已转义 / 已切分） */
+  parts: string[];
+  /** 是否有未受控 CQ 码被丢弃 */
+  droppedCq: boolean;
+}
+
+/**
+ * 将 SendableMessage 编码为可安全发送的 CQ 字符串数组。
+ * - 纯文本：转义 CQ 元字符后按长度切分；
+ * - CqCode：仅放行受控 qqFace，其余一律丢弃（droppedCq=true）。
+ */
+export function encodeOutbound(message: SendableMessage, maxChars?: number): EncodedOutbound {
+  if (isCqCode(message)) {
+    if (!isAllowedCqCode(message.cq)) return { parts: [], droppedCq: true };
+    return { parts: [message.cq.trim()], droppedCq: false };
+  }
+  const limit = maxChars ?? getMaxMessageLength();
+  return { parts: splitAndEscape(message, limit), droppedCq: false };
 }
 
 // ── OneBot 11 出站 API ──────────────────────────
@@ -114,20 +398,156 @@ export function isCqCode(msg: SendableMessage): msg is CqCode {
   return typeof msg !== "string" && (msg as CqCode).type === "cqcode";
 }
 
+/**
+ * 白名单判断。
+ * 空白名单 = 允许全部（当前单用户阶段；qq.ts 会在启动时打印显著警告）。
+ */
+export function isUserAllowed(
+  userId: number | null | undefined,
+  allowedUsers: readonly number[],
+): boolean {
+  if (!Array.isArray(allowedUsers) || allowedUsers.length === 0) return true;
+  if (typeof userId !== "number" || !Number.isFinite(userId)) return false;
+  return allowedUsers.includes(userId);
+}
+
+/**
+ * message_id 去重（LRU）。
+ * 断线重连/重复投递时 NapCat 可能重发同一条事件，靠它避免重复回复。
+ */
+export class MessageIdDedup {
+  private readonly capacity: number;
+  private readonly seen = new Map<number, true>();
+
+  constructor(capacity = 1000) {
+    this.capacity = Number.isFinite(capacity) && capacity >= 1 ? Math.floor(capacity) : 1000;
+  }
+
+  get size(): number {
+    return this.seen.size;
+  }
+
+  /** 是否已见过（true = 重复投递）。非法 id 不参与去重，返回 false。 */
+  hasSeen(messageId: number | null | undefined): boolean {
+    if (typeof messageId !== "number" || !Number.isFinite(messageId) || messageId <= 0) {
+      return false;
+    }
+    if (this.seen.has(messageId)) {
+      // 刷新 LRU 顺序
+      this.seen.delete(messageId);
+      this.seen.set(messageId, true);
+      return true;
+    }
+    this.seen.set(messageId, true);
+    if (this.seen.size > this.capacity) {
+      const oldest = this.seen.keys().next();
+      if (!oldest.done) this.seen.delete(oldest.value);
+    }
+    return false;
+  }
+
+  clear(): void {
+    this.seen.clear();
+  }
+}
+
+function sendMessage(action: string, targetParams: ApiParams, message: SendableMessage): boolean {
+  const encoded = encodeOutbound(message);
+  if (encoded.droppedCq) {
+    console.warn(`[安全] 出站消息包含未受控的 CQ 码，已丢弃（action=${action}）`);
+    return false;
+  }
+  if (encoded.parts.length === 0) return false;
+
+  let sent = false;
+  for (const part of encoded.parts) {
+    const ok = callApi(action, {
+      ...targetParams,
+      message: part,
+      // 文本已由我们自己转义，避免 NapCat 再解释一遍 CQ 码
+      auto_escape: false,
+    });
+    sent = sent || ok;
+    if (!ok) break; // 连接已断，后续分段不再尝试
+  }
+  return sent;
+}
+
 export function sendPrivateMsg(userId: number, message: SendableMessage): boolean {
-  return callApi("send_private_msg", {
-    user_id: userId,
-    message: isCqCode(message) ? message.cq : message,
-    auto_escape: false,
-  });
+  return sendMessage("send_private_msg", { user_id: userId }, message);
 }
 
 export function sendGroupMsg(groupId: number, message: SendableMessage): boolean {
-  return callApi("send_group_msg", {
-    group_id: groupId,
-    message: isCqCode(message) ? message.cq : message,
-    auto_escape: false,
-  });
+  return sendMessage("send_group_msg", { group_id: groupId }, message);
+}
+
+// ── 反向 WS 握手鉴权 ────────────────────────────
+
+/** 从请求 URL 中取 pathname（日志/校验时绝不包含 query 里的 token） */
+export function getRequestPathname(req: Pick<IncomingMessage, "url">): string {
+  try {
+    return new URL(req.url ?? "/", "ws://127.0.0.1").pathname;
+  } catch {
+    return "/";
+  }
+}
+
+/**
+ * 从请求中取 token：优先 query 的 access_token，其次 Authorization: Bearer。
+ * NapCat 反向 WS 两种方式都可能用到。
+ */
+export function getProvidedToken(req: Pick<IncomingMessage, "url" | "headers">): string | null {
+  try {
+    const url = new URL(req.url ?? "/", "ws://127.0.0.1");
+    const queryToken = url.searchParams.get("access_token");
+    if (queryToken) return queryToken;
+  } catch {
+    // URL 解析失败时继续尝试 Header
+  }
+  const auth = req.headers.authorization;
+  if (typeof auth === "string") {
+    const match = /^Bearer\s+(.+)$/i.exec(auth.trim());
+    if (match) return match[1].trim();
+  }
+  return null;
+}
+
+/** 定长比较，避免 token 逐字符比较的时间侧信道 */
+export function safeEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
+export interface HandshakeDecision {
+  ok: boolean;
+  /** 拒绝时回给客户端的 HTTP 状态码（404 路径不符 / 401 token 不符） */
+  statusCode: number;
+  /** 人类可读的拒绝原因（不含 token 等敏感值） */
+  reason: string;
+}
+
+/**
+ * 反向 WS 握手校验：path 必须匹配配置，配置了 token 时必须校验通过。
+ * 纯函数，方便单测；qq.ts 的 verifyClient 直接调用它。
+ */
+export function verifyHandshake(
+  req: Pick<IncomingMessage, "url" | "headers">,
+  expectedPath: string,
+  expectedToken?: string | null,
+): HandshakeDecision {
+  const pathname = getRequestPathname(req);
+  if (pathname !== expectedPath) {
+    return { ok: false, statusCode: 404, reason: "路径不匹配" };
+  }
+  if (expectedToken) {
+    const provided = getProvidedToken(req);
+    if (!provided || !safeEquals(provided, expectedToken)) {
+      return { ok: false, statusCode: 401, reason: "token 校验失败" };
+    }
+  }
+  return { ok: true, statusCode: 101, reason: "ok" };
 }
 
 // ── 通用 API 调用 ───────────────────────────────
@@ -240,8 +660,8 @@ export interface OneBotApiResponse {
 export function parseApiResponse(raw: string): OneBotApiResponse | null {
   try {
     const data = JSON.parse(raw);
-    if (typeof data.status === "string" && typeof data.retcode === "number") {
-      return { status: data.status, retcode: data.retcode };
+    if (isRecord(data) && typeof data.status === "string" && typeof data.retcode === "number") {
+      return { status: data.status as OneBotApiResponse["status"], retcode: data.retcode };
     }
     return null;
   } catch {
@@ -249,29 +669,18 @@ export function parseApiResponse(raw: string): OneBotApiResponse | null {
   }
 }
 
-// ── 事件解析 ────────────────────────────────────
-
-export function parseEvent(data: string): OneBotEvent | null {
-  try {
-    return JSON.parse(data) as OneBotEvent;
-  } catch {
-    return null;
-  }
-}
-
-export function isPrivateMessage(event: OneBotEvent): event is PrivateMessageEvent {
-  return event.post_type === "message" && (event as PrivateMessageEvent).message_type === "private";
-}
-
-export function isGroupMessage(event: OneBotEvent): event is GroupMessageEvent {
-  return event.post_type === "message" && (event as GroupMessageEvent).message_type === "group";
-}
-
 // ── P1-3: 消息类型检测 ─────────────────────────
 
+/** 取消息段数组（字符串/缺失时返回 null） */
+function getSegments(segments: unknown): MessageSegment[] | null {
+  if (!Array.isArray(segments)) return null;
+  return segments.filter(
+    (seg): seg is MessageSegment => isRecord(seg) && typeof seg.type === "string",
+  );
+}
+
 /** OneBot CQ 码匹配 */
-function extractCqType(segments: MessageSegment[] | string): string | null {
-  if (typeof segments === "string") return null;
+function extractCqType(segments: MessageSegment[]): string | null {
   for (const seg of segments) {
     if (seg.type && seg.type !== "text") return seg.type;
   }
@@ -279,10 +688,9 @@ function extractCqType(segments: MessageSegment[] | string): string | null {
 }
 
 /** 提取图片/语音的 URL（给 Level 2 预留） */
-function extractCqData(segments: MessageSegment[] | string, cqType: string): Record<string, string> | null {
-  if (typeof segments === "string") return null;
+function extractCqData(segments: MessageSegment[], cqType: string): Record<string, string> | null {
   for (const seg of segments) {
-    if (seg.type === cqType && seg.data) return seg.data;
+    if (seg.type === cqType && isRecord(seg.data)) return seg.data as Record<string, string>;
   }
   return null;
 }
@@ -298,10 +706,13 @@ export interface MessageMedia {
 }
 
 /**
- * 检测消息中的媒体类型并返回合成标记
+ * 检测消息中的媒体类型并返回合成标记。
+ * 对畸形/缺失的 message 字段容错：无法识别时返回 null。
  */
 export function detectMedia(event: PrivateMessageEvent): MessageMedia | null {
-  const segments = event.message;
+  if (!event) return null;
+  const segments = getSegments(event.message);
+  if (!segments || segments.length === 0) return null;
   const cqType = extractCqType(segments);
   if (!cqType) return null;
 
@@ -322,7 +733,7 @@ export function detectMedia(event: PrivateMessageEvent): MessageMedia | null {
       // 引用消息：返回原始 text + reply 数据，由 qq.ts 拼接 [引用：...]
       return {
         type: "reply",
-        syntheticText: event.raw_message,
+        syntheticText: typeof event.raw_message === "string" ? event.raw_message : "",
         data: extractCqData(segments, "reply"),
       };
     case "face":
@@ -343,23 +754,29 @@ export function detectMedia(event: PrivateMessageEvent): MessageMedia | null {
 
 /**
  * 检测群消息中是否 @了指定 QQ 号。
- * 返回被 @ 时提取的纯文本（去掉了 @CQ 码）。
+ * 返回被 @ 时提取的纯文本（去掉了 @CQ 码）；畸形消息返回 null。
  */
 export function extractAtText(event: GroupMessageEvent, selfId: number): string | null {
+  if (!event) return null;
   const segments = event.message;
+  const rawMessage = typeof event.raw_message === "string" ? event.raw_message : "";
+
   if (typeof segments === "string") {
     // 字符串形式：检查 raw_message 中是否包含 [CQ:at,qq=<selfId>]
     const atPattern = new RegExp(`\\[CQ:at,qq=${selfId}\\]`);
-    if (atPattern.test(event.raw_message)) {
-      return event.raw_message.replace(atPattern, "").trim();
+    if (atPattern.test(rawMessage)) {
+      return rawMessage.replace(atPattern, "").trim();
     }
     return null;
   }
 
+  const safeSegments = getSegments(segments);
+  if (!safeSegments) return null;
+
   // 结构化消息：检查 segments 中是否有 at 类型的 segment
   let atFound = false;
-  for (const seg of segments) {
-    if (seg.type === "at" && seg.data?.qq === String(selfId)) {
+  for (const seg of safeSegments) {
+    if (seg.type === "at" && isRecord(seg.data) && seg.data.qq === String(selfId)) {
       atFound = true;
       break;
     }
@@ -368,27 +785,26 @@ export function extractAtText(event: GroupMessageEvent, selfId: number): string 
 
   // 提取文本部分（去掉 at segment）
   const textParts: string[] = [];
-  for (const seg of segments) {
-    if (seg.type === "text" && seg.data?.text) {
+  for (const seg of safeSegments) {
+    if (seg.type === "text" && isRecord(seg.data) && typeof seg.data.text === "string") {
       textParts.push(seg.data.text);
-    } else if (seg.type === "at") {
+    } else if (seg.type === "at" && isRecord(seg.data)) {
       // 跳过 at，但如果它是 @别人（不是自己），可以保留为文本标记
-      if (seg.data?.qq !== String(selfId)) {
-        textParts.push(`@${seg.data?.qq ?? "某人"}`);
+      if (seg.data.qq !== String(selfId)) {
+        textParts.push(`@${seg.data.qq ?? "某人"}`);
       }
     }
   }
   const text = textParts.join("").trim();
-  return text || event.raw_message.replace(/\[CQ:at,[^\]]+\]/, "").trim();
+  return text || rawMessage.replace(/\[CQ:at,[^\]]+\]/, "").trim();
 }
 
 /** 从 reply 段的 data 中提取引用原文（NapCatQQ 可能在 data 中附带原文） */
 export function getReplyContext(replyData: Record<string, string> | null): string | null {
-  if (!replyData) return null;
+  if (!replyData || !isRecord(replyData)) return null;
   // 有些实现直接在 data 中包含被引用消息的 text
-  if (replyData.text) return replyData.text;
+  if (typeof replyData.text === "string") return replyData.text;
   // 有些用 message 字段
-  if (replyData.message) return replyData.message;
+  if (typeof replyData.message === "string") return replyData.message;
   return null;
 }
-

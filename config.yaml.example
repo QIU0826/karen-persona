@@ -15,9 +15,24 @@ tags: []
 
 # === 用户→人设映射（选填，QQ 模式专用）===
 # 不同 QQ 号对应不同人设。未在此映射中的用户使用上方默认 persona。
+# 键建议加引号，避免 YAML 把 QQ 号解析成数字。
 # user_personas:
-#   123456789: "qiuyao"
+#   "123456789": "qiuyao"
+
+# === QQ 桥接安全（选填；不填则用安全默认值）===
+# 反向 WS 监听地址：默认只监听本机回环地址；除非清楚风险，不要改成 "0.0.0.0"。
+# one_bot_ws_host: "127.0.0.1"
+# 反向 WS 监听端口（默认 18080，需与 NapCat 的 WebSocket 客户端地址一致）。
+# one_bot_ws_port: 18080
+# 反向 WS 路径（默认 /onebot/v11/ws，需与 NapCat 的地址一致）。
+# one_bot_ws_path: "/onebot/v11/ws"
+# 握手 token：监听非本机地址 / 跨机连接时必须设置；NapCat 侧填同样的 access_token。
+# one_bot_token: "请换成一段足够长的随机字符串"
+#
+# QQ 白名单：只允许这些 QQ 号和她聊天。留空 = 允许所有人（启动时打印显著警告），
+# 个人使用建议至少填自己的 QQ 号。
+allowed_users: []
 
 # === 系统配置 ===
-message_frequency_limit: 10  # 每分钟最大消息数（防封号）
+message_frequency_limit: 10  # 每分钟最大自动回复条数（1-120，防封号）
 log_level: "info"            # debug / info / warn / error
