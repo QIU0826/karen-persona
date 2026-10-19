@@ -36,7 +36,8 @@
 - M1-3 演化可见化 ✅（`/journal` `/timeline` `/herview` `/evolution`，21 文件/330 测试）
 - DeepSeek 能力审计与落地 ✅（思考模式默认关闭修复空回复；图片识别改 DeepSeek Flash；模型名 canonical；旁路 LLM 调用统一 thinking；prompt 缓存命中实测）
 - 跨平台 QQ 桥接方案 ✅ 文档化（`docs/QQ_BRIDGE_CROSS_PLATFORM.md` + `deploy/napcat-macos`/`napcat-windows` + `scripts/mock-onebot.mjs`；mock 全链路实测通过；macOS 原生 NapCat 未实机扫码验证）
-- 真机联调（2026-10-19 深夜）：NapCat 原生 macOS → Karen → DeepSeek 全链路跑通；图片识别/缓存/流式正常；已修复 BUG-1（关系误判）并新增免打扰配置；问题清单见 docs/M1_BACKLOG.md。测试数更新为 23 文件 / 347 用例。
+- 真机联调（2026-10-19 深夜）：NapCat 原生 macOS → Karen → DeepSeek 全链路跑通；图片识别/缓存/流式正常；已修复 BUG-1（关系误判）、BUG-2（延迟队列持久化）、IMP-1（图片描述过短），并新增免打扰配置；问题清单见 docs/M1_BACKLOG.md。
+- M1-7 记忆检索 P0 完成：n-gram + FTS5 BM25 RRF 混合、sqlite-vec 启用、语义 embedding 双列（需 Qwen Key 实跑）、真实库 schema v2 幂等迁移验证。测试数更新为 27 文件 / 386 用例。
 - 仍未修复（M1 剩余）：延迟队列持久化（BUG-2）、视觉描述过短（IMP-1）、多用户隔离、语义检索接线、双管线彻底统一、合规项、真实 QQ 长跑。
 
 ---
