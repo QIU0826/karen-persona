@@ -42,3 +42,8 @@ quiet_hours_end: "07:00"
 # === 系统配置 ===
 message_frequency_limit: 10  # 每分钟最大自动回复条数（1-120，防封号）
 log_level: "info"            # debug / info / warn / error
+
+# === 可观测性（选填）===
+# /health 探活 + /cost 成本摘要（零依赖 HTTP，**仅绑定 127.0.0.1**，不对外网开放）。
+# 默认 18081；设为 0 关闭。可用 `curl -s http://127.0.0.1:18081/health` 自检。
+health_port: 18081

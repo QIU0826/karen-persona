@@ -22,7 +22,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 - **存储**：better-sqlite3（T1/T2 记忆）+ 会话 JSON + 人设 JSON/YAML
 - **外部世界**：OpenWeatherMap（真实天气，可选）、时间感知（结构化标签）；网络热点是硬编码话题池
 - **桥接**：NapCatQQ（Windows 已验证 v4.18.4，官方最新 v4.18.38）+ OneBot 11 反向 WebSocket；macOS 原生 NapCat / Linux Docker 方案见 [docs/QQ_BRIDGE_CROSS_PLATFORM.md](docs/QQ_BRIDGE_CROSS_PLATFORM.md)；微信 = wechaty echo 桩（规划中）
-- **工程**：GitHub Actions CI（`npm ci` → typecheck → test）、`npm run doctor` 环境体检、Dockerfile（node:22-slim/非 root）、PM2 配置
+- **工程**：GitHub Actions CI（`npm ci` → typecheck → test）、`npm run doctor` 环境体检、结构化日志 + `/health` + 成本统计、Dockerfile（node:22-slim/非 root）、PM2（跑 dist 需先 build）
 - **不存在的**：TTS、图片生成（即梦）、真实语义向量检索、Web 控制台、多用户隔离
 
 ## 架构（十个域）与当前状态
@@ -40,7 +40,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
 | 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入未接线；TTS/即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | ✅/🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF）**、sqlite-vec 真正启用（cosine + metadata 过滤）、双列 embedding（ngram / semantic 不混比）、schema v2 幂等迁移；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；多用户隔离未完成 |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 27 个测试文件 / 386 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai 测试），`tsc --noEmit` 0 错误，CI 已接入；仍缺真实 QQ 集成测试与覆盖率；eval 多为实验代码、无产品入口，历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 30 个测试文件 / 419 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai 测试），`tsc --noEmit` 0 错误，CI 已接入；仍缺真实 QQ 集成测试与覆盖率；eval 多为实验代码、无产品入口，历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -64,7 +64,7 @@ npm run setup      # 交互式配置向导
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 统一为 `>=22`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm test` 27 文件 / 386 用例通过（审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm test` 30 文件 / 419 用例通过（审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -78,6 +78,7 @@ npm run setup      # 交互式配置向导
 - **BUG-2 延迟补发持久化**：新增 `src/data/pending-queue.ts`（SQLite 队列；失败 60s×attempts 退避）；桥接在 NapCat 重连后自动恢复并补发，退出只清 timer 保留记录；实测「预置 10s 后到期 → 重启桥接 → 到点补发成功」。
 - **IMP-1 图片描述增强**：视觉改用 `detail:"high"`（low 下截图 OCR 失真），prompt 区分类型：截图/文字类逐字转述（≤200 字），照片/插画 40–80 字；max_tokens 600。真实中文会议截图 OCR 实测四行原文全部正确。
 - **M1-7 记忆检索 P0**：`src/data/embedding.ts` 统一 embedder（Qwen text-embedding-v3 + ngram 降级，修 768 截断 bug）；`vector.ts` schema v2（embedding_model/semantic_embedding/semantic_model、FTS5 中文 BM25、sqlite-vec vec0 cosine + metadata）；`retriever.ts` RRF 混合 + 阈值/去重/source 过滤 + confidence 修正；orchestrator 仅 2 处改 async 检索。真实库 22 条记忆迁移验证通过（v2、FTS 22 行、幂等）。
+- **步骤 3 可观测最小闭环（2026-10-20 凌晨）**：零新依赖新增 `src/obs/`——结构化脱敏日志（非 TTY JSON lines / TTY 可读，敏感字段 `[redacted N chars]`）、SQLite `llm_usage` 成本统计（DeepSeek 峰谷价/缓存命中/flash-pro）、`GET /health` + `/cost`（仅绑 127.0.0.1，默认 18081，可配 0=关）、PM2 改跑 `dist/bridge/qq.js`。实测 `/health` 200、`/cost` 单次调用成本 ¥0.000033 正确入账。
 - **问题记录**：真机联调问题与修复清单见 [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md)。
 
 ### 已知问题（M0 之后继续修）
@@ -88,7 +89,9 @@ npm run setup      # 交互式配置向导
 - 主动消息：M0 已加单日上限 4 条、两次最小间隔 30 分钟、连续沉默 3 次强制回复；仍无免打扰/暂停开关（M1-4）
 - 语义检索需配置 Qwen Key（`QWEN_VL_API_KEY`）才能生效；无 Key 时为 n-gram + FTS5 BM25 混合；阈值待真实 Key + 标注集标定
 - 主动消息/夜间补发仍需真机长跑验证
-- 可观测性仍弱（console.log、无 /health、无成本汇总）——技术雷达第 1 件事
+- 成本统计仅覆盖 chat/chatStream 主路径；旁路 LLM（独白/T3/视觉等）未计入，`cost_today` 是下限
+- 结构化日志只覆盖 qq/chat 关键链路，orchestrator/evolution 等仍有 console.log（可能含派生文本）
+- 节假日按工作日近似计算峰谷价，可能高估成本
 - 表情包/贴纸、语音 ASR、Web 控制台待做（技术雷达已排期）
 - 测试覆盖率低；无 lint/coverage
 - QQ 桥接跨平台验证不完整（Windows 已验，macOS 方案已文档化但未实机验证）；平台/封号风险是结构性风险

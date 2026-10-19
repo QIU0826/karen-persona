@@ -31,6 +31,11 @@ export interface AppConfig {
   quiet_hours_start: number;
   /** 免打扰结束小时（0-23，支持小数）。 */
   quiet_hours_end: number;
+  /**
+   * 可观测性 /health 探活端口（**仅绑定 127.0.0.1**）。
+   * 默认 18081；设为 0 关闭（不启动 HTTP 服务）。
+   */
+  health_port: number;
 }
 
 /** 配置错误。消息面向用户，可直接打印。 */
@@ -47,6 +52,8 @@ export const DEFAULT_ONE_BOT_WS_HOST = "127.0.0.1";
 export const DEFAULT_ONE_BOT_WS_PORT = 18080;
 export const DEFAULT_ONE_BOT_WS_PATH = "/onebot/v11/ws";
 export const DEFAULT_MESSAGE_FREQUENCY_LIMIT = 10;
+/** /health 探活端口（默认 18081；0 = 关闭）。 */
+export const DEFAULT_HEALTH_PORT = 18081;
 /** 每分钟消息数上限的合理范围（防封号） */
 const MIN_MESSAGE_FREQUENCY_LIMIT = 1;
 const MAX_MESSAGE_FREQUENCY_LIMIT = 120;
@@ -347,6 +354,12 @@ export function loadConfig(): AppConfig {
   const quietEndPicked = pickOption(raw, "quiet_hours_end", "QUIET_HOURS_END");
   const quietHoursEnd = quietEndPicked ? parseHourOption(quietEndPicked.value, quietEndPicked.source) : 7;
 
+  // 可观测性 /health 端口：默认 18081，0 = 关闭（范围 0-65535）
+  const healthPortPicked = pickOption(raw, "health_port", "HEALTH_PORT");
+  const healthPort = healthPortPicked
+    ? parseIntegerOption(healthPortPicked.value, healthPortPicked.source, 0, 65535)
+    : DEFAULT_HEALTH_PORT;
+
   return {
     persona,
     her_name: herName,
@@ -366,6 +379,7 @@ export function loadConfig(): AppConfig {
     allowed_users: allowedUsers,
     quiet_hours_start: quietHoursStart,
     quiet_hours_end: quietHoursEnd,
+    health_port: healthPort,
   };
 }
 

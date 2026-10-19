@@ -8,6 +8,11 @@ import {
   type ThinkingConfig,
 } from "./router.js";
 import type { Persona } from "../persona/loader.js";
+import { createLogger } from "../obs/logger.js";
+import { recordLlmUsage } from "../obs/cost-tracker.js";
+
+/** 结构化日志 scope=llm（脱敏由 logger 统一处理：不打印 prompt/正文/Key）。 */
+const log = createLogger("llm");
 
 export interface ChatOptions {
   ragContext?: string;
@@ -189,7 +194,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** 记录并打印 token usage。provider 不返回 usage 时静默跳过。 */
+/**
+ * 记录并打印 token usage，并写入 llm_usage 成本表。
+ * provider 不返回 usage 时静默跳过（不估算、不造假数据）。
+ *
+ * 成本统计范围：仅 chat / chatStream 主路径；旁路 LLM 调用（独白/T3/herView/视觉等）
+ * 尚未接入（见 src/obs/cost-tracker.ts 头注释）。
+ */
 function recordUsage(
   kind: "chat" | "chatStream",
   model: string,
@@ -202,7 +213,8 @@ function recordUsage(
     /** DeepSeek：自动 prompt 缓存命中/未命中的输入 tokens。 */
     prompt_cache_hit_tokens?: number | null;
     prompt_cache_miss_tokens?: number | null;
-  } | null | undefined
+  } | null | undefined,
+  meta: { latencyMs: number; complexity: MessageComplexity }
 ): void {
   if (!usage) return;
   const promptTokens = usage.prompt_tokens ?? 0;
@@ -210,6 +222,7 @@ function recordUsage(
   const totalTokens = usage.total_tokens ?? promptTokens + completionTokens;
   const reasoningTokens = usage.completion_tokens_details?.reasoning_tokens ?? 0;
   const cacheHitTokens = usage.prompt_cache_hit_tokens ?? 0;
+  const cacheMissTokens = usage.prompt_cache_miss_tokens ?? undefined;
 
   usageTotals.calls += 1;
   usageTotals.promptTokens += promptTokens;
@@ -218,11 +231,32 @@ function recordUsage(
   usageTotals.cacheHitTokens += cacheHitTokens;
   usageTotals.totalTokens += totalTokens;
 
-  console.log(
-    `[LLM] usage(${kind}, ${model}): prompt=${promptTokens} (cache_hit=${cacheHitTokens})` +
-      ` completion=${completionTokens} (reasoning=${reasoningTokens}) total=${totalTokens}` +
-      ` | 累计 total=${usageTotals.totalTokens} (${usageTotals.calls} 次, cache_hit=${usageTotals.cacheHitTokens})`
-  );
+  // 成本入库（失败只 warn，绝不影响对话）
+  const costCny = recordLlmUsage({
+    model,
+    kind,
+    promptTokens,
+    completionTokens,
+    cachedTokens: cacheHitTokens,
+    cacheMissTokens,
+    reasoningTokens,
+    latencyMs: meta.latencyMs,
+  });
+
+  log.info("llm.usage", {
+    kind,
+    model,
+    complexity: meta.complexity,
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    cached_tokens: cacheHitTokens,
+    reasoning_tokens: reasoningTokens,
+    total_tokens: totalTokens,
+    latency_ms: meta.latencyMs,
+    cost_cny: costCny,
+    cumulative_tokens: usageTotals.totalTokens,
+    cumulative_calls: usageTotals.calls,
+  });
 }
 
 /** 判断 4xx 错误是否是「provider 不认识 stream_options」→ 可降级重发。 */
@@ -382,10 +416,17 @@ export async function chat(
       const attemptMs = Date.now() - attemptStartMs;
       const totalMs = Date.now() - startMs;
       if (attemptMs > 5000) {
-        console.log(`[LLM] 慢响应: ${attemptMs}ms (attempt ${attempt}, 总 ${totalMs}ms)`);
+        log.warn("llm.slow_response", {
+          attempt,
+          latency_ms: attemptMs,
+          total_ms: totalMs,
+        });
       }
 
-      recordUsage("chat", modelConfig.model, response.usage);
+      recordUsage("chat", modelConfig.model, response.usage, {
+        latencyMs: attemptMs,
+        complexity,
+      });
       return extractContentOrThrow(response);
     } catch (err) {
       lastError = err;
@@ -394,15 +435,18 @@ export async function chat(
       if (!canRetry) break;
 
       const delayMs = computeRetryDelayMs(attempt);
-      console.log(
-        `[LLM] 第 ${attempt} 次调用失败（${describeError(err)}），${delayMs}ms 后重试（${attempt}/${MAX_RETRIES}）`
-      );
+      log.warn("llm.retry", {
+        attempt,
+        max_retries: MAX_RETRIES,
+        delay_ms: delayMs,
+        error: describeError(err),
+      });
       await sleep(delayMs);
     }
   }
 
   const totalMs = Date.now() - startMs;
-  console.log(`[LLM] 失败: ${totalMs}ms total, last error: ${describeError(lastError)}`);
+  log.error("llm.failed", { latency_ms: totalMs, error: describeError(lastError) });
   throw new Error(
     `[LLM] 调用失败（耗时 ${totalMs}ms）：${describeError(lastError)}`,
     { cause: lastError }
@@ -477,7 +521,10 @@ export async function* chatStream(
         const chunk = result.value;
         // provider 支持 include_usage 时，最后一个 chunk 带 usage
         if (chunk.usage) {
-          recordUsage("chatStream", modelConfig.model, chunk.usage);
+          recordUsage("chatStream", modelConfig.model, chunk.usage, {
+            latencyMs: Date.now() - startMs,
+            complexity,
+          });
         }
 
         const delta = chunk.choices?.[0]?.delta;
@@ -492,22 +539,25 @@ export async function* chatStream(
         emitted = true;
         if (!firstTokenAt) {
           firstTokenAt = Date.now();
-          console.log(`[LLM] 首 token: ${firstTokenAt - startMs}ms (attempt ${attempts})`);
+          log.info("llm.first_token", {
+            latency_ms: firstTokenAt - startMs,
+            attempt: attempts,
+          });
         }
         yield contentDelta;
       }
 
       if (!emitted) {
         // 思考模式可能把 max_tokens 全花在 reasoning_content 上 → 用户收不到任何回复
-        console.log(
-          `[LLM] 警告：流式响应未产出正文（thinking=${thinking.enabled ? "enabled" : "disabled"}，` +
-            `reasoning≈${reasoningChars} 字）；若已开启思考模式请提高 max_tokens`
-        );
+        log.warn("llm.empty_stream", {
+          thinking_enabled: thinking.enabled,
+          reasoning_chars: reasoningChars,
+        });
       }
 
       const totalMs = Date.now() - startMs;
       if (totalMs > 5000) {
-        console.log(`[LLM] 慢响应(stream): ${totalMs}ms`);
+        log.warn("llm.slow_response", { stream: true, total_ms: totalMs });
       }
       return;
     } catch (err) {
@@ -518,7 +568,7 @@ export async function* chatStream(
       if (!emitted && includeUsage && isUnsupportedStreamOptionsError(err)) {
         includeUsage = false;
         attempts--;
-        console.log("[LLM] 当前服务不支持流式 usage 统计，已静默降级（不影响回复）");
+        log.warn("llm.stream_usage_unsupported");
         continue;
       }
 
@@ -530,20 +580,27 @@ export async function* chatStream(
       if (!canRetry) {
         const totalMs = Date.now() - startMs;
         const prefix = emitted ? "流式回复中断（已输出部分内容）" : "流式调用失败";
+        log.error(emitted ? "llm.stream_interrupted" : "llm.stream_failed", {
+          attempts,
+          latency_ms: totalMs,
+          error: describeError(err),
+        });
         const error = new Error(
           `[LLM] ${prefix}（尝试 ${attempts} 次，耗时 ${totalMs}ms）：${describeError(err)}`,
           { cause: err }
         );
-        console.log(error.message);
         throw error;
       }
 
       retriesUsed++;
       const delayMs = computeRetryDelayMs(retriesUsed);
-      console.log(
-        `[LLM] 流式第 ${attempts} 次尝试失败（${describeError(err)}），` +
-          `${delayMs}ms 后重试（${retriesUsed}/${MAX_RETRIES}）`
-      );
+      log.warn("llm.stream_retry", {
+        attempt: attempts,
+        retry: retriesUsed,
+        max_retries: MAX_RETRIES,
+        delay_ms: delayMs,
+        error: describeError(err),
+      });
       await sleep(delayMs);
     } finally {
       // 正常结束 / 提前关闭生成器 / 出错都释放底层连接
@@ -552,7 +609,7 @@ export async function* chatStream(
   }
 
   const totalMs = Date.now() - startMs;
-  console.log(`[LLM] 流式失败: ${totalMs}ms total, last error: ${describeError(lastError)}`);
+  log.error("llm.stream_failed", { latency_ms: totalMs, error: describeError(lastError) });
   throw new Error(
     `[LLM] 流式调用失败（耗时 ${totalMs}ms）：${describeError(lastError)}`,
     { cause: lastError }

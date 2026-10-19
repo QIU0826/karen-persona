@@ -30,6 +30,7 @@ import {
   markPendingAttempt,
   markPendingDone,
   purgeFinishedReplies,
+  countPendingReplies,
 } from "../data/pending-queue.js";
 import {
   initConversation,
@@ -66,6 +67,8 @@ import {
 } from "./onebot.js";
 import { describeImage } from "../ai/vision.js";
 import { execSync } from "node:child_process";
+import { createLogger, configureLogger } from "../obs/logger.js";
+import { startHealthServer, type HealthServerHandle } from "../obs/health-server.js";
 
 // ── 常量 ────────────────────────────────────────
 
@@ -80,6 +83,9 @@ const MIN_DEFERRED_DELAY_MS = 500;
 const MAX_DEFERRED_DELAY_MS = 24 * 60 * 60 * 1000;
 /** 非法连接/握手失败的日志里最多展示多少字符 */
 const MAX_LOG_VALUE_LENGTH = 120;
+
+/** 结构化日志 scope=qq（脱敏、TTY 可读；只记录长度/摘要，不落消息正文）。 */
+const log = createLogger("qq");
 
 // ── 通用工具 ────────────────────────────────────
 
@@ -99,6 +105,11 @@ function asCqCode(cq: string): CqCode {
 /** 只保留长度信息：日志中不落任何消息正文 */
 function textSummary(text: string): string {
   return `${text.length} 字`;
+}
+
+/** 按 Unicode 码点统计字符数（结构化日志字段用）。 */
+function charCount(text: string): number {
+  return Array.from(text).length;
 }
 
 /** 转义/截断外部可控字符串，避免日志注入 */
@@ -162,16 +173,21 @@ function isAllowedUser(sharedBase: SharedBase, userId: number): boolean {
 function noteIgnoredNonWhitelisted(userId: number): void {
   ignoredNonWhitelistedMessages++;
   ignoredNonWhitelistedUsers.add(userId);
-  debugLog(`[安全] 忽略非白名单账号的消息（累计 ${ignoredNonWhitelistedMessages} 条）`);
+  log.debug("security.ignored_non_whitelisted", {
+    total: ignoredNonWhitelistedMessages,
+    accounts: ignoredNonWhitelistedUsers.size,
+  });
 }
 
 function reportIgnoredNonWhitelisted(): void {
   if (ignoredNonWhitelistedMessages <= lastReportedIgnoredMessages) return;
   const delta = ignoredNonWhitelistedMessages - lastReportedIgnoredMessages;
   lastReportedIgnoredMessages = ignoredNonWhitelistedMessages;
-  console.log(
-    `[安全] 已忽略 ${delta} 条非白名单账号消息（累计 ${ignoredNonWhitelistedMessages} 条，涉及 ${ignoredNonWhitelistedUsers.size} 个账号）`,
-  );
+  log.warn("security.ignored_non_whitelisted_summary", {
+    delta,
+    total: ignoredNonWhitelistedMessages,
+    accounts: ignoredNonWhitelistedUsers.size,
+  });
 }
 
 // ── 延迟回复（消息门 deferred）──────────────────
@@ -185,7 +201,7 @@ function cancelDeferredTimer(userId: number, reason?: string): void {
   // 即使内存里没有 timer（例如刚重启还没恢复），也要取消持久化记录
   const cancelled = cancelPendingReplies("qq-private", String(userId), reason ?? "");
   if (reason && (entry || cancelled > 0)) {
-    console.log(`[消息门] 用户 ${userId} 的待补发回复已取消（${reason}）`);
+    log.info("gate.deferred_cancelled", { user_id: userId, reason, cancelled });
   }
 }
 
@@ -225,7 +241,7 @@ interface DeferredGroupContext {
 function scheduleDeferredPrivateReply(ctx: DeferredPrivateContext, delayMs: number): void {
   const delay = clampDeferredDelay(delayMs);
   if (delay === null) {
-    console.warn(`[消息门] 收到无效延迟 ${String(delayMs)}ms，跳过补回复`);
+    log.warn("gate.deferred_invalid_delay", { delay_ms: String(delayMs) });
     return;
   }
   // 同一用户只保留最新一条（与旧的内存 timer 语义一致），先取消旧记录
@@ -238,10 +254,12 @@ function scheduleDeferredPrivateReply(ctx: DeferredPrivateContext, delayMs: numb
     text: ctx.text,
     dueAt: Date.now() + delay,
   });
-  console.log(
-    `[消息门] 用户 ${ctx.userName} 的消息晚点回：${Math.round(delay / 1000)}s 后补发` +
-      `（${textSummary(ctx.text)}，已持久化 #${pendingId}）`,
-  );
+  log.info("gate.deferred_scheduled", {
+    user_id: ctx.userId,
+    delay_s: Math.round(delay / 1000),
+    chars: charCount(ctx.text),
+    pending_id: pendingId,
+  });
   scheduleDeferredDelivery({ ...ctx, pendingId }, delay);
 }
 
@@ -259,7 +277,7 @@ async function deliverDeferredPrivateReply(ctx: DeferredPrivateContext): Promise
   const pendingId = ctx.pendingId;
   // 用户状态被淘汰/重建时放弃，避免把回复写到旧状态上
   if (userStates.get(ctx.userId) !== ctx.state) {
-    console.log(`[消息门] 用户 ${ctx.userName} 状态已变化，取消延迟补发`);
+    log.info("gate.deferred_cancelled", { user_id: ctx.userId, reason: "user_state_changed" });
     if (pendingId) markPendingDone(pendingId);
     return;
   }
@@ -274,23 +292,25 @@ async function deliverDeferredPrivateReply(ctx: DeferredPrivateContext): Promise
     });
     if (outcome.deferredDelayMs !== undefined) {
       // bypassGate 下不应再被门控；不再排期，避免无限循环
-      console.warn("[消息门] 延迟补发时仍被门控，已跳过");
+      log.warn("gate.deferred_still_gated", { user_id: ctx.userId });
       if (pendingId) markPendingDone(pendingId);
       return;
     }
     if (pendingId) markPendingDone(pendingId);
     if (outcome.sentCount === 0) {
-      console.log(`[消息门] 延迟补发未产生回复（${ctx.userName}）`);
+      log.info("gate.deferred_empty", { user_id: ctx.userId });
     }
   } catch (err) {
     const msg = errMessage(err);
-    console.error(`[消息门] 延迟补发失败（${ctx.userName}）: ${msg}`);
+    log.error("gate.deferred_failed", { user_id: ctx.userId, error: msg });
     if (pendingId) {
       const retry = markPendingAttempt(pendingId, msg);
       const retryDelay = Math.max(MIN_DEFERRED_DELAY_MS, retry.dueAt - Date.now());
-      console.log(
-        `[消息门] 已重新排期：第 ${retry.attempts} 次重试，${Math.round(retryDelay / 1000)}s 后`,
-      );
+      log.info("gate.deferred_retry", {
+        user_id: ctx.userId,
+        attempts: retry.attempts,
+        delay_s: Math.round(retryDelay / 1000),
+      });
       scheduleDeferredDelivery(ctx, retryDelay);
     }
   }
@@ -309,12 +329,12 @@ async function restorePendingReplies(sharedBase: SharedBase): Promise<void> {
   pendingRestoring = true;
   try {
     const purged = purgeFinishedReplies();
-    if (purged > 0) debugLog(`[消息门] 清理已完成/已取消的延迟记录 ${purged} 条`);
+    if (purged > 0) log.debug("gate.pending_purged", { purged });
 
     const rows = listPendingReplies("qq-private");
     if (rows.length === 0) return;
 
-    console.log(`[消息门] 发现 ${rows.length} 条待补发回复，开始恢复`);
+    log.info("gate.pending_restore_start", { count: rows.length });
     for (const row of rows) {
       const userId = Number(row.userId);
       if (!Number.isFinite(userId)) {
@@ -322,7 +342,7 @@ async function restorePendingReplies(sharedBase: SharedBase): Promise<void> {
         continue;
       }
       if (!isAllowedUser(sharedBase, userId)) {
-        console.log("[消息门] 白名单已变化，取消一条待补发回复");
+        log.warn("gate.pending_cancelled", { reason: "allowed_users_changed", pending_id: row.id });
         markPendingDone(row.id);
         continue;
       }
@@ -336,9 +356,11 @@ async function restorePendingReplies(sharedBase: SharedBase): Promise<void> {
         userStates.set(userId, state);
       }
       const wait = Math.max(2_000, row.dueAt - Date.now());
-      console.log(
-        `[消息门] 恢复待补发：用户 ${userId}，${Math.round(wait / 1000)}s 后补发（尝试 ${row.attempts} 次）`,
-      );
+      log.info("gate.pending_restored", {
+        user_id: userId,
+        delay_s: Math.round(wait / 1000),
+        attempts: row.attempts,
+      });
       scheduleDeferredDelivery(
         {
           userId,
@@ -352,7 +374,7 @@ async function restorePendingReplies(sharedBase: SharedBase): Promise<void> {
       );
     }
   } catch (err) {
-    console.error(`[消息门] 恢复待补发失败: ${errMessage(err)}`);
+    log.error("gate.pending_restore_failed", { error: errMessage(err) });
   } finally {
     pendingRestoring = false;
   }
@@ -361,13 +383,15 @@ async function restorePendingReplies(sharedBase: SharedBase): Promise<void> {
 function scheduleDeferredGroupReply(ctx: DeferredGroupContext, delayMs: number): void {
   const delay = clampDeferredDelay(delayMs);
   if (delay === null) {
-    console.warn(`[消息门] 收到无效延迟 ${String(delayMs)}ms，跳过群聊补回复`);
+    log.warn("gate.group_deferred_invalid_delay", { delay_ms: String(delayMs) });
     return;
   }
   cancelDeferredTimer(ctx.userId);
-  console.log(
-    `[消息门] 群 ${ctx.groupId} 中 ${ctx.userName} 的消息晚点回：${Math.round(delay / 1000)}s 后补发`,
-  );
+  log.info("gate.group_deferred_scheduled", {
+    group_id: ctx.groupId,
+    user_id: ctx.userId,
+    delay_s: Math.round(delay / 1000),
+  });
   const timer = setTimeout(() => {
     userDeferredTimers.delete(ctx.userId);
     void deliverDeferredGroupReply(ctx);
@@ -378,7 +402,7 @@ function scheduleDeferredGroupReply(ctx: DeferredGroupContext, delayMs: number):
 
 async function deliverDeferredGroupReply(ctx: DeferredGroupContext): Promise<void> {
   if (userStates.get(ctx.userId) !== ctx.state) {
-    console.log("[消息门] 用户状态已变化，取消群聊延迟补发");
+    log.info("gate.group_deferred_cancelled", { user_id: ctx.userId });
     return;
   }
   try {
@@ -386,15 +410,15 @@ async function deliverDeferredGroupReply(ctx: DeferredGroupContext): Promise<voi
       bypassGate: true,
       skipUserPersist: true,
     });
-    for (const log of result.logs) console.log(`  ${log}`);
+    for (const line of result.logs) console.log(`  ${line}`);
     if (result.deferred) {
-      console.warn("[消息门] 群聊延迟补发时仍被门控，已跳过");
+      log.warn("gate.group_deferred_still_gated", { group_id: ctx.groupId });
       return;
     }
     const sent = await sendGroupReplies(ctx.groupId, ctx.userId, ctx.userName, result);
-    console.log(`[消息门] 群聊延迟补发完成: ${sent} 条`);
+    log.info("gate.group_deferred_done", { group_id: ctx.groupId, sent });
   } catch (err) {
-    console.error(`[消息门] 群聊延迟补发失败: ${errMessage(err)}`);
+    log.error("gate.group_deferred_failed", { group_id: ctx.groupId, error: errMessage(err) });
   }
 }
 
@@ -440,7 +464,7 @@ function evictStaleUsers(): void {
       userBuffers.delete(userId);
     }
   }
-  console.log(`[内存] 淘汰 ${toRemove.length} 个不活跃用户 (剩余: ${userStates.size})`);
+  log.info("memory.evicted_users", { removed: toRemove.length, remaining: userStates.size });
 }
 
 /** 消费缓冲：处理期间到达的新消息会被继续消费，不丢失 */
@@ -457,7 +481,7 @@ async function drainUserBuffer(
       try {
         await handlePrivateBatch(batch, sharedBase);
       } catch (err) {
-        console.error(`[错误] 用户 ${userId} 消息处理失败: ${errMessage(err)}`);
+        log.error("message.drain_failed", { user_id: userId, error: errMessage(err) });
       }
     }
   } finally {
@@ -495,12 +519,18 @@ function enqueueMessage(event: PrivateMessageEvent, sharedBase: SharedBase): voi
 // ── 启动主流程 ──────────────────────────────────
 
 async function main() {
-  console.log("╔══════════════════════════════════════╗");
-  console.log("║   Karen — QQ 桥接 (NapCat/OneBot)   ║");
-  console.log("╚══════════════════════════════════════╝\n");
+  // TTY 下保留人类可读 banner；非 TTY（PM2/管道）走结构化日志，保持 JSON lines
+  if (process.stdout.isTTY) {
+    console.log("╔══════════════════════════════════════╗");
+    console.log("║   Karen — QQ 桥接 (NapCat/OneBot)   ║");
+    console.log("╚══════════════════════════════════════╝\n");
+  } else {
+    log.info("startup.banner", { service: "karen-qq", bridge: "napcat/onebot11" });
+  }
 
   const config = loadConfig();
   setLogLevel(config.log_level);
+  configureLogger({ level: config.log_level });
 
   // ── 安全启动自检 ──────────────────────────────
   const isLoopback =
@@ -510,19 +540,21 @@ async function main() {
     config.one_bot_ws_host === "[::1]";
 
   if (config.allowed_users.length === 0) {
-    console.warn("⚠️  [安全] allowed_users 白名单为空：任何 QQ 号都能和她聊天。");
-    console.warn("⚠️  [安全] 个人使用请把 allowed_users 配成你自己的 QQ 号；对外提供服务前必须配置。");
+    log.warn("security.allowed_users_empty", {
+      hint: "任何 QQ 号都能和她聊天；个人使用请把 allowed_users 配成自己的 QQ 号，对外提供服务前必须配置",
+    });
   } else {
-    console.log(`[安全] 白名单已启用：${config.allowed_users.length} 个 QQ 号`);
+    log.info("security.allowed_users", { count: config.allowed_users.length });
   }
 
   if (!isLoopback && !config.one_bot_token) {
-    console.warn(
-      `⚠️  [安全] WS 监听 ${config.one_bot_ws_host}（非本机回环）但未配置 ONE_BOT_TOKEN：局域网内任何人都能伪装 NapCat 发事件。`,
-    );
+    log.warn("security.ws_no_token", {
+      host: config.one_bot_ws_host,
+      hint: "非本机回环监听但未配置 ONE_BOT_TOKEN：局域网内任何人都能伪装 NapCat 发事件",
+    });
   }
   if (config.one_bot_token && config.one_bot_token.length < 8) {
-    console.warn("[安全] ONE_BOT_TOKEN 过短（<8 字符），容易被暴力猜测。");
+    log.warn("security.token_too_short", { length: config.one_bot_token.length });
   }
 
   // 预加载默认人设
@@ -536,15 +568,18 @@ async function main() {
         try {
           personaCache.set(personaId, await loadPersona(personaId));
         } catch (err) {
-          console.log(`[警告] 用户配置的人设 "${personaId}" 加载失败: ${errMessage(err)}`);
+          log.warn("persona.load_failed", { persona_id: personaId, error: errMessage(err) });
         }
       }
     }
   }
 
-  console.log(`[启动] 默认人设: ${defaultPersona.name} (${defaultPersona.identity.lifeStory.career})`);
+  log.info("startup.persona", {
+    persona: defaultPersona.name,
+    career: defaultPersona.identity.lifeStory.career,
+  });
   if (config.user_personas && Object.keys(config.user_personas).length > 0) {
-    console.log(`[启动] 已启用 ${Object.keys(config.user_personas).length} 条用户专属人设映射`);
+    log.info("startup.user_personas", { count: Object.keys(config.user_personas).length });
   }
 
   const sharedBase: SharedBase = {
@@ -558,7 +593,7 @@ async function main() {
   const decayed = applyGlobalDecay();
   const archived = archiveDecayedEpisodes();
   if (decayed > 0 || archived > 0) {
-    console.log(`[记忆] 衰减: ${decayed} | 归档: ${archived}`);
+    log.info("memory.decay", { decayed, archived });
   }
 
   // P2-a: 记忆代谢
@@ -566,14 +601,21 @@ async function main() {
     currentEmotion: 0, // 启动时情绪中性
     topicKeywords: [],
   });
-  for (const log of metabResult.logs) {
-    console.log(`  ${log}`);
+  for (const line of metabResult.logs) {
+    console.log(`  ${line}`);
   }
 
   if (!process.env.DEEPSEEK_API_KEY || process.env.DEEPSEEK_API_KEY === "sk-your-key-here") {
-    console.log("[错误] 未设置 DEEPSEEK_API_KEY");
+    log.error("startup.missing_api_key", { hint: "未设置 DEEPSEEK_API_KEY" });
     return;
   }
+
+  // ── 可观测性：/health + /cost（仅 127.0.0.1；启动失败不影响桥接）──
+  const healthServer: HealthServerHandle | null = startHealthServer({
+    port: config.health_port,
+    getWsConnections: () => getConnectionStatus().count,
+    getPendingReplies: () => countPendingReplies(),
+  });
 
   // ── WebSocket 服务端（安全加固）────────────────
   const PORT = config.one_bot_ws_port;
@@ -587,9 +629,10 @@ async function main() {
     verifyClient: (info, cb) => {
       const decision = verifyHandshake(info.req, PATH, TOKEN);
       if (!decision.ok) {
-        console.warn(
-          `[WS] 拒绝握手：${decision.reason} (path=${sanitizeLogValue(getRequestPathname(info.req))})`,
-        );
+        log.warn("ws.handshake_rejected", {
+          reason: decision.reason,
+          path: sanitizeLogValue(getRequestPathname(info.req)),
+        });
         cb(false, decision.statusCode, decision.reason);
         return;
       }
@@ -605,21 +648,28 @@ async function main() {
         : address
           ? `${address.address}:${address.port}`
           : `${HOST}:${PORT}`;
-    console.log(`[WS] 监听 ws://${display}${PATH}`);
-    console.log(`[WS] 等待 NapCatQQ 连接...${TOKEN ? "（已启用 token 校验）" : ""}`);
-    console.log("══════════════════════════════════════\n");
+    log.info("ws.listening", {
+      url: `ws://${display}${PATH}`,
+      token_enforced: Boolean(TOKEN),
+    });
+    log.info("ws.waiting_for_client");
+    if (process.stdout.isTTY) console.log("══════════════════════════════════════\n");
   });
 
   wss.on("error", (err: Error) => {
-    console.error(`[WS] 服务端错误: ${err.message}`);
+    log.error("ws.server_error", { error: err.message });
   });
 
   wss.on("connection", (ws: WebSocket, req) => {
     const clientPath = sanitizeLogValue(getRequestPathname(req));
     const wasReconnect = getConnectionCount() > 0;
-    console.log(`[WS] ${wasReconnect ? "重连" : "连接"}: ${clientPath} (活跃: ${getConnectionCount() + 1})`);
+    log.info("ws.connected", {
+      path: clientPath,
+      reconnect: wasReconnect,
+      active: getConnectionCount() + 1,
+    });
     if (wasReconnect) {
-      console.log("[WS] NapCat 已重连，会话和记忆保持不变");
+      log.info("ws.reconnected", { note: "会话和记忆保持不变" });
     }
     addConnection(ws);
 
@@ -649,14 +699,14 @@ async function main() {
     ws.on("close", () => {
       clearInterval(pingInterval);
       const remaining = getConnectionCount();
-      console.log(`[WS] 连接断开 (剩余活跃: ${remaining})`);
+      log.warn("ws.disconnected", { remaining });
       if (remaining === 0) {
         const status = getConnectionStatus();
-        console.log(`[WS] NapCat 已断开。等待重连... (上次连接: ${status.since ?? "未知"})`);
+        log.warn("ws.disconnected_waiting", { last_connected_at: status.since });
         // 延迟 30s 确认不是瞬时重连，再弹通知
         setTimeout(() => {
           if (getConnectionCount() === 0) {
-            console.log("[WS] 掉线超过 30s，请重新扫码登录 NapCatQQ");
+            log.error("ws.offline_timeout", { hint: "掉线超过 30s，请重新扫码登录 NapCatQQ" });
             notifyWindows("Karen 掉线了", "NapCatQQ 连接已断开，请重新扫码登录。");
           }
         }, 30000);
@@ -665,7 +715,7 @@ async function main() {
 
     ws.on("error", (err: Error) => {
       clearInterval(pingInterval);
-      console.error(`[WS] 连接错误: ${err.message}`);
+      log.error("ws.connection_error", { error: err.message });
     });
   });
 
@@ -693,8 +743,8 @@ async function main() {
         if (!result || !result.reply) continue;
 
         const userName = String(userId);
-        for (const log of result.logs) {
-          console.log(`  ${log}`);
+        for (const line of result.logs) {
+          console.log(`  ${line}`);
         }
 
         const pendingSnapshot = userPending.get(userId) ?? 0;
@@ -703,13 +753,13 @@ async function main() {
           // 中断检测：主动 burst 中用户回复了就停
           const nowPending = userPending.get(userId) ?? 0;
           if (nowPending > pendingSnapshot) {
-            console.log(`[主动] 用户 ${userName} 发来新消息，丢弃剩余`);
+            log.info("proactive.interrupted", { user_id: userId });
             state.interrupted = true;
             break;
           }
 
           sendPrivateMsg(userId, line.trim());
-          console.log(`[主动] -> ${userName}: ${textSummary(line.trim())}`);
+          log.info("proactive.sent", { user_id: userId, chars: charCount(line.trim()) });
           await sleep(1500 + Math.random() * 2000);
         }
         if (result.qqFace) {
@@ -721,12 +771,12 @@ async function main() {
         }
       } catch (err: unknown) {
         // 单个用户失败不影响其他（不打印正文）
-        console.error(`[主动] 用户 ${userId} 处理失败: ${errMessage(err)}`);
+        log.error("proactive.failed", { user_id: userId, error: errMessage(err) });
       }
     }
   }, HEARTBEAT_MS);
 
-  console.log(`[主动] 生活流心跳已启动 (每 ${HEARTBEAT_MS / 60000} 分钟)`);
+  log.info("proactive.heartbeat_started", { interval_min: HEARTBEAT_MS / 60000 });
 
   // ── 优雅退出 ──────────────────────────────────
 
@@ -734,11 +784,11 @@ async function main() {
   const cleanup = () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log("\n[退出] 正在清理...");
+    log.info("shutdown.start");
     clearInterval(statusInterval);
     clearInterval(heartbeatTimer);
     const cancelled = clearAllDeferredTimers();
-    if (cancelled > 0) console.log(`[退出] 已清理 ${cancelled} 个待补发回复 timer`);
+    if (cancelled > 0) log.info("shutdown.deferred_timers_cleared", { cancelled });
     for (const buf of userBuffers.values()) {
       if (buf.timer) clearTimeout(buf.timer);
       buf.timer = null;
@@ -746,6 +796,7 @@ async function main() {
     for (const ws of wss.clients) {
       try { ws.close(); } catch { /* 忽略关闭失败 */ }
     }
+    healthServer?.stop();
     closeVectorDb();
     wss.close();
     process.exit(0);
@@ -768,7 +819,7 @@ async function handleMessage(
 
     const apiResp = parseApiResponse(raw);
     if (apiResp && apiResp.retcode !== 0) {
-      console.log(`[API] 调用失败: retcode=${apiResp.retcode}`);
+      log.warn("api.call_failed", { retcode: apiResp.retcode });
       return;
     }
 
@@ -805,7 +856,7 @@ async function handleMessage(
     }
   } catch (err) {
     // 单条畸形事件/处理失败绝不拖垮进程
-    console.error(`[WS] 事件处理失败: ${errMessage(err)}`);
+    log.error("ws.event_failed", { error: errMessage(err) });
   }
 }
 
@@ -840,7 +891,7 @@ async function streamPrivateReply(params: {
     // 中断检测：用户发来新消息 → 丢弃剩余 burst
     if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
       state.interrupted = true;
-      console.log(`[中断] 用户 ${userName} 发来新消息，丢弃剩余`);
+      log.info("reply.interrupted", { user_id: userId, stage: "before_send" });
       return { sentCount, interrupted: true };
     }
 
@@ -854,11 +905,11 @@ async function streamPrivateReply(params: {
       await sleep(400 + Math.random() * 400);
       if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
         state.interrupted = true;
-        console.log(`[中断] 用户 ${userName} 在表情发送前发来新消息`);
+        log.info("reply.interrupted", { user_id: userId, stage: "before_qqface" });
         return { sentCount, interrupted: true };
       }
       sendPrivateMsg(userId, asCqCode(frag.qqFace));
-      console.log(`[${logPrefix}] -> ${userName}: QQ 表情`);
+      log.info("reply.sent_qqface", { user_id: userId, deferred: logPrefix !== "回复" });
       sentCount++;
       break;
     }
@@ -871,13 +922,17 @@ async function streamPrivateReply(params: {
       await sleep(typingDelay);
       if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
         state.interrupted = true;
-        console.log(`[中断] 用户 ${userName} 在流中发来新消息`);
+        log.info("reply.interrupted", { user_id: userId, stage: "streaming" });
         return { sentCount, interrupted: true };
       }
     }
 
     sendPrivateMsg(userId, frag.text);
-    console.log(`[${logPrefix}] -> ${userName}: ${textSummary(frag.text)}`);
+    log.info("reply.sent", {
+      user_id: userId,
+      chars: charCount(frag.text),
+      deferred: logPrefix !== "回复",
+    });
     sentCount++;
   }
 
@@ -910,7 +965,7 @@ async function handlePrivateBatch(
       const desc = await describeImage(media.data.url);
       if (desc) {
         syntheticText = `[图片：${desc}]`;
-        console.log(`[Vision] 图片识别完成: ${textSummary(desc)}`);
+        log.info("vision.described", { chars: charCount(desc), source: "private" });
       }
     }
 
@@ -922,10 +977,10 @@ async function handlePrivateBatch(
       if (!quoted && media.data?.id) {
         const msgId = parseInt(media.data.id, 10);
         if (!isNaN(msgId)) {
-          console.log("[引用] NapCat 未附带原文，回查原消息...");
+          log.info("quote.refetch_start");
           quoted = await getMsgById(msgId);
           if (quoted) {
-            console.log(`[引用] 回查成功: ${textSummary(quoted)}`);
+            log.info("quote.refetch_ok", { chars: charCount(quoted) });
           }
         }
       }
@@ -954,7 +1009,7 @@ async function handlePrivateBatch(
     return;
   }
 
-  console.log(`[收到] ${userName} (${userId}): ${textSummary(text)}`);
+  log.info("message.received", { user_id: userId, chars: charCount(text) });
 
   if (!userStates.has(userId)) {
     evictStaleUsers();
@@ -962,7 +1017,7 @@ async function handlePrivateBatch(
     const st = await initConversation(persona, sharedBase.config);
     st.stickerMode = "qqface";
     userStates.set(userId, st);
-    console.log(`[会话] 新会话: ${userName} → ${persona.name}`);
+    log.info("session.created", { user_id: userId, persona: persona.name });
   }
 
   userLastActive.set(userId, Date.now());
@@ -971,7 +1026,7 @@ async function handlePrivateBatch(
   // 频率限制（放在门控/LLM 之前，省成本）
   const freqLimit = sharedBase.config.message_frequency_limit;
   if (!checkRateLimit(userId, freqLimit)) {
-    console.log(`[限速] 用户 ${userName} 超过频率限制 (${freqLimit}/分钟)，本轮不回复`);
+    log.warn("message.rate_limited", { user_id: userId, limit_per_minute: freqLimit });
     return;
   }
 
@@ -991,7 +1046,7 @@ async function handlePrivateBatch(
       );
     }
   } catch (err: unknown) {
-    console.error(`[错误] 用户 ${userName} 回复失败: ${errMessage(err)}`);
+    log.error("reply.failed", { user_id: userId, error: errMessage(err) });
     // 不发送「[系统] 消息发送失败」这类破坏人设的消息，只用一句人设内兜底
     try {
       sendPrivateMsg(userId, "……等我一下，马上回来。");
@@ -1024,7 +1079,7 @@ async function sendGroupReplies(
     if (i > 0) await sleep(delayMs);
 
     sendGroupMsg(groupId, line);
-    console.log(`[群聊回复] -> ${userName}(${userId}): ${textSummary(line)}`);
+    log.info("group.reply_sent", { group_id: groupId, user_id: userId, chars: charCount(line) });
     sent++;
   }
 
@@ -1064,12 +1119,12 @@ async function handleGroupMessage(
 
   // 检查 @她的那个人是否是她"认识"的
   if (!userStates.has(userId)) {
-    console.log(`[群聊] 忽略群 ${groupId} 中陌生人的 @（无单聊记录）`);
+    log.info("group.ignored_stranger", { group_id: groupId, user_id: userId });
     return;
   }
 
   const userName = sanitizeLogValue(event.sender?.card || event.sender?.nickname || String(userId));
-  console.log(`[群聊] ${userName}(${userId}) 在群 ${groupId} 中 @了她`);
+  log.info("group.mentioned", { group_id: groupId, user_id: userId });
 
   // 图片识别
   const media = detectMedia(event as unknown as PrivateMessageEvent);
@@ -1078,7 +1133,7 @@ async function handleGroupMessage(
     const desc = await describeImage(media.data.url);
     if (desc) {
       finalText = `[图片：${desc}] ${text}`;
-      console.log(`[Vision] 群聊图片识别完成: ${textSummary(desc)}`);
+      log.info("vision.described", { chars: charCount(desc), source: "group" });
     }
   }
 
@@ -1088,7 +1143,7 @@ async function handleGroupMessage(
   try {
     // P0 修复：await + catch，畸形事件/LLM 失败不再产生 unhandled rejection
     const result = await processMessage(state, finalText);
-    for (const log of result.logs) console.log(`  ${log}`);
+    for (const line of result.logs) console.log(`  ${line}`);
 
     // 消息门判定晚点回
     if (result.deferred) {
@@ -1103,22 +1158,22 @@ async function handleGroupMessage(
     // 不发 Unsplash 照片到群里——那是私聊专属
     await sendGroupReplies(groupId, userId, userName, result);
   } catch (err: unknown) {
-    console.log(`[群聊错误] ${errMessage(err)}`);
+    log.error("group.failed", { group_id: groupId, user_id: userId, error: errMessage(err) });
   }
 }
 
 // ── 进程级兜底 ──────────────────────────────────
 
 process.on("unhandledRejection", (reason) => {
-  console.error(`[兜底] 未处理的 Promise 拒绝: ${errMessage(reason)}`);
+  log.error("process.unhandled_rejection", { error: errMessage(reason) });
 });
 
 process.on("uncaughtException", (err) => {
   // 记录后保持进程存活：一条畸形事件/一次失败调用不该让 QQ 桥接整体掉线
-  console.error(`[兜底] 未捕获异常: ${errMessage(err)}`);
+  log.error("process.uncaught_exception", { error: errMessage(err) });
 });
 
 main().catch((err) => {
-  console.error("[致命错误]", errMessage(err));
+  log.error("process.fatal", { error: errMessage(err) });
   process.exit(1);
 });
