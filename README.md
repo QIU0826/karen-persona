@@ -40,7 +40,7 @@
 
 | 项目 | 说明 | 必需？ |
 |---|---|---|
-| Node.js 22+ | [nodejs.org](https://nodejs.org) 下载 LTS。`package.json` 的 `engines` 要求 `>=22` | ✅ |
+| Node.js 22.12+ | [nodejs.org](https://nodejs.org) 下载 LTS。`package.json` 的 `engines` 要求 `>=22.12`（better-sqlite3 13 使用 N-API 预编译包） | ✅ |
 | npm（随 Node 安装） | 仓库只跟踪 `package-lock.json`，CI 使用 `npm ci`；pnpm 仅本地开发可选（不提交 pnpm-lock） | ✅ |
 | DeepSeek API Key | [platform.deepseek.com](https://platform.deepseek.com) 创建；没有 Key 无法对话（新用户额度以平台当前政策为准） | ✅ |
 | QQ 小号 | 单独注册，用于 NapCatQQ 登录 | 仅 QQ 模式 |
@@ -54,7 +54,7 @@ npm install
 # 可选：pnpm install（仅本地开发；仓库只跟踪 package-lock.json）
 ```
 
-> `better-sqlite3` 在 Node 22 上通常有预编译包；如果 `npm install` 报 C++ 编译错误，安装 [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)（勾选「C++ 桌面开发工作负载」）后重试。
+> `better-sqlite3` 13 已内置 Windows/macOS/Linux 的 N-API 预编译模块（`prebuilds/`），正常 `npm install` **无需 C++ 编译工具链**。若安装的是更老版本才需要 VS Build Tools。
 
 ### 2. 配置
 
@@ -159,7 +159,7 @@ npm run dev
 | 主动发图 | ✅ | 亲密度/情绪/概率门控；有 `UNSPLASH_ACCESS_KEY` 走 Unsplash 搜索，无 Key 用本地 7 张授权图库兜底；QQ 私聊 base64 发送配文+图片 |
 | 本地 Web 控制台 | ✅ | `http://127.0.0.1:18082/`：聊天/记忆/关系时间线/状态成本四视图；只读、仅本机、可选 `web_token` |
 | 群聊 @ 回复 | 🚧 | 仅「@ 她 + 对方和她私聊过」才回复；不 @ 不回、不引用，与私聊共享状态 |
-| 微信桥接 | 🗺 | 仅 wechaty echo 桩，`npm run wechat` 不能正常聊天 |
+| 微信桥接 | 🗺 | 无依赖占位桩，`npm run wechat` 会明确提示走 QQ |
 | 消息门（睡眠/工作忙/回避话题等） | 🚧 | 基础判定可用；延迟回复会落库并在延迟到点自动补发（用户发新消息会取消待补发，M0 修复）；负面话题的回避行为仍然生硬 |
 | 语音消息 / TTS | 🗺 | 未实现，`[语音]` 仅占位 |
 | 撤回消息 | 🗺 | 暂无消费者 |
@@ -211,7 +211,7 @@ npm run dev
 | 健康检查 | ✅ | `GET http://127.0.0.1:18081/health`（仅本机；返回 ws/db/pending/成本/最近错误） |
 | 成本统计 | ✅ | `GET /cost` 7 日摘要；DeepSeek 峰谷价 + 缓存命中；仅主聊天路径（旁路未计入） |
 | PM2 守护 | ✅ | 改跑 `dist/bridge/qq.js`，部署前需 `npm run build` |
-| CI（GitHub Actions） | ✅ | push/PR：Node 22 + `npm ci` + typecheck + test |
+| CI（GitHub Actions） | ✅ | push/PR：Node 22 + `npm ci` + typecheck + test；**ubuntu / macOS / Windows 三平台矩阵** |
 | 环境体检 | ✅ | `npm run doctor` |
 | Docker | 🚧 | 提供 node:22-slim 多阶段镜像（非 root）；仅面向开发者/Linux，NapCat 仍需宿主机运行，未在所有平台验证 |
 | PM2 守护 | ✅ | `ecosystem.config.js`；日志目录需手动创建（见注释） |
@@ -345,7 +345,7 @@ karen-persona/
 │   ├── ai/            # AI 引擎（DeepSeek 路由、流式、视觉、Unsplash）
 │   ├── data/          # 记忆系统（SQLite 存储、RAG 检索、会话历史、路径解析）
 │   ├── pipeline/      # 管线编排器（orchestrator）
-│   ├── bridge/        # QQ 桥接（NapCat/OneBot 11）；wechaty 为微信桩
+│   ├── bridge/        # QQ 桥接（NapCat/OneBot 11）；微信桥接为无依赖占位
 │   ├── eval/          # 评估脚本与实验代码（无产品入口）—— 🚧
 │   ├── router/        # 消息路由实验代码（当前未被主路径引用）—— 💀
 │   ├── doctor.ts      # 环境体检
@@ -361,7 +361,7 @@ karen-persona/
 
 ## 技术栈
 
-贴纸素材：Twitter Twemoji（CC-BY 4.0）。Node.js 22+ · TypeScript 5.6 · DeepSeek V4.1 Flash / V4-Pro（对话 + 视觉 + JSON/Tools，flash 自动路由）· OpenWeatherMap（天气）· Unsplash（图库）· better-sqlite3（SQLite）· sqlite-vec（已引入，检索尚未使用）· NapCatQQ / OneBot 11（QQ 桥接）· wechaty（微信，仅桩）· vitest（测试）· GitHub Actions（CI）
+贴纸素材：Twitter Twemoji（CC-BY 4.0）。Node.js 22+ · TypeScript 5.6 · DeepSeek V4.1 Flash / V4-Pro（对话 + 视觉 + JSON/Tools，flash 自动路由）· OpenWeatherMap（天气）· Unsplash（图库）· better-sqlite3 13（SQLite，预编译跨平台）· sqlite-vec + FTS5（混合检索）· NapCatQQ / OneBot 11（QQ 桥接）· 微信桥接（无依赖占位，不在路线图）· vitest（测试）· GitHub Actions（CI）
 
 ---
 

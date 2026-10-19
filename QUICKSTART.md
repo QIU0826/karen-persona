@@ -6,7 +6,7 @@
 
 ## 你需要准备
 
-- **Node.js 22+**（[nodejs.org](https://nodejs.org) 下载 LTS）——`package.json` 的 `engines` 要求 `>=22`
+- **Node.js 22.12+**（[nodejs.org](https://nodejs.org) 下载 LTS）——`package.json` 的 `engines` 要求 `>=22.12`
 - **npm**（随 Node 安装；pnpm 仅本地开发可选）——仓库只跟踪 `package-lock.json`，CI 用 `npm ci`
 - **DeepSeek API Key**（[platform.deepseek.com](https://platform.deepseek.com) 创建；新用户额度以平台当前政策为准）——**必填**，没有 Key 无法对话
 - **一个 QQ 小号**（仅 QQ 模式需要，用于 NapCatQQ 登录，建议单独注册）

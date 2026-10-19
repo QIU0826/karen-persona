@@ -10,9 +10,14 @@ permissions:
   contents: read
 
 jobs:
+  # 三平台矩阵：macOS/Windows 用户是主要目标（原生 better-sqlite3 安装是否可用必须双端验证）
   check:
-    name: typecheck & test (Node 22)
-    runs-on: ubuntu-latest
+    name: typecheck & test (${{ matrix.os }} / Node 22)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       - name: Checkout

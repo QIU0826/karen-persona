@@ -13,17 +13,17 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 
 ## 技术栈（如实）
 
-- **运行时**：Node.js 22+（`engines: >=22`）、TypeScript 5.6（strict，NodeNext）、tsx 直跑 TS、vitest 4
+- **运行时**：Node.js 22.12+（`engines: >=22.12`；better-sqlite3 13 用 N-API 预编译）、TypeScript 5.6（strict，NodeNext）、tsx 直跑 TS、vitest 4（vitest 5 暂缓）
 - **对话模型**：DeepSeek V4.1 `deepseek-flash` / `deepseek-v4-pro`，按复杂度规则路由（真实主路径；`deepseek-v4-flash` 是仍可调用的旧别名）
 - **图片识别**：DeepSeek Flash 多模态（真实，用同一个 DEEPSEEK_API_KEY；先下载图片转 base64，兼容 NapCat 私有 URL；`detail=high`，截图逐字转述 ≤200 字）
 - **思考模式**：默认关闭（`thinking:{type:"disabled"}`）；不关闭时 reasoning 会吃掉 max_tokens 导致空回复（2026-10 实测修复）
-- **语义嵌入**：Qwen `text-embedding-v3` 代码已实现，**但未接入主路径**；当前实际使用字符 n-gram 哈希（`src/data/embedding.ts`）
-- **向量库**：`sqlite-vec` 已引入并建 `t2_vec` 表，**检索实际是 JS 层全量 JSON 解析 + 余弦**，未使用 sqlite-vec
-- **存储**：better-sqlite3（T1/T2 记忆）+ 会话 JSON + 人设 JSON/YAML
+- **语义嵌入**：Qwen `text-embedding-v3` 已接入写入/检索（双列不混比）；**需配置 Qwen Key 才启用**，无 Key 自动降级为字符 n-gram + FTS5 BM25 混合
+- **向量库**：`sqlite-vec` 已启用（`t2_vec`：cosine + persona/source/model metadata），并与 FTS5 中文 BM25 做 RRF 混合检索；JSON n-gram 作为降级路径
+- **存储**：better-sqlite3 13.0.3（T1/T2 记忆，内置跨平台预编译）+ 会话 JSON + 人设 JSON/YAML
 - **外部世界**：OpenWeatherMap（真实天气，可选）、时间感知（结构化标签）；网络热点是硬编码话题池
-- **桥接**：NapCatQQ（Windows 已验证 v4.18.4，官方最新 v4.18.38）+ OneBot 11 反向 WebSocket；macOS 原生 NapCat / Linux Docker 方案见 [docs/QQ_BRIDGE_CROSS_PLATFORM.md](docs/QQ_BRIDGE_CROSS_PLATFORM.md)；微信 = wechaty echo 桩（规划中）
-- **工程**：GitHub Actions CI（`npm ci` → typecheck → test）、`npm run doctor` 环境体检、结构化日志 + `/health` + 成本统计、Dockerfile（node:22-slim/非 root）、PM2（跑 dist 需先 build）
-- **不存在的**：TTS、图片生成（即梦）、真实语义向量检索、Web 控制台、多用户隔离
+- **桥接**：NapCatQQ（Windows 已验证 v4.18.4，官方最新 v4.18.38）+ OneBot 11 反向 WebSocket；macOS 原生 NapCat / Linux Docker 方案见 [docs/QQ_BRIDGE_CROSS_PLATFORM.md](docs/QQ_BRIDGE_CROSS_PLATFORM.md)；微信桥接 = 无依赖占位桩（不在近期路线图）
+- **工程**：GitHub Actions CI（ubuntu/macOS/Windows 三平台矩阵：`npm ci` → typecheck → test）、`npm run doctor` 环境体检、结构化日志 + `/health` + 成本统计、Dockerfile（node:22-slim/非 root）、PM2（跑 dist 需先 build）
+- **不存在的**：TTS、图片生成（即梦）、多用户隔离；语义检索需 Qwen Key；Web 控制台为只读 MVP
 
 ## 架构（十个域）与当前状态
 
@@ -31,14 +31,14 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 
 | # | 域 | 状态 | 现状与证据 |
 |---|---|---|---|
-| 1 | 消息桥接 `src/bridge` | ✅/🚧 | QQ 私聊流式回复可用（`qq.ts`）；群聊仅 @ + 私聊过的人（半成品）；M0 已加固：默认监听 `127.0.0.1`、token/path 校验、`ALLOWED_USERS` 白名单、CQ 注入转义与超长切分、message_id 去重、延迟回复落库补发、进程级异常兜底；`scripts/mock-onebot.mjs` 支持无 QQ 端到端联调；Windows 已实机验证，macOS 原生 NapCat/Docker 方案见 docs/QQ_BRIDGE_CROSS_PLATFORM.md（未实机验证）；微信仅 echo 桩 🗺 |
+| 1 | 消息桥接 `src/bridge` | ✅/🚧 | QQ 私聊流式回复可用（`qq.ts`）；群聊仅 @ + 私聊过的人（半成品）；M0 已加固：默认监听 `127.0.0.1`、token/path 校验、`ALLOWED_USERS` 白名单、CQ 注入转义与超长切分、message_id 去重、延迟回复落库补发、进程级异常兜底；`scripts/mock-onebot.mjs` 支持无 QQ 端到端联调；Windows/macOS 均已实机验证（macOS 原生 NapCat + 反向 WS）；微信仅无依赖占位 🗺 |
 | 2 | 消息路由 `src/router` | 💀/🚧 | `router/classifier.ts`、`router/session.ts` 未被主路径引用（死代码）；实际合并窗口在 `bridge/qq.ts`、复杂度分级在 `ai/router.ts` |
 | 3 | 响应管线 `src/pipeline` | 🚧 | 双管线：`processMessage`（完整，CLI/群聊）/ `processMessageStream`（精简，QQ 私聊）。M0 已统一门控上下文（`buildGateContext`）与延迟消息落库/补发；记忆写入与其余演化步骤的统一在 M1 继续 |
 | 4 | 人设引擎 `src/persona` | 🚧 | 六层 schema、校验器、Prompt 静态缓存 + 动态组装可用；未消费字段多（审计 2.3）；负债偿还、纠正层、社交分寸未闭环 |
 | 5 | 演化引擎 `src/evolution` | 🚧 | 基线漂移/因果链/叙事重构/进化日志代码存在，但多数未接 QQ 主路径、状态不持久化（重启归零） |
 | 6 | 冲动引擎 `src/impulse` | 🚧 | 消息门可用；延迟回复已在 M0 落库+补发；沉默弧线/tone 链/撤回仅有限生效 |
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
-| 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入未接线；TTS/即梦 🗺 |
+| 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入已接线（双列，需 Qwen Key 实跑）；TTS/即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | ✅/🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF）**、sqlite-vec 真正启用（cosine + metadata 过滤）、双列 embedding（ngram / semantic 不混比）、schema v2 幂等迁移；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；多用户隔离未完成 |
 | 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 35 个测试文件 / 462 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai 测试），`tsc --noEmit` 0 错误，CI 已接入；仍缺真实 QQ 集成测试与覆盖率；eval 多为实验代码、无产品入口，历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
@@ -61,8 +61,8 @@ npm run setup      # 交互式配置向导
 
 - **文档真话 pass**：README/QUICKSTART 按实际代码重写；隐私声明修正为「数据本地存储，但对话与图片会发给 DeepSeek（M1 起图片也走 DeepSeek Flash）」；删除「数据不上传」「语义嵌入主路径」「sqlite-vec 检索」「延迟回复已实现」「不同好友不同人设已生效」「133 tests」等不实/过时表述
 - **许可证**：新增 MIT `LICENSE`（© 2026 QIU0826）
-- **工程化**：`.github/workflows/ci.yml`（Node 22 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
-- **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 统一为 `>=22`
+- **工程化**：`.github/workflows/ci.yml`（Node 22 + ubuntu/macOS/Windows 三平台矩阵 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
+- **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 已收紧为 `>=22.12`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
 - **验证**：`npm run typecheck` 0 错误；`npm test` 35 文件 / 462 用例通过（审计基线为 11 文件 / 178 用例）
 
@@ -82,6 +82,7 @@ npm run setup      # 交互式配置向导
 - **步骤 4 表情/贴纸（2026-10-20 凌晨）**：入站 face/mface 不再丢弃，转成 `[表情：微笑]`/`[表情包：...]` 交给管线；新增 `src/impulse/stickers.ts` + `assets/stickers/`（11 个 Twemoji，CC-BY 4.0）：文字回复后按情绪/时段以 22% 概率顺手发本地贴纸（收到对方表情时 55%），5 分钟冷却，冲突未化解不发；CQ 白名单仅放行内部 base64 图片；私聊生效，群聊暂不支持。
 - **步骤 5 本地 Web 控制台（2026-10-20 凌晨）**：新增 `src/web/`（node:http，零新依赖）：单页只读四视图（聊天/记忆搜索+列表/关系时间线+herView/状态+健康+成本），深色移动端适配、5s 自动刷新可暂停；仅绑 127.0.0.1，默认 `web_port: 18082`，可选 `web_token`（`?token=` 或 `X-Web-Token`），CSP/no-store/HTML 转义；API：`/api/overview|session|memory|timeline|health|cost`。实测页面 200、API 正常。
 - **主动发图接通 QQ（2026-10-20 凌晨）**：`photoShare` 在流式路径也触发；有 `UNSPLASH_ACCESS_KEY` 走 Unsplash 搜索，无 Key 回退**本地 7 张授权图库**（`assets/photos`，Picsum/Unsplash License）；桥接下载/读文件转 base64 发送 CQ image；修掉「qqFace 后 break 导致发图 fragment 被丢弃」的 bug；测试期 config 可覆盖门槛/概率/冷却（`photo_share_*`），实测 E2E 收到配文+图片。
+- **0 号依赖升级（2026-10-20 凌晨）**：`better-sqlite3` 11.10 → **13.0.3**（改为内置 N-API 预编译，`npm install` 不再需要 C++ 构建工具，Windows/macOS 安装风险大幅下降）；`engines` 收紧 `>=22.12`；移除未使用的 `wechaty`（微信 echo 桩改为无依赖占位）与 `node-cron`（死依赖），依赖树从 ~446 个包降到 ~162 个；CI 改为 ubuntu/macOS/Windows 三平台矩阵；Node 22 下 `tsc` 0 错误、462 用例全绿、桥接/健康/Web 实测正常。**vitest 5 暂缓**（其依赖树引入 rolldown 平台包，安装解析过慢，后续单独升级）。
 - **问题记录**：真机联调问题与修复清单见 [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md)。
 
 ### 已知问题（M0 之后继续修）
@@ -100,7 +101,8 @@ npm run setup      # 交互式配置向导
 - Web 控制台只读、仅本机；token 在 URL query 可见（后续可改 fragment）；多人设搜索仍受 getCurrentPersona 单例约束
 - 语音 ASR、多用户隔离、合规项待做
 - 测试覆盖率低；无 lint/coverage
-- QQ 桥接跨平台验证不完整（Windows 已验，macOS 方案已文档化但未实机验证）；平台/封号风险是结构性风险
+- QQ 桥接跨平台验证不完整（Windows 曾验，macOS 已实机验证；CI 现已三平台跑单测，但真实 QQ 端到端仍只在 macOS 跑过）；平台/封号风险是结构性风险
+- 依赖：vitest 5 暂缓（rolldown 平台包解析慢）；`node-cron`/`wechaty` 已从依赖移除
 - 隐私合规缺口：无 AI 披露、年龄门、危机干预；QQ 桥接日志已脱敏（只打印长度/摘要），但 orchestrator 等其他模块仍可能打印消息片段
 
 ### 路线图
@@ -144,7 +146,7 @@ npm run setup      # 交互式配置向导
 3. **改动边界**：`data/`、`.env`、`config.yaml` 是运行时文件，不进仓库；不要手改 lock 文件；不提交密钥。
 4. **测试**：新增逻辑配套 vitest 单测；提交前 `npm run typecheck && npm test`。测试被 tsconfig 排除，类型问题需单独跑 typecheck。
 5. **不要基于死代码/未接线模块写宣称**：`router/*`、`data/state.ts`、`world/info-sphere.ts`、`impulse/trigger.ts`、`t2_vec`、`node-cron`、`downloadImageAsBase64`、`CategoryRAG`、`persona.md` 等。
-6. **平台约束**：QQ 桥接 Windows 已实机验证；macOS 按 docs/QQ_BRIDGE_CROSS_PLATFORM.md 的原生 NapCat 方案推进（未实机验证）；微信桥接是桩。
+6. **平台约束**：QQ 桥接 Windows/macOS 均已实机验证；微信桥接是无依赖占位桩。
 7. **阶段纪律**：M0 地基已固定（新装可用/不丢消息/安全/异常兜底）；M1 优先「状态持久化 → 关系成长 → 演化可见」，M2 才做产品化与 Web 控制台。
 
 ## 相关文档
