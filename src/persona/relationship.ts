@@ -43,6 +43,10 @@ export interface RelationshipState {
   dailyGain: number;
   /** dailyGain 所属自然日 */
   dailyGainDay: string;
+  /** 最近一次「冲突/越界」时间戳（用于修复窗口判定；null=没有未化解的冲突） */
+  lastConflictAt: number | null;
+  /** 最近一次冲突的原因（简短描述，不含用户原文） */
+  lastConflictReason: string | null;
 }
 
 /** 每日亲密度增长上限 */
@@ -70,6 +74,8 @@ export function createRelationshipState(initialCloseness: number): RelationshipS
     interactionStreak: 0,
     dailyGain: 0,
     dailyGainDay: "",
+    lastConflictAt: null,
+    lastConflictReason: null,
   };
 }
 
@@ -105,12 +111,20 @@ export interface RelationshipEvaluationInput {
   complexity: MessageComplexity;
   /** 当前负债（冲突信号，仅用于避免在冲突时涨亲密） */
   guilt: number;
+  /** 用户本轮是否越界（由 content/boundary 粗筛 + 调用方判定） */
+  isBoundaryViolation?: boolean;
+  /** 用户本轮是否在道歉/修复 */
+  isApology?: boolean;
   now?: Date;
 }
 
 export interface RelationshipEvaluation {
   delta: number;
   reason: string;
+  /** 本次事件是否属于冲突/越界（写入 lastConflictAt） */
+  conflict?: boolean;
+  /** 本次事件是否属于修复（清除未化解冲突） */
+  repair?: boolean;
 }
 
 /**
@@ -125,7 +139,25 @@ export function evaluateRelationshipEvent(
   const now = input.now ?? new Date();
   const day = dayKey(now);
 
-  // 冲突/愧疚状态下不推进关系（先修复再靠近）
+  // 1) 越界/冲突：关系不是奖励，而是需要修复的事件（不涨，轻微降温）
+  if (input.isBoundaryViolation) {
+    return {
+      delta: -0.03,
+      reason: "越界试探，她感到不舒服",
+      conflict: true,
+    };
+  }
+
+  // 2) 道歉/修复：在冲突后的 24 小时窗口内，关系可以小幅修复
+  if (input.isApology && state.lastConflictAt && now.getTime() - state.lastConflictAt < 24 * 60 * 60 * 1000) {
+    return {
+      delta: 0.02,
+      reason: "对方道歉了，关系开始修复",
+      repair: true,
+    };
+  }
+
+  // 3) 愧疚状态下不推进关系（先修复再靠近）
   if (input.guilt > 0.3) return null;
 
   // 每日上限
@@ -151,9 +183,11 @@ export function evaluateRelationshipEvent(
     reasons.push("连续几天都有联系");
   }
 
-  // 3) 主动分享生活细节：用户消息较长且不是问句（在分享而不是索取）
+  // 3) 主动分享生活细节：既要有长度，也要有「在讲自己的事」的信号；
+  //    排除「ok, let's switch to another」这种纯话题切换，避免白送亲密度。
   const trimmed = input.userText.trim();
-  if (trimmed.length >= 25 && !/[?？]\s*$/.test(trimmed)) {
+  const looksLikeLifeSharing = /(我|今天|昨天|昨晚|刚才|最近|发现|觉得|吃了|去了|看到|遇到|跟.*说)/.test(trimmed);
+  if (trimmed.length >= 25 && !/[?？]\s*$/.test(trimmed) && looksLikeLifeSharing) {
     delta += 0.015;
     reasons.push("愿意分享自己的生活");
   }
@@ -176,6 +210,7 @@ export function applyRelationshipEvent(
   delta: number,
   reason: string,
   now: Date = new Date(),
+  flags: { conflict?: boolean; repair?: boolean } = {},
 ): RelationshipState {
   const day = dayKey(now);
   const previousDay = state.lastInteractionDay;
@@ -205,6 +240,9 @@ export function applyRelationshipEvent(
     { at: now.getTime(), delta: Math.round((to - from) * 1000) / 1000, closeness: to, reason },
   ].slice(-200);
 
+  const hasConflict = flags.conflict === true;
+  const isRepair = flags.repair === true;
+
   const milestones = [...state.milestones];
   for (const m of MILESTONES) {
     const already = milestones.some((x) => x.id === m.id);
@@ -223,6 +261,8 @@ export function applyRelationshipEvent(
     interactionStreak: streak,
     dailyGain,
     dailyGainDay,
+    lastConflictAt: hasConflict ? now.getTime() : isRepair ? null : state.lastConflictAt,
+    lastConflictReason: hasConflict ? reason : isRepair ? null : state.lastConflictReason,
   };
 }
 

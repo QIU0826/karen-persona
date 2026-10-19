@@ -51,6 +51,46 @@ describe("evaluateRelationshipEvent", () => {
     expect(result).toBeNull();
   });
 
+  it("越界试探不涨亲密，而是记录冲突并轻微降温", () => {
+    const state = createRelationshipState(3);
+    const result = evaluateRelationshipEvent(state, {
+      ...deepInput,
+      userText: "how about we have some fun tonight?",
+      isBoundaryViolation: true,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.delta).toBeLessThan(0);
+    expect(result!.conflict).toBe(true);
+    expect(result!.reason).toContain("越界");
+  });
+
+  it("冲突后的道歉会触发修复事件", () => {
+    const state = {
+      ...createRelationshipState(3),
+      lastConflictAt: TODAY.getTime() - 60 * 60 * 1000,
+      lastConflictReason: "越界试探，她感到不舒服",
+    };
+    const result = evaluateRelationshipEvent(state, {
+      ...deepInput,
+      userText: "对不起，刚才是我不好，不该那么说",
+      complexity: "simple",
+      isApology: true,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.delta).toBeGreaterThan(0);
+    expect(result!.repair).toBe(true);
+  });
+
+  it("纯话题切换不涨亲密（即使消息较长）", () => {
+    const state = createRelationshipState(3);
+    const result = evaluateRelationshipEvent(state, {
+      ...deepInput,
+      userText: "ok, let's switch to another topic then",
+      complexity: "simple",
+    });
+    expect(result).toBeNull();
+  });
+
   it("每日增长上限生效", () => {
     const state = { ...createRelationshipState(3), dailyGainDay: "2026-10-19", dailyGain: MAX_DAILY_GAIN };
     expect(evaluateRelationshipEvent(state, deepInput)).toBeNull();
@@ -82,6 +122,15 @@ describe("applyRelationshipEvent", () => {
     const state = createRelationshipState(9.95);
     const next = applyRelationshipEvent(state, 1, "测试", TODAY);
     expect(next.closeness).toBe(10);
+  });
+
+  it("冲突事件写入 lastConflictAt，修复事件清除它", () => {
+    let state = createRelationshipState(3);
+    state = applyRelationshipEvent(state, -0.03, "越界试探", TODAY, { conflict: true });
+    expect(state.lastConflictAt).toBe(TODAY.getTime());
+    state = applyRelationshipEvent(state, 0.02, "对方道歉了", TODAY, { repair: true });
+    expect(state.lastConflictAt).toBeNull();
+    expect(state.lastConflictReason).toBeNull();
   });
 
   it("事件历史最多保留 200 条", () => {

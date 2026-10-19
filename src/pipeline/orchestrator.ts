@@ -104,6 +104,7 @@ import {
   createRelationshipState,
   type RelationshipState,
 } from "../persona/relationship.js";
+import { checkBoundary, isApology } from "../persona/boundary.js";
 
 // ── 会话状态 ──────────────────────────────────
 
@@ -450,6 +451,10 @@ export function buildGateContext(
     isQuickChat: trimmed.length <= 6 && /[\?？]/.test(trimmed),
     closeness: persona.relationship.closeness,
     dailyRhythm: persona.world.dailyRhythm as Array<{ time: string; activity: string }>,
+    quietHours: {
+      start: state.config.quiet_hours_start,
+      end: state.config.quiet_hours_end,
+    },
   };
 }
 
@@ -499,6 +504,19 @@ export async function refreshWeatherIfStale(state: ConversationState): Promise<v
 /** 合并附加上下文（保持拼接顺序稳定，便于排查） */
 function narrationContext(style: string, trending: string, interrupt: string, narrative: string): string {
   return style + trending + interrupt + narrative;
+}
+
+/** 未化解的冲突：给她的下一条回复一个「还没缓过来」的处境，而不是当没事发生 */
+function buildConflictNote(state: ConversationState): string {
+  const last = state.relationshipState.lastConflictAt;
+  if (!last) return "";
+  const hours = (Date.now() - last) / (60 * 60 * 1000);
+  if (hours > 24) return "";
+  return (
+    "\n## 你心里的疙瘩\n" +
+    "刚才对方的话让你不太舒服，这事还没过去。你可以保持距离、把话题岔开，" +
+    "或者在对方真诚道歉时稍微松动一点；不要假装什么都没发生。\n"
+  );
 }
 
 // ── M1-1/M1-2: 状态持久化与关系成长 ─────────────
@@ -553,12 +571,15 @@ export function updateRelationshipAfterTurn(
   const before = state.relationshipState.closeness;
   const beforeMilestones = state.relationshipState.milestones.length;
 
+  const boundary = checkBoundary(userInput);
   const evaluation = evaluateRelationshipEvent(state.relationshipState, {
     currentCloseness: state.relationshipState.closeness,
     userText: userInput,
     replyText,
     complexity,
     guilt: state.guiltState.guilt,
+    isBoundaryViolation: boundary.violation,
+    isApology: isApology(userInput),
     now,
   });
 
@@ -568,6 +589,7 @@ export function updateRelationshipAfterTurn(
       evaluation.delta,
       evaluation.reason,
       now,
+      { conflict: evaluation.conflict, repair: evaluation.repair },
     );
     const after = state.relationshipState.closeness;
     state.persona.relationship.closeness = after;
@@ -816,7 +838,12 @@ export async function processMessage(
   }
 
   // 结构化标签 + 风格参考 + RAG + 热点作为额外上下文
-  const fullSystem = systemPrompt + narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) + `\n${momentTag}`;
+  const conflictNote = buildConflictNote(state);
+  const fullSystem =
+    systemPrompt +
+    narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
+    conflictNote +
+    `\n${momentTag}`;
   const messages = buildChatMessages(session, fullSystem);
 
   // M. AI 回复（短期上下文 + 长期 RAG 上下文，均通过 ChatOptions 注入）
@@ -1103,7 +1130,7 @@ export async function* processMessageStream(
   const memories = retrieveRelevantMemories(userInput);
   const ragContext = buildRagContext(memories);
   const shortTermContext = buildShortTermContext(session);
-  const fullSystem = systemPrompt + interruptedNote + `\n${momentTag}`;
+  const fullSystem = systemPrompt + interruptedNote + buildConflictNote(state) + `\n${momentTag}`;
 
   // 构建消息列表
   const messages = buildChatMessages(session, fullSystem);
@@ -1355,6 +1382,10 @@ export async function processProactive(
     isQuickChat: false,
     closeness: persona.relationship.closeness,
     dailyRhythm: persona.world.dailyRhythm as Array<{ time: string; activity: string }>,
+    quietHours: {
+      start: config.quiet_hours_start,
+      end: config.quiet_hours_end,
+    },
   });
 
   if (gate.type === "delay") {

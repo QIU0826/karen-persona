@@ -18,6 +18,10 @@ function makeState(messages: Array<{ role: "user" | "assistant"; content: string
       world: { dailyRhythm: [] },
       relationship: { closeness: 3 },
     },
+    config: {
+      quiet_hours_start: 23,
+      quiet_hours_end: 7,
+    },
     emotionState: { vector: 0 },
     guiltState: { guilt: 0 },
     session: { messages },

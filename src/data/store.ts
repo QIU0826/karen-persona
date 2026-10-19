@@ -27,6 +27,10 @@ export interface AppConfig {
   one_bot_token?: string;
   /** QQ 用户白名单。空数组 = 允许全部（仅建议个人单用户阶段）。 */
   allowed_users: number[];
+  /** 免打扰起始小时（0-23，支持小数如 22.5；与 end 相等视为关闭免打扰）。 */
+  quiet_hours_start: number;
+  /** 免打扰结束小时（0-23，支持小数）。 */
+  quiet_hours_end: number;
 }
 
 /** 配置错误。消息面向用户，可直接打印。 */
@@ -257,6 +261,25 @@ function parseToken(value: unknown, source: string): string | undefined {
   return token === "" ? undefined : token;
 }
 
+/** 解析小时配置：支持 23、"23:30"、"22.5"，范围 0-24。 */
+function parseHourOption(value: unknown, source: string): number {
+  let hour: number;
+  if (typeof value === "number") {
+    hour = value;
+  } else if (typeof value === "string") {
+    const trimmed = value.trim();
+    const m = /^(\d{1,2})(?::(\d{1,2}))?$/.exec(trimmed);
+    if (!m) throw new ConfigError(`${source} 需要是 0-24 的小时，如 23 或 "23:30"（当前: ${JSON.stringify(value)}）`);
+    hour = Number(m[1]) + (m[2] ? Number(m[2]) / 60 : 0);
+  } else {
+    throw new ConfigError(`${source} 需要是 0-24 的小时，如 23 或 "23:30"（当前: ${JSON.stringify(value)}）`);
+  }
+  if (!Number.isFinite(hour) || hour < 0 || hour > 24) {
+    throw new ConfigError(`${source} 超出范围 0-24（当前: ${JSON.stringify(value)}）`);
+  }
+  return hour === 24 ? 0 : Math.round(hour * 100) / 100;
+}
+
 // ── 加载配置 ──────────────────────────────────
 
 export function loadConfig(): AppConfig {
@@ -318,6 +341,12 @@ export function loadConfig(): AppConfig {
 
   const userPersonas = parseUserPersonas(raw.user_personas);
 
+  // 免打扰时段：默认 23:00-07:00；start == end 表示关闭
+  const quietStartPicked = pickOption(raw, "quiet_hours_start", "QUIET_HOURS_START");
+  const quietHoursStart = quietStartPicked ? parseHourOption(quietStartPicked.value, quietStartPicked.source) : 23;
+  const quietEndPicked = pickOption(raw, "quiet_hours_end", "QUIET_HOURS_END");
+  const quietHoursEnd = quietEndPicked ? parseHourOption(quietEndPicked.value, quietEndPicked.source) : 7;
+
   return {
     persona,
     her_name: herName,
@@ -335,6 +364,8 @@ export function loadConfig(): AppConfig {
     one_bot_ws_path: oneBotWsPath,
     one_bot_token: oneBotToken,
     allowed_users: allowedUsers,
+    quiet_hours_start: quietHoursStart,
+    quiet_hours_end: quietHoursEnd,
   };
 }
 

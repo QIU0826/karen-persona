@@ -33,6 +33,12 @@ tags: []
 # 个人使用建议至少填自己的 QQ 号。
 allowed_users: []
 
+# === 免打扰时段（可选）===
+# 她在这个时段内收到消息会推迟到结束时间再回（默认 23:00-07:00）
+# start == end 表示关闭免打扰；支持 "23:30" 这样的写法
+quiet_hours_start: "23:00"
+quiet_hours_end: "07:00"
+
 # === 系统配置 ===
 message_frequency_limit: 10  # 每分钟最大自动回复条数（1-120，防封号）
 log_level: "info"            # debug / info / warn / error

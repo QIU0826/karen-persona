@@ -32,19 +32,45 @@ export interface GateContext {
   closeness: number;
   /** 她的日常作息（匹配当前时段活动） */
   dailyRhythm?: DailySlot[];
+  /** 免打扰时段（小时，支持小数；start === end 视为关闭） */
+  quietHours?: QuietHoursConfig;
+}
+
+/** 免打扰时段配置（24 小时制小数小时，如 23 与 7） */
+export interface QuietHoursConfig {
+  start: number;
+  end: number;
+}
+
+/** 当前小时是否落在免打扰时段内（支持跨午夜） */
+export function isQuietHour(hour: number, quiet?: QuietHoursConfig): boolean {
+  if (!quiet || quiet.start === quiet.end) return false;
+  const h = ((hour % 24) + 24) % 24;
+  return quiet.start < quiet.end
+    ? h >= quiet.start && h < quiet.end
+    : h >= quiet.start || h < quiet.end;
+}
+
+/** 距离免打扰结束还有多少毫秒 */
+function quietHoursRemainingMs(hour: number, quiet: QuietHoursConfig): number {
+  const remainder = ((quiet.end - hour + 24) % 24) * 60 * 60 * 1000;
+  return remainder > 0 ? remainder : 60 * 60 * 1000;
 }
 
 export function decideGate(ctx: GateContext): GateAction {
   const hour = ctx.currentHour;
   const busy = getBusyLevel(hour, ctx.dailyRhythm);
 
-  // 睡眠时间 → 延迟（不变）
-  if (hour >= 23 || hour < 7) {
-    return {
-      type: "delay",
-      reason: "太晚了，明天再回",
-      resumeAfterMs: (7 - hour + 24) % 24 * 3600000,
-    };
+  // 免打扰时段（默认 23:00-07:00，可通过 config.yaml 的 quiet_hours_start/end 配置）
+  if (ctx.quietHours || (hour >= 23 || hour < 7)) {
+    const quiet = ctx.quietHours ?? { start: 23, end: 7 };
+    if (isQuietHour(hour, quiet)) {
+      return {
+        type: "delay",
+        reason: "太晚了，明天再回",
+        resumeAfterMs: quietHoursRemainingMs(hour, quiet),
+      };
+    }
   }
 
   // 负债驱动的不回（不变）
