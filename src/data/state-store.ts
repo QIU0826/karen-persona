@@ -42,6 +42,14 @@ export interface PersistedCounters {
   interrupted: boolean;
 }
 
+/** 消息门裁决记录（/why 可解释；不含消息正文） */
+export interface PersistedGateRecord {
+  action: "reply" | "delay" | "silence";
+  reason: string;
+  at: number;
+  remainingMs?: number;
+}
+
 export interface PersistedPersonaState {
   version: number;
   personaId: string;
@@ -56,6 +64,8 @@ export interface PersistedPersonaState {
   relationship: RelationshipState;
   counters: PersistedCounters;
   weather: { raw: WeatherInfo; fetchedAt: number } | null;
+  lastGate: PersistedGateRecord | null;
+  proactivePaused: boolean;
 }
 
 function stateFilePath(personaId: string): string {
@@ -103,6 +113,8 @@ export function createPersistedPersonaState(personaId: string, initialCloseness 
       interrupted: false,
     },
     weather: null,
+    lastGate: null,
+    proactivePaused: false,
   };
 }
 
@@ -202,6 +214,21 @@ function normalize(raw: unknown, personaId: string, initialCloseness: number): P
     }
   }
 
+  let lastGate: PersistedGateRecord | null = null;
+  if (isRecord(raw.lastGate)) {
+    const action = raw.lastGate.action;
+    if (action === "reply" || action === "delay" || action === "silence") {
+      lastGate = {
+        action,
+        reason: str(raw.lastGate.reason, "") ?? "",
+        at: num(raw.lastGate.at, 0),
+        ...(typeof raw.lastGate.remainingMs === "number"
+          ? { remainingMs: raw.lastGate.remainingMs }
+          : {}),
+      };
+    }
+  }
+
   return {
     version: PERSONA_STATE_VERSION,
     personaId,
@@ -218,6 +245,8 @@ function normalize(raw: unknown, personaId: string, initialCloseness: number): P
     relationship,
     counters,
     weather,
+    lastGate,
+    proactivePaused: boolean(raw.proactivePaused, false),
   };
 }
 

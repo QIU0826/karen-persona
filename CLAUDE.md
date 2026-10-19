@@ -40,7 +40,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
 | 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入已接线（双列，需 Qwen Key 实跑）；TTS/即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | ✅/🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF）**、sqlite-vec 真正启用（cosine + metadata 过滤）、双列 embedding（ngram / semantic 不混比）、schema v2 幂等迁移；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；多用户隔离未完成 |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 35 个测试文件 / 462 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai 测试），`tsc --noEmit` 0 错误，CI 已接入；仍缺真实 QQ 集成测试与覆盖率；eval 多为实验代码、无产品入口，历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 37 个测试文件 / 471 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai 测试），`tsc --noEmit` 0 错误，CI 已接入；仍缺真实 QQ 集成测试与覆盖率；eval 多为实验代码、无产品入口，历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -64,7 +64,7 @@ npm run setup      # 交互式配置向导
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + ubuntu/macOS/Windows 三平台矩阵 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 已收紧为 `>=22.12`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm test` 35 文件 / 462 用例通过（审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm test` 37 文件 / 471 用例通过（审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -83,6 +83,7 @@ npm run setup      # 交互式配置向导
 - **步骤 5 本地 Web 控制台（2026-10-20 凌晨）**：新增 `src/web/`（node:http，零新依赖）：单页只读四视图（聊天/记忆搜索+列表/关系时间线+herView/状态+健康+成本），深色移动端适配、5s 自动刷新可暂停；仅绑 127.0.0.1，默认 `web_port: 18082`，可选 `web_token`（`?token=` 或 `X-Web-Token`），CSP/no-store/HTML 转义；API：`/api/overview|session|memory|timeline|health|cost`。实测页面 200、API 正常。
 - **主动发图接通 QQ（2026-10-20 凌晨）**：`photoShare` 在流式路径也触发；有 `UNSPLASH_ACCESS_KEY` 走 Unsplash 搜索，无 Key 回退**本地 7 张授权图库**（`assets/photos`，Picsum/Unsplash License）；桥接下载/读文件转 base64 发送 CQ image；修掉「qqFace 后 break 导致发图 fragment 被丢弃」的 bug；测试期 config 可覆盖门槛/概率/冷却（`photo_share_*`），实测 E2E 收到配文+图片。
 - **0 号依赖升级（2026-10-20 凌晨）**：`better-sqlite3` 11.10 → **13.0.3**（改为内置 N-API 预编译，`npm install` 不再需要 C++ 构建工具，Windows/macOS 安装风险大幅下降）；`engines` 收紧 `>=22.12`；移除未使用的 `wechaty`（微信 echo 桩改为无依赖占位）与 `node-cron`（死依赖），依赖树从 ~446 个包降到 ~162 个；CI 改为 ubuntu/macOS/Windows 三平台矩阵；Node 22 下 `tsc` 0 错误、462 用例全绿、桥接/健康/Web 实测正常。**vitest 5 暂缓**（其依赖树引入 rolldown 平台包，安装解析过慢，后续单独升级）。
+- **M1 治理与数据主权（2026-10-20 凌晨）**：新增 `src/commands/control.ts`（QQ/CLI 共用 `/why` 门控可解释、`/pause`/`/resume` 主动消息暂停、`/export` 记忆导出、`/stats`、`/help`）；`lastGate` 与 `proactivePaused` 写入持久化状态；心跳跳过暂停用户；新增 `src/data/user-export.ts` 导出会话+人格状态+T2 记忆为本地 JSON（600 权限）。测试 37 文件 / 471 用例全绿。
 - **问题记录**：真机联调问题与修复清单见 [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md)。
 
 ### 已知问题（M0 之后继续修）

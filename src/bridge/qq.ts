@@ -38,6 +38,7 @@ import {
   processMessageStream,
   processProactive,
   getStateSummary,
+  persistRuntimeState,
   type ConversationState,
   type PipelineResult,
 } from "../pipeline/orchestrator.js";
@@ -66,6 +67,8 @@ import {
   type CqCode,
 } from "./onebot.js";
 import { describeImage } from "../ai/vision.js";
+import { handleControlCommand } from "../commands/control.js";
+import { exportUserData } from "../data/user-export.js";
 import { pickSticker, toStickerCqCode } from "../impulse/stickers.js";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -760,6 +763,9 @@ async function main() {
 
     for (const [userId, state] of userStates) {
       try {
+        // /pause：暂停主动消息（用户主动发消息仍会正常回）
+        if (state.proactivePaused) continue;
+
         // 频率限制
         const freqLimit = sharedBase.config.message_frequency_limit;
         if (!checkRateLimit(userId, freqLimit)) continue;
@@ -1133,10 +1139,22 @@ async function handlePrivateBatch(
   );
 
   if (text.startsWith("/")) {
-    const state = userStates.get(userId);
-    if (text === "/stats" && state) {
-      const summary = getStateSummary(state);
-      sendPrivateMsg(userId, summary.join("\n"));
+    // 治理命令：/why /stats /pause /resume /export /help
+    if (!userStates.has(userId)) {
+      evictStaleUsers();
+      const persona = sharedBase.getPersona(userId);
+      const st = await initConversation(persona, sharedBase.config);
+      st.stickerMode = "qqface";
+      userStates.set(userId, st);
+    }
+    const state = userStates.get(userId)!;
+    const handled = await handleControlCommand(text, state, {
+      reply: (reply) => sendPrivateMsg(userId, reply),
+      persist: () => persistRuntimeState(state),
+      exportData: () => exportUserData(sharedBase.config.persona, state.persona.name),
+    });
+    if (!handled) {
+      sendPrivateMsg(userId, "看不懂这个指令。/help 看看能做什么。");
     }
     return;
   }

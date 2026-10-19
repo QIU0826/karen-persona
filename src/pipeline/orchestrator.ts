@@ -108,6 +108,36 @@ import { checkBoundary, isApology } from "../persona/boundary.js";
 
 // ── 会话状态 ──────────────────────────────────
 
+/** 最近一次消息门裁决（/why 用；只含动作与原因，不含消息正文） */
+export interface GateRecord {
+  action: "reply" | "delay" | "silence";
+  reason: string;
+  at: number;
+  /** 延迟回复时预计多久后补回（毫秒） */
+  remainingMs?: number;
+}
+
+/** 记录本轮消息门裁决，供 /why 解释（不落消息正文） */
+function recordGateDecision(state: ConversationState, gate: GateAction, opts: ProcessOptions): void {
+  let action: GateRecord["action"] = gate.type;
+  let reason: string;
+  if (opts.bypassGate) {
+    reason = "强制回复（延迟补发/连续沉默兜底）";
+  } else if (state.consecutiveSilences >= 3) {
+    reason = "连续沉默兜底：强制回复一次，避免一直不出现";
+  } else if (gate.type === "reply") {
+    reason = "正常回复";
+  } else {
+    reason = gate.reason;
+  }
+  state.lastGate = {
+    action,
+    reason,
+    at: Date.now(),
+    ...(gate.type === "delay" ? { remainingMs: gate.resumeAfterMs } : {}),
+  };
+}
+
 export interface ConversationState {
   persona: Persona;
   config: AppConfig;
@@ -169,6 +199,10 @@ export interface ConversationState {
   proactiveDay: string;
   /** M1-2: 关系状态（亲密度/事件/里程碑），持久化于 persona-state */
   relationshipState: RelationshipState;
+  /** M1-gov: 最近一次消息门裁决（供 /why 解释；持久化） */
+  lastGate: GateRecord | null;
+  /** M1-gov: 主动消息是否暂停（/pause），持久化 */
+  proactivePaused: boolean;
 }
 
 export interface PipelineResult {
@@ -289,6 +323,8 @@ export async function initConversation(persona: Persona, config: AppConfig): Pro
     proactiveCountToday: counters?.proactiveCountToday ?? 0,
     proactiveDay: counters?.proactiveDay ?? "",
     relationshipState,
+    lastGate: persisted?.lastGate ?? null,
+    proactivePaused: persisted?.proactivePaused ?? false,
   };
 }
 
@@ -554,6 +590,8 @@ export function persistRuntimeState(state: ConversationState): void {
         interrupted: state.interrupted,
       },
       weather: { raw: state.weatherPerception.raw, fetchedAt: state.weatherFetchedAt },
+      lastGate: state.lastGate,
+      proactivePaused: state.proactivePaused,
     };
     savePersonaState(snapshot);
   } catch (err) {

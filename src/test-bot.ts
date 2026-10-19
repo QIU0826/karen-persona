@@ -25,7 +25,10 @@ import {
   initConversation,
   processMessage,
   getStateSummary,
+  persistRuntimeState,
 } from "./pipeline/orchestrator.js";
+import { handleControlCommand } from "./commands/control.js";
+import { exportUserData } from "./data/user-export.js";
 import readline from "node:readline";
 
 /** 打印一轮结果（即时回复与延迟补回复共用） */
@@ -142,7 +145,8 @@ async function main() {
 
   console.log("══════════════════════════════════════");
   console.log(`  和 ${persona.name} 聊天`);
-  console.log("  /quit 退出  /stats 统计  /mood +0.1 调节情绪  /weather 天气");
+  console.log("  /quit 退出  /stats 统计  /why 解释上一轮  /pause 暂停主动消息  /resume 恢复");
+  console.log("  /export 导出记忆  /mood +0.1 调节情绪  /weather 天气");
   console.log("  /journal 她的日记  /timeline 关系时间线  /herview 她眼中的你  /evolution 她的变化");
   console.log("══════════════════════════════════════\n");
 
@@ -165,12 +169,14 @@ async function main() {
       continue;
     }
 
-    if (cmd === "/stats") {
-      const summary = getStateSummary(state);
-      console.log(`\n--- ${persona.name} 状态 ---`);
-      for (const line of summary) console.log(`  ${line}`);
-      console.log();
-      continue;
+    if (cmd.startsWith("/")) {
+      const handled = await handleControlCommand(cmd, state, {
+        reply: (text) => console.log(`\n${text}\n`),
+        persist: () => persistRuntimeState(state),
+        exportData: () => exportUserData(config.persona, persona.name),
+      });
+      if (handled) continue;
+      // 未识别指令继续走下面原有命令（/mood /weather /journal…）
     }
 
     if (cmd.startsWith("/mood")) {
