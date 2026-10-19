@@ -11,8 +11,9 @@
  * - 出站消息 CQ 转义 + 仅放行受控 qqFace + 按 QQ 长度上限切分（见 onebot.ts）；
  * - message_id LRU 去重；合并窗口处理期间的新消息全部重投不丢失；
  * - 群聊 handler await + catch；unhandledRejection / uncaughtException 兜底；
- * - 消费消息门的延迟回复（deferred）：setTimeout 到点后用 bypassGate 补发；
- *   新消息到达取消该用户待定 timer，退出时统一清理；
+ * - 消费消息门的延迟回复（deferred）：**排期持久化**到 SQLite（pending_replies），
+ *   进程重启/NapCat 重连后自动恢复并补发；失败按 60s×attempts 退避重试；
+ *   新消息到达取消该用户待发回复；退出时只清 timer，保留持久化记录；
  * - 日志只打印长度/摘要，不打印消息全文、token 或不必要的外部内容。
  */
 import "dotenv/config";
@@ -22,6 +23,14 @@ import type { Persona } from "../persona/loader.js";
 import { loadConfig, setLogLevel, debugLog } from "../data/store.js";
 import type { AppConfig } from "../data/store.js";
 import { applyGlobalDecay, archiveDecayedEpisodes, closeVectorDb } from "../data/vector.js";
+import {
+  cancelPendingReplies,
+  enqueuePendingReply,
+  listPendingReplies,
+  markPendingAttempt,
+  markPendingDone,
+  purgeFinishedReplies,
+} from "../data/pending-queue.js";
 import {
   initConversation,
   processMessage,
@@ -138,8 +147,8 @@ const userPending: Map<number, number> = new Map();
 const userMessageTimestamps = new Map<number, number[]>();
 /** message_id 去重（LRU） */
 const messageDedup = new MessageIdDedup(DEDUP_CAPACITY);
-/** 每个用户最多一个待补发的延迟回复 timer */
-const userDeferredTimers = new Map<number, ReturnType<typeof setTimeout>>();
+/** 每个用户最多一个待补发的延迟回复（timer + 持久化记录 id） */
+const userDeferredTimers = new Map<number, { timer: ReturnType<typeof setTimeout>; pendingId: number }>();
 
 // 静默忽略的非白名单账号（只统计数量，日志不落 QQ 号）
 let ignoredNonWhitelistedMessages = 0;
@@ -168,18 +177,22 @@ function reportIgnoredNonWhitelisted(): void {
 // ── 延迟回复（消息门 deferred）──────────────────
 
 function cancelDeferredTimer(userId: number, reason?: string): void {
-  const timer = userDeferredTimers.get(userId);
-  if (!timer) return;
-  clearTimeout(timer);
-  userDeferredTimers.delete(userId);
-  if (reason) {
+  const entry = userDeferredTimers.get(userId);
+  if (entry) {
+    clearTimeout(entry.timer);
+    userDeferredTimers.delete(userId);
+  }
+  // 即使内存里没有 timer（例如刚重启还没恢复），也要取消持久化记录
+  const cancelled = cancelPendingReplies("qq-private", String(userId), reason ?? "");
+  if (reason && (entry || cancelled > 0)) {
     console.log(`[消息门] 用户 ${userId} 的待补发回复已取消（${reason}）`);
   }
 }
 
+/** 退出时只清理内存 timer；持久化记录保留，下次启动恢复 */
 function clearAllDeferredTimers(): number {
   const count = userDeferredTimers.size;
-  for (const timer of userDeferredTimers.values()) clearTimeout(timer);
+  for (const entry of userDeferredTimers.values()) clearTimeout(entry.timer);
   userDeferredTimers.clear();
   return count;
 }
@@ -196,6 +209,8 @@ interface DeferredPrivateContext {
   text: string;
   state: ConversationState;
   sharedBase: SharedBase;
+  /** 持久化队列中的记录 id（恢复/重试时必需） */
+  pendingId?: number;
 }
 
 interface DeferredGroupContext {
@@ -213,21 +228,39 @@ function scheduleDeferredPrivateReply(ctx: DeferredPrivateContext, delayMs: numb
     console.warn(`[消息门] 收到无效延迟 ${String(delayMs)}ms，跳过补回复`);
     return;
   }
-  cancelDeferredTimer(ctx.userId);
+  // 同一用户只保留最新一条（与旧的内存 timer 语义一致），先取消旧记录
+  cancelDeferredTimer(ctx.userId, "重新排期");
+  const pendingId = enqueuePendingReply({
+    platform: "qq-private",
+    userId: String(ctx.userId),
+    userName: ctx.userName,
+    personaId: ctx.state.persona.name,
+    text: ctx.text,
+    dueAt: Date.now() + delay,
+  });
   console.log(
-    `[消息门] 用户 ${ctx.userName} 的消息晚点回：${Math.round(delay / 1000)}s 后补发（${textSummary(ctx.text)}）`,
+    `[消息门] 用户 ${ctx.userName} 的消息晚点回：${Math.round(delay / 1000)}s 后补发` +
+      `（${textSummary(ctx.text)}，已持久化 #${pendingId}）`,
   );
+  scheduleDeferredDelivery({ ...ctx, pendingId }, delay);
+}
+
+/** 安排一次投递（内存 timer）；timer 触发后从 map 移除并调用 deliver */
+function scheduleDeferredDelivery(ctx: DeferredPrivateContext, delayMs: number): void {
+  const wait = Math.max(MIN_DEFERRED_DELAY_MS, Math.round(delayMs));
   const timer = setTimeout(() => {
     userDeferredTimers.delete(ctx.userId);
     void deliverDeferredPrivateReply(ctx);
-  }, delay);
-  userDeferredTimers.set(ctx.userId, timer);
+  }, wait);
+  userDeferredTimers.set(ctx.userId, { timer, pendingId: ctx.pendingId ?? -1 });
 }
 
 async function deliverDeferredPrivateReply(ctx: DeferredPrivateContext): Promise<void> {
+  const pendingId = ctx.pendingId;
   // 用户状态被淘汰/重建时放弃，避免把回复写到旧状态上
   if (userStates.get(ctx.userId) !== ctx.state) {
     console.log(`[消息门] 用户 ${ctx.userName} 状态已变化，取消延迟补发`);
+    if (pendingId) markPendingDone(pendingId);
     return;
   }
   try {
@@ -242,13 +275,86 @@ async function deliverDeferredPrivateReply(ctx: DeferredPrivateContext): Promise
     if (outcome.deferredDelayMs !== undefined) {
       // bypassGate 下不应再被门控；不再排期，避免无限循环
       console.warn("[消息门] 延迟补发时仍被门控，已跳过");
+      if (pendingId) markPendingDone(pendingId);
       return;
     }
+    if (pendingId) markPendingDone(pendingId);
     if (outcome.sentCount === 0) {
       console.log(`[消息门] 延迟补发未产生回复（${ctx.userName}）`);
     }
   } catch (err) {
-    console.error(`[消息门] 延迟补发失败（${ctx.userName}）: ${errMessage(err)}`);
+    const msg = errMessage(err);
+    console.error(`[消息门] 延迟补发失败（${ctx.userName}）: ${msg}`);
+    if (pendingId) {
+      const retry = markPendingAttempt(pendingId, msg);
+      const retryDelay = Math.max(MIN_DEFERRED_DELAY_MS, retry.dueAt - Date.now());
+      console.log(
+        `[消息门] 已重新排期：第 ${retry.attempts} 次重试，${Math.round(retryDelay / 1000)}s 后`,
+      );
+      scheduleDeferredDelivery(ctx, retryDelay);
+    }
+  }
+}
+
+// ── 待补发队列恢复（进程重启 / NapCat 重连）────────
+
+let pendingRestoring = false;
+
+/**
+ * 从持久化队列恢复待补发回复。
+ * 在 NapCat 反向 WS 连上后调用（send 需要活跃连接）。
+ */
+async function restorePendingReplies(sharedBase: SharedBase): Promise<void> {
+  if (pendingRestoring) return;
+  pendingRestoring = true;
+  try {
+    const purged = purgeFinishedReplies();
+    if (purged > 0) debugLog(`[消息门] 清理已完成/已取消的延迟记录 ${purged} 条`);
+
+    const rows = listPendingReplies("qq-private");
+    if (rows.length === 0) return;
+
+    console.log(`[消息门] 发现 ${rows.length} 条待补发回复，开始恢复`);
+    for (const row of rows) {
+      const userId = Number(row.userId);
+      if (!Number.isFinite(userId)) {
+        markPendingDone(row.id);
+        continue;
+      }
+      if (!isAllowedUser(sharedBase, userId)) {
+        console.log("[消息门] 白名单已变化，取消一条待补发回复");
+        markPendingDone(row.id);
+        continue;
+      }
+      if (userDeferredTimers.has(userId)) continue;
+
+      let state = userStates.get(userId);
+      if (!state) {
+        const persona = sharedBase.getPersona(userId);
+        state = await initConversation(persona, sharedBase.config);
+        state.stickerMode = "qqface";
+        userStates.set(userId, state);
+      }
+      const wait = Math.max(2_000, row.dueAt - Date.now());
+      console.log(
+        `[消息门] 恢复待补发：用户 ${userId}，${Math.round(wait / 1000)}s 后补发（尝试 ${row.attempts} 次）`,
+      );
+      scheduleDeferredDelivery(
+        {
+          userId,
+          userName: row.userName || String(userId),
+          text: row.text,
+          state,
+          sharedBase,
+          pendingId: row.id,
+        },
+        wait,
+      );
+    }
+  } catch (err) {
+    console.error(`[消息门] 恢复待补发失败: ${errMessage(err)}`);
+  } finally {
+    pendingRestoring = false;
   }
 }
 
@@ -266,7 +372,8 @@ function scheduleDeferredGroupReply(ctx: DeferredGroupContext, delayMs: number):
     userDeferredTimers.delete(ctx.userId);
     void deliverDeferredGroupReply(ctx);
   }, delay);
-  userDeferredTimers.set(ctx.userId, timer);
+  // 群聊延迟暂不持久化（pendingId=-1）；与私聊共用「每用户一个 timer」的简化语义
+  userDeferredTimers.set(ctx.userId, { timer, pendingId: -1 });
 }
 
 async function deliverDeferredGroupReply(ctx: DeferredGroupContext): Promise<void> {
@@ -515,6 +622,9 @@ async function main() {
       console.log("[WS] NapCat 已重连，会话和记忆保持不变");
     }
     addConnection(ws);
+
+    // 恢复持久化的待补发回复（重启/重连后仍能兑现「晚点回」）
+    void restorePendingReplies(sharedBase);
 
     // 心跳：每 30s ping 一次，检测连接是否存活
     const pingInterval = setInterval(() => {
