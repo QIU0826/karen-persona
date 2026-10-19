@@ -36,6 +36,23 @@ export interface AppConfig {
    * 默认 18081；设为 0 关闭（不启动 HTTP 服务）。
    */
   health_port: number;
+  /**
+   * 本地 Web 控制台端口（**仅绑定 127.0.0.1**）。
+   * 默认 18082；设为 0 关闭（不启动 HTTP 服务）。
+   */
+  web_port: number;
+  /**
+   * Web 控制台访问 token（可选）。设置后所有请求必须携带 `?token=` 或
+   * `X-Web-Token` 头，否则 401；不设置时仅本机可访问（启动会告警）。
+   */
+  web_token?: string;
+  /**
+   * 主动发图调试覆盖（不设置则用人设 photoShare 里的值）：
+   * 亲密度门槛 / 概率（0-1） / 冷却分钟数。仅建议测试期使用。
+   */
+  photo_share_min_closeness?: number;
+  photo_share_probability?: number;
+  photo_share_cooldown_minutes?: number;
 }
 
 /** 配置错误。消息面向用户，可直接打印。 */
@@ -54,6 +71,8 @@ export const DEFAULT_ONE_BOT_WS_PATH = "/onebot/v11/ws";
 export const DEFAULT_MESSAGE_FREQUENCY_LIMIT = 10;
 /** /health 探活端口（默认 18081；0 = 关闭）。 */
 export const DEFAULT_HEALTH_PORT = 18081;
+/** 本地 Web 控制台端口（默认 18082；0 = 关闭）。 */
+export const DEFAULT_WEB_PORT = 18082;
 /** 每分钟消息数上限的合理范围（防封号） */
 const MIN_MESSAGE_FREQUENCY_LIMIT = 1;
 const MAX_MESSAGE_FREQUENCY_LIMIT = 120;
@@ -360,6 +379,30 @@ export function loadConfig(): AppConfig {
     ? parseIntegerOption(healthPortPicked.value, healthPortPicked.source, 0, 65535)
     : DEFAULT_HEALTH_PORT;
 
+  // 本地 Web 控制台：默认 18082，0 = 关闭；token 可选（设置后所有请求需鉴权）
+  const webPortPicked = pickOption(raw, "web_port", "WEB_PORT");
+  const webPort = webPortPicked
+    ? parseIntegerOption(webPortPicked.value, webPortPicked.source, 0, 65535)
+    : DEFAULT_WEB_PORT;
+  const webTokenPicked = pickOption(raw, "web_token", "WEB_TOKEN");
+  const webToken = webTokenPicked
+    ? parseToken(webTokenPicked.value, webTokenPicked.source)
+    : undefined;
+
+  // 主动发图调试覆盖（可选；不设置时用人设 photoShare 的值）
+  const photoMinClosenessPicked = pickOption(raw, "photo_share_min_closeness", "PHOTO_SHARE_MIN_CLOSENESS");
+  const photoShareMinCloseness = photoMinClosenessPicked
+    ? parseOptionalNumber(photoMinClosenessPicked.value, photoMinClosenessPicked.source, 0, 10)
+    : undefined;
+  const photoProbabilityPicked = pickOption(raw, "photo_share_probability", "PHOTO_SHARE_PROBABILITY");
+  const photoShareProbability = photoProbabilityPicked
+    ? parseOptionalNumber(photoProbabilityPicked.value, photoProbabilityPicked.source, 0, 1)
+    : undefined;
+  const photoCooldownPicked = pickOption(raw, "photo_share_cooldown_minutes", "PHOTO_SHARE_COOLDOWN_MINUTES");
+  const photoShareCooldownMinutes = photoCooldownPicked
+    ? parseOptionalNumber(photoCooldownPicked.value, photoCooldownPicked.source, 0, 1440)
+    : undefined;
+
   return {
     persona,
     her_name: herName,
@@ -380,7 +423,32 @@ export function loadConfig(): AppConfig {
     quiet_hours_start: quietHoursStart,
     quiet_hours_end: quietHoursEnd,
     health_port: healthPort,
+    web_port: webPort,
+    web_token: webToken,
+    photo_share_min_closeness: photoShareMinCloseness,
+    photo_share_probability: photoShareProbability,
+    photo_share_cooldown_minutes: photoShareCooldownMinutes,
   };
+}
+
+/**
+ * 解析可选浮点配置项（范围校验）；未设置时返回 undefined。
+ * 用于测试期覆盖主动发图概率/门槛等。
+ */
+function parseOptionalNumber(
+  value: unknown,
+  source: string,
+  min: number,
+  max: number,
+): number {
+  if (value === null || value === undefined || value === "") {
+    throw new ConfigError(`${source} 不能为空`);
+  }
+  const num = typeof value === "number" ? value : Number(String(value).trim());
+  if (!Number.isFinite(num) || num < min || num > max) {
+    throw new ConfigError(`${source} 必须是 ${min}-${max} 之间的数字（当前: ${String(value)}）`);
+  }
+  return num;
 }
 
 // ── 日志级别 ──────────────────────────────────

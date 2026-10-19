@@ -10,6 +10,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { assetDir } from "../data/paths.js";
 
 export interface StickerDef {
   /** 稳定 id（日志用） */
@@ -20,7 +21,7 @@ export interface StickerDef {
   tags: string[];
 }
 
-const STICKER_DIR = path.resolve("assets/stickers");
+const STICKER_DIR = assetDir("assets/stickers");
 
 /** 内置贴纸目录（后续可按人设扩展为 persona 级贴纸包） */
 const STICKERS: StickerDef[] = [

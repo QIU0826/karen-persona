@@ -176,8 +176,10 @@ export interface PipelineResult {
   logs: string[];
   /** P1-d: QQ 表情 CQ 码（附加消息，在 reply 之后发送） */
   qqFace?: string;
-  /** P2-c: Unsplash 主动发图 URL */
+  /** P2-c: 主动发图 URL（Unsplash）或本地图库路径 */
   imageUrl?: string;
+  /** P2-c: 本地兜底图片绝对路径（无 Unsplash Key 时） */
+  imageFile?: string;
   /** P2-c: 配图文字 */
   imageCaption?: string;
   /** 消息门判定「晚点回」：调用方应在 delayMs 后以 {bypassGate:true, skipUserPersist:true} 重新调用 */
@@ -964,13 +966,15 @@ export async function processMessage(
 
   // S. P2-c: Unsplash 主动发图（基于她刚说的话 + 情绪 + 视觉人格生成 query）
   let imageUrl: string | undefined;
+  let imageFile: string | undefined;
   let imageCaption: string | undefined;
   try {
     const photo = await trySharePhoto(state, rawReply);
     if (photo) {
       imageUrl = photo.imageUrl;
+      imageFile = photo.imageFile;
       imageCaption = photo.caption;
-      logs.push(`[Unsplash] 主动分享: ${imageCaption}`);
+      logs.push(`[发图] 主动分享(${photo.source}): ${imageCaption}`);
     }
   } catch (err: unknown) {
     // 发图失败不影响主回复
@@ -980,7 +984,7 @@ export async function processMessage(
   state.consecutiveSilences = 0;
   logs.push(...updateRelationshipAfterTurn(state, userInput, rawReply, complexity));
   persistRuntimeState(state);
-  return { reply, logs, qqFace: rendered.qqFace, imageUrl, imageCaption };
+  return { reply, logs, qqFace: rendered.qqFace, imageUrl, imageFile, imageCaption };
 }
 
 // ── P1: 主动消息（生活流触发 + 沉默保温兜底）────
@@ -1044,6 +1048,11 @@ export interface StreamFragment {
   text: string;
   /** QQ 表情 CQ 码（流结束后单独发送，仅最后一条 fragment 可能有值） */
   qqFace?: string;
+  /**
+   * 主动发图（流式路径）：url = Unsplash 图；file = 本地兜底图绝对路径；
+   * caption 为配文（桥接负责先发配文再发图）。
+   */
+  image?: { url?: string; file?: string; caption?: string };
   /** 消息门判定「晚点回」：调用方应在 delayMs 后以 {bypassGate:true, skipUserPersist:true} 重新调用 */
   deferred?: { delayMs: number };
 }
@@ -1215,6 +1224,22 @@ export async function* processMessageStream(
 
     if (rendered.qqFace) {
       yield { text: "", qqFace: rendered.qqFace };
+    }
+
+    // 主动发图：流式路径也触发（无 Key 时本地图库兜底；超时/失败静默跳过）
+    try {
+      const photo = await Promise.race([
+        trySharePhoto(state, fullReply).catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+      ]);
+      if (photo) {
+        yield {
+          text: "",
+          image: { url: photo.imageUrl, file: photo.imageFile, caption: photo.caption },
+        };
+      }
+    } catch {
+      // 发图失败不影响文字回复
     }
   } finally {
     // 无论正常结束还是被消费方中断（break），都持久化「实际已发送」的内容，避免记忆丢失

@@ -37,3 +37,26 @@ export function safeFileStem(id: string): string {
   const cleaned = id.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim();
   return cleaned.length > 0 ? cleaned.slice(0, 80) : "unknown";
 }
+
+/**
+ * 项目资源目录（assets/...）绝对路径。
+ *
+ * 不依赖 cwd：优先从入口脚本（process.argv[1]，如 src/bridge/qq.ts / dist/bridge/qq.js）
+ * 向上逐级查找；回退 cwd。用于贴纸、本地图库等随仓库分发的静态资源。
+ */
+export function assetDir(relative: string): string {
+  const candidates: string[] = [];
+  const entry = process.argv[1];
+  if (entry) {
+    let dir = path.dirname(path.resolve(entry));
+    for (let i = 0; i < 6; i++) {
+      candidates.push(path.resolve(dir, relative));
+      dir = path.dirname(dir);
+    }
+  }
+  candidates.push(path.resolve(process.cwd(), relative));
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return candidates[0];
+}

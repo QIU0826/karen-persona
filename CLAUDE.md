@@ -40,7 +40,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
 | 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入未接线；TTS/即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | ✅/🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF）**、sqlite-vec 真正启用（cosine + metadata 过滤）、双列 embedding（ngram / semantic 不混比）、schema v2 幂等迁移；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；多用户隔离未完成 |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 31 个测试文件 / 429 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai 测试），`tsc --noEmit` 0 错误，CI 已接入；仍缺真实 QQ 集成测试与覆盖率；eval 多为实验代码、无产品入口，历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 35 个测试文件 / 462 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai 测试），`tsc --noEmit` 0 错误，CI 已接入；仍缺真实 QQ 集成测试与覆盖率；eval 多为实验代码、无产品入口，历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -64,7 +64,7 @@ npm run setup      # 交互式配置向导
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 统一为 `>=22`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm test` 31 文件 / 429 用例通过（审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm test` 35 文件 / 462 用例通过（审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -80,6 +80,8 @@ npm run setup      # 交互式配置向导
 - **M1-7 记忆检索 P0**：`src/data/embedding.ts` 统一 embedder（Qwen text-embedding-v3 + ngram 降级，修 768 截断 bug）；`vector.ts` schema v2（embedding_model/semantic_embedding/semantic_model、FTS5 中文 BM25、sqlite-vec vec0 cosine + metadata）；`retriever.ts` RRF 混合 + 阈值/去重/source 过滤 + confidence 修正；orchestrator 仅 2 处改 async 检索。真实库 22 条记忆迁移验证通过（v2、FTS 22 行、幂等）。
 - **步骤 3 可观测最小闭环（2026-10-20 凌晨）**：零新依赖新增 `src/obs/`——结构化脱敏日志（非 TTY JSON lines / TTY 可读，敏感字段 `[redacted N chars]`）、SQLite `llm_usage` 成本统计（DeepSeek 峰谷价/缓存命中/flash-pro）、`GET /health` + `/cost`（仅绑 127.0.0.1，默认 18081，可配 0=关）、PM2 改跑 `dist/bridge/qq.js`。实测 `/health` 200、`/cost` 单次调用成本 ¥0.000033 正确入账。
 - **步骤 4 表情/贴纸（2026-10-20 凌晨）**：入站 face/mface 不再丢弃，转成 `[表情：微笑]`/`[表情包：...]` 交给管线；新增 `src/impulse/stickers.ts` + `assets/stickers/`（11 个 Twemoji，CC-BY 4.0）：文字回复后按情绪/时段以 22% 概率顺手发本地贴纸（收到对方表情时 55%），5 分钟冷却，冲突未化解不发；CQ 白名单仅放行内部 base64 图片；私聊生效，群聊暂不支持。
+- **步骤 5 本地 Web 控制台（2026-10-20 凌晨）**：新增 `src/web/`（node:http，零新依赖）：单页只读四视图（聊天/记忆搜索+列表/关系时间线+herView/状态+健康+成本），深色移动端适配、5s 自动刷新可暂停；仅绑 127.0.0.1，默认 `web_port: 18082`，可选 `web_token`（`?token=` 或 `X-Web-Token`），CSP/no-store/HTML 转义；API：`/api/overview|session|memory|timeline|health|cost`。实测页面 200、API 正常。
+- **主动发图接通 QQ（2026-10-20 凌晨）**：`photoShare` 在流式路径也触发；有 `UNSPLASH_ACCESS_KEY` 走 Unsplash 搜索，无 Key 回退**本地 7 张授权图库**（`assets/photos`，Picsum/Unsplash License）；桥接下载/读文件转 base64 发送 CQ image；修掉「qqFace 后 break 导致发图 fragment 被丢弃」的 bug；测试期 config 可覆盖门槛/概率/冷却（`photo_share_*`），实测 E2E 收到配文+图片。
 - **问题记录**：真机联调问题与修复清单见 [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md)。
 
 ### 已知问题（M0 之后继续修）
@@ -93,7 +95,10 @@ npm run setup      # 交互式配置向导
 - 成本统计仅覆盖 chat/chatStream 主路径；旁路 LLM（独白/T3/视觉等）未计入，`cost_today` 是下限
 - 结构化日志只覆盖 qq/chat 关键链路，orchestrator/evolution 等仍有 console.log（可能含派生文本）
 - 节假日按工作日近似计算峰谷价，可能高估成本
-- 贴纸仅 11 个内置 Twemoji、仅私聊；出站 mface/收藏表情未做；语音 ASR、Web 控制台待做
+- 贴纸仅 11 个内置 Twemoji、仅私聊；出站 mface/收藏表情未做
+- 发图仅私聊、仅 7 张本地兜底图（Unsplash Key 未配置）；群聊发图未接；夜间发图不再单独限制（由免打扰门控）
+- Web 控制台只读、仅本机；token 在 URL query 可见（后续可改 fragment）；多人设搜索仍受 getCurrentPersona 单例约束
+- 语音 ASR、多用户隔离、合规项待做
 - 测试覆盖率低；无 lint/coverage
 - QQ 桥接跨平台验证不完整（Windows 已验，macOS 方案已文档化但未实机验证）；平台/封号风险是结构性风险
 - 隐私合规缺口：无 AI 披露、年龄门、危机干预；QQ 桥接日志已脱敏（只打印长度/摘要），但 orchestrator 等其他模块仍可能打印消息片段

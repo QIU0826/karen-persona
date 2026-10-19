@@ -68,8 +68,10 @@ import {
 import { describeImage } from "../ai/vision.js";
 import { pickSticker, toStickerCqCode } from "../impulse/stickers.js";
 import { execSync } from "node:child_process";
+import fs from "node:fs";
 import { createLogger, configureLogger } from "../obs/logger.js";
 import { startHealthServer, type HealthServerHandle } from "../obs/health-server.js";
+import { startWebServer, type WebServerHandle } from "../web/server.js";
 
 // ── 常量 ────────────────────────────────────────
 
@@ -629,6 +631,17 @@ async function main() {
     getPendingReplies: () => countPendingReplies(),
   });
 
+  // ── 本地 Web 控制台（只读四视图；仅 127.0.0.1；失败不影响桥接）──
+  const webServer: WebServerHandle | null = startWebServer({
+    port: config.web_port,
+    token: config.web_token,
+    personaId: config.persona,
+    personaName: defaultPersona.name,
+    initialCloseness: defaultPersona.relationship.closeness,
+    getWsConnections: () => getConnectionStatus().count,
+    getPendingReplies: () => countPendingReplies(),
+  });
+
   // ── WebSocket 服务端（安全加固）────────────────
   const PORT = config.one_bot_ws_port;
   const PATH = config.one_bot_ws_path;
@@ -809,6 +822,7 @@ async function main() {
       try { ws.close(); } catch { /* 忽略关闭失败 */ }
     }
     healthServer?.stop();
+    webServer?.stop();
     closeVectorDb();
     wss.close();
     process.exit(0);
@@ -884,6 +898,63 @@ interface PrivateStreamOutcome {
  * 把流式回复逐条发给用户；返回是否被门控延迟/被新消息打断。
  * deferred 时不发送任何内容，由调用方排期补发。
  */
+/** 出站图片大小上限（base64 后约 6.7MB，留余量） */
+const MAX_OUTBOUND_PHOTO_BYTES = 5 * 1024 * 1024;
+
+interface OutboundPhoto {
+  url?: string;
+  file?: string;
+  caption?: string;
+}
+
+/**
+ * 发送主动分享的图片：先发配文、再发图片（本地文件读 base64 / URL 下载后 base64）。
+ * 失败静默降级，不影响文字回复；日志不落正文。
+ */
+async function sendPhotoToUser(userId: number, photo: OutboundPhoto): Promise<void> {
+  try {
+    let base64: string | null = null;
+    let source = "unknown";
+
+    if (photo.file) {
+      const buffer = fs.readFileSync(photo.file);
+      if (buffer.length > 0 && buffer.length <= MAX_OUTBOUND_PHOTO_BYTES) {
+        base64 = buffer.toString("base64");
+        source = "local";
+      }
+    } else if (photo.url) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10_000);
+      try {
+        const response = await fetch(photo.url, { signal: controller.signal });
+        if (response.ok) {
+          const buffer = Buffer.from(await response.arrayBuffer());
+          if (buffer.length > 0 && buffer.length <= MAX_OUTBOUND_PHOTO_BYTES) {
+            base64 = buffer.toString("base64");
+            source = "url";
+          }
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    if (!base64) {
+      log.warn("photo.outbound_failed", { user_id: userId, source });
+      return;
+    }
+
+    if (photo.caption) {
+      sendPrivateMsg(userId, photo.caption);
+      await sleep(700);
+    }
+    sendPrivateMsg(userId, asCqCode(`[CQ:image,file=base64://${base64}]`));
+    log.info("photo.sent", { user_id: userId, source, bytes: Math.round((base64.length * 3) / 4) });
+  } catch (err: unknown) {
+    log.warn("photo.send_error", { user_id: userId, error: errMessage(err) });
+  }
+}
+
 async function streamPrivateReply(params: {
   state: ConversationState;
   text: string;
@@ -923,7 +994,13 @@ async function streamPrivateReply(params: {
       sendPrivateMsg(userId, asCqCode(frag.qqFace));
       log.info("reply.sent_qqface", { user_id: userId, deferred: logPrefix !== "回复" });
       sentCount++;
-      break;
+      // 不能 break：qqFace 之后还可能跟主动发图 fragment（本地图库/Unsplash）
+      continue;
+    }
+
+    if (frag.image) {
+      await sendPhotoToUser(userId, frag.image);
+      continue;
     }
 
     if (!frag.text) continue;
