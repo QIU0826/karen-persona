@@ -39,7 +39,11 @@ describe("vector 数据层（全新目录）", () => {
     );
     expect(cols).toContain("embedding");
     expect(cols).toContain("persona_id");
-    expect(Number(db.pragma("user_version", { simple: true }))).toBe(1);
+    // M1-7 schema v2：新增 embedding_model / semantic_embedding / semantic_model + FTS/vec 索引
+    expect(cols).toContain("embedding_model");
+    expect(cols).toContain("semantic_embedding");
+    expect(cols).toContain("semantic_model");
+    expect(Number(db.pragma("user_version", { simple: true }))).toBe(2);
     m.closeVectorDb();
   });
 

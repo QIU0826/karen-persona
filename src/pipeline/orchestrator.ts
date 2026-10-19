@@ -6,7 +6,7 @@ import { decideGate, getBusyLevel, type GateAction, type GateContext } from "../
 import { insertT1Snapshot, insertEpisode, setCurrentPersona, applyGlobalDecay, archiveDecayedEpisodes, closeVectorDb, backfillEpisodeVectors } from "../data/vector.js";
 import { generateEmbedding } from "../data/embedding.js";
 import {
-  retrieveRelevantMemories,
+  retrieveRelevantMemoriesAsync,
   buildRagContext,
   storeConversationEpisode,
 } from "../data/retriever.js";
@@ -709,8 +709,8 @@ export async function processMessage(
     logs.push(`[纠正] 应用已有纠正记录`);
   }
 
-  // H. T2 记忆检索
-  const memories = retrieveRelevantMemories(userInput);
+  // H. T2 记忆检索（M1-7：有 Qwen Key 走语义混合检索，无 Key/异常自动降级 n-gram+FTS）
+  const memories = await retrieveRelevantMemoriesAsync(userInput);
   const ragContext = buildRagContext(memories);
 
   // I. 社交分寸
@@ -1127,7 +1127,7 @@ export async function* processMessageStream(
 
   const timeCtx = perceiveTime(persona.world);
   const momentTag = buildMomentTag(timeCtx, weatherPerception.raw);
-  const memories = retrieveRelevantMemories(userInput);
+  const memories = await retrieveRelevantMemoriesAsync(userInput);
   const ragContext = buildRagContext(memories);
   const shortTermContext = buildShortTermContext(session);
   const fullSystem = systemPrompt + interruptedNote + buildConflictNote(state) + `\n${momentTag}`;
