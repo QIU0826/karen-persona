@@ -6,9 +6,9 @@
 
 > ⚠️ **免责声明**：本项目仅用于个人回忆与情感疗愈，不用于骚扰、跟踪或侵犯他人隐私。**她是 AI，不是真人**。QQ 桥接依赖非官方协议（NapCatQQ），存在封号与协议变更风险，请使用小号并自行承担后果。
 
-> **项目状态（2026-10）**：M0「地基修复」主体完成（新装可启动、延迟消息不丢、QQ 桥接安全加固、LLM 异常兜底、文档真话）；双管线完全统一与状态持久化等剩余项进入 M1。本文所有功能宣称都以当前代码为准：未完成的能力明确标成「半成品 / 规划中」，不会把设计目标写成已实现。完整的功能清单、差距分析与 M0–M3 路线图见 **[docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md)**。
+> **项目状态（2026-10）**：M0「地基修复」完成（新装可启动、延迟消息不丢、QQ 桥接安全加固、LLM 异常兜底、文档真话）；**M1 进行中**：情绪/负债/关系/演化状态已持久化（重启不归零）、亲密度会随互动成长并有里程碑、CLI 可查看她的日记/关系时间线/她眼中的你；图片识别已切换到 DeepSeek Flash（不再需要 Qwen-VL Key）。双管线完全统一、多用户隔离、语义检索等仍在 M1/M2。本文所有功能宣称都以当前代码为准：未完成的能力明确标成「半成品 / 规划中」，不会把设计目标写成已实现。完整的功能清单、差距分析与 M0–M3 路线图见 **[docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md)**。
 >
-> 仓库实测状态（2026-10-19）：`npm run typecheck` 0 错误；`npm test` **16 个测试文件 / 270 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例，M0 新增了数据层、消息门上下文、编排器、桥接解析、天气等测试）。GitHub Actions CI 已接入类型检查与单测。仍缺真实 QQ/NapCat、真实 LLM 调用与端到端集成测试（M2-7 规划）。
+> 仓库实测状态（2026-10-19）：`npm run typecheck` 0 错误；`npm test` **21 个测试文件 / 330 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例，M0/M1 新增数据层、消息门、编排器、桥接解析、天气、关系成长、状态持久化、演化视图、AI 路由/视觉等测试）。GitHub Actions CI 已接入类型检查与单测；CLI + 真实 DeepSeek Key 已完成 3 轮端到端实测（含缓存命中、关系成长、重启恢复）。仍缺真实 QQ/NapCat 端到端测试（M2-7 规划）。
 
 ---
 
@@ -44,7 +44,7 @@
 | npm（随 Node 安装） | 仓库只跟踪 `package-lock.json`，CI 使用 `npm ci`；pnpm 仅本地开发可选（不提交 pnpm-lock） | ✅ |
 | DeepSeek API Key | [platform.deepseek.com](https://platform.deepseek.com) 创建；没有 Key 无法对话（新用户额度以平台当前政策为准） | ✅ |
 | QQ 小号 | 单独注册，用于 NapCatQQ 登录 | 仅 QQ 模式 |
-| Windows 10/11 | QQ 桥接的启动脚本与 NapCat 方案按 Windows 验证；macOS/Linux 目前只能跑 CLI | 仅 QQ 模式 |
+| Windows 10/11 或 macOS 12+ | QQ 桥接需要 NapCat：Windows 已验证、macOS 有官方原生安装器（方案见 [跨平台桥接指南](docs/QQ_BRIDGE_CROSS_PLATFORM.md)）；Linux 可用 Docker | 仅 QQ 模式 |
 
 ### 1. 安装
 
@@ -72,7 +72,8 @@ DEEPSEEK_API_KEY=sk-xxxxxxxx          # 必填。platform.deepseek.com → API K
 可选（不填也能启动，对应功能自动关闭）：
 
 ```env
-QWEN_VL_API_KEY=sk-xxxxxxxx           # 图片识别（Qwen-VL）。dashscope.aliyun.com
+# 图片识别已内置在 DeepSeek Flash 中，无需额外 Key（可选覆盖 DEEPSEEK_VISION_MODEL）
+# QWEN_VL_API_KEY=sk-xxxxxxxx          # 仅语义嵌入（可选，规划中），不用于图片识别
 OPENWEATHER_API_KEY=xxxxxxxx          # 真实天气。openweathermap.org/api
 UNSPLASH_ACCESS_KEY=xxxxxxxx          # 主动发图。unsplash.com/developers
 ```
@@ -120,21 +121,21 @@ npm run doctor
 npm run dev
 ```
 
-**QQ 桥接**（完整体验——她在你的 QQ 通讯录里，仅 Windows 已验证）：
+**QQ 桥接**（完整体验——她在你的 QQ 通讯录里；Windows 已验证，macOS/Linux 方案见 [跨平台桥接指南](docs/QQ_BRIDGE_CROSS_PLATFORM.md)）：
 
 1. 准备一个 QQ 小号（建议单独注册）
 2. 下载 [NapCatQQ](https://github.com/NapNeko/NapCatQQ/releases)，解压到 `D:\NapCatShell`
 3. 打开 NapCat WebUI → `http://127.0.0.1:6099` → 网络配置 → 新增反向 WebSocket：
    - 地址：`ws://127.0.0.1:18080/onebot/v11/ws`
    - access_token：与 `.env` 的 `ONE_BOT_TOKEN` 保持一致
-4. 双击 `scripts\start-all.bat`，扫码登录 QQ 小号
+4. Windows：双击 `scripts\start-all.bat`；macOS：按[跨平台桥接指南](docs/QQ_BRIDGE_CROSS_PLATFORM.md)安装原生 NapCat 后启动；扫码登录 QQ 小号
 5. 用你自己的 QQ 号给她发消息（如果配置了 `ALLOWED_USERS`，确保你的 QQ 号在白名单里）
 
 **首次启动可能遇到的问题**：[QUICKSTART.md](QUICKSTART.md) 有详细的故障排查。
 
 ### 费用（如实）
 
-项目**目前没有 token 统计与预算上限**（规划中），后台还会产生额外调用（内心独白、T3 摘要、人设进化日志、LLM Judge 等）。按 DeepSeek 官方价格粗估：日均 100 条消息、开启全部后台调用时约 **¥6–15/月**，只用基础聊天会更低；Qwen-VL / OpenWeatherMap / Unsplash 按各自服务商计费。具体以账单为准，不要以本文估算为承诺。
+项目**目前没有 token 统计与预算上限**（规划中），但每次 LLM 调用都会记录 token/缓存命中日志；后台还会产生额外调用（内心独白、T3 摘要、人设进化日志等）。DeepSeek V4 的思考模式默认已关闭、静态人设前缀可命中 prompt 缓存，按官方价格粗估：日均 100 条消息、开启全部后台调用时约 **¥3–8/月**；OpenWeatherMap / Unsplash 按各自服务商计费。具体以账单为准，不要以本文估算为承诺。详见 [DeepSeek 能力审计](docs/DEEPSEEK_CAPABILITY_AUDIT.md)。
 
 ---
 
@@ -146,7 +147,7 @@ npm run dev
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
-| CLI 终端对话 | ✅ | `npm run dev`，支持 `/quit` `/stats` `/mood` `/weather` |
+| CLI 终端对话 | ✅ | `npm run dev`；命令：`/stats` `/mood` `/weather` `/journal` `/timeline` `/herview` `/evolution` `/quit` |
 | QQ 私聊流式回复 | ✅ | NapCatQQ / OneBot 11；标点断句、0.2–0.8s 间隔、400ms 消息合并、中断检测 |
 | 消息复杂度路由 | ✅ | 规则分级 simple/normal/complex → `deepseek-v4-flash` / `deepseek-v4-pro` |
 | 引用消息 / QQ 表情 | ✅ | 引用原文回查、qqface CQ 码发送 |
@@ -187,7 +188,7 @@ npm run dev
 | 真实天气（OpenWeatherMap） | ✅ | 需 `OPENWEATHER_API_KEY`；无 Key 时降级 mock |
 | 时间感知 | ✅ | 结构化时刻标签注入 Prompt |
 | 网络热点 | 🚧 | 本地硬编码话题池，无真实抓取 |
-| 图片识别（Qwen-VL） | ✅ | 需 Key + NapCat 能提供公网图片 URL；无下载/压缩/缓存 |
+| 图片识别 | ✅ | 由 DeepSeek Flash 多模态完成（无需 Qwen-VL）；先用本地下载转 base64，兼容 NapCat 私有图片 URL；`detail=low` 省 token |
 | 主动发图（Unsplash） | 🚧 | 仅 CLI 非流式会展示；QQ 私聊/群聊不发图 |
 | 图片生成（即梦）/ 表情包 | 🗺 | 未实现（仅有 Key 占位） |
 
@@ -195,7 +196,7 @@ npm run dev
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
-| 类型检查 + 单元测试 | ✅ | `npm run typecheck`、`npm test`（16 文件 / 270 用例） |
+| 类型检查 + 单元测试 | ✅ | `npm run typecheck`、`npm test`（21 文件 / 330 用例） |
 | CI（GitHub Actions） | ✅ | push/PR：Node 22 + `npm ci` + typecheck + test |
 | 环境体检 | ✅ | `npm run doctor` |
 | Docker | 🚧 | 提供 node:22-slim 多阶段镜像（非 root）；仅面向开发者/Linux，NapCat 仍需宿主机运行，未在所有平台验证 |
@@ -218,7 +219,7 @@ npm run dev
 | 操作 | 发往 | 发送内容 |
 |---|---|---|
 | 每一轮对话 | DeepSeek API | 你的消息 + 上下文（含人设块、记忆检索结果、状态标签） |
-| 图片识别 | 阿里云 DashScope（Qwen-VL） | 图片 URL 或图片数据 |
+| 图片识别 | DeepSeek API（deepseek-flash 多模态） | 图片数据（base64，先下载后上传） |
 | 语义嵌入（当前未接主路径） | 阿里云 DashScope | 用于嵌入的文本 |
 | 天气感知 | OpenWeatherMap | 城市名 |
 | 主动发图（仅 CLI 非流式触发） | DeepSeek API + Unsplash | 用于生成图片搜索词的摘要、搜索关键词 |
@@ -240,14 +241,14 @@ npm run dev
 
 按重要度排列（完整清单见 [审计报告第 4 节](docs/PRODUCT_AUDIT.md)）：
 
-1. **QQ 桥接只在 Windows 验证**：启动脚本、NapCat 路径、掉线通知都依赖 Windows；macOS/Linux 目前只能 CLI。
+1. **QQ 桥接的跨平台验证不完整**：Windows 已实机验证；macOS 有官方原生 NapCat 方案 + Docker 备选（见 [跨平台桥接指南](docs/QQ_BRIDGE_CROSS_PLATFORM.md)），但本项目尚未在 macOS 实机扫码验证；掉线通知仍是 Windows-only。
 2. **多用户隔离未完成**：会话与记忆按人设而非「用户」隔离，同一个人设被多个好友使用时共享聊天记录；群聊与私聊共享状态。
 3. **演化状态不持久化**：情绪、负债、漂移、因果链、herView、计时器多存在内存里，重启归零。
 4. **记忆检索不是语义检索**：当前是字符 n-gram 哈希；同义不同句容易检索不到，也没有阈值过滤。
 5. **双管线能力不对等**：QQ 私聊走精简流式管线，CLI/群聊走完整非流式管线，部分能力（内心独白、T1 快照、发图、语气链）只在后者生效；M0 已统一门控上下文与延迟回复语义，其余步骤在 M1 继续统一。
 6. **主动消息仍不可完全控制**：M0 已加单日 4 条上限与 30 分钟最小间隔，但还没有免打扰/暂停开关，也不能按用户配置频率（M1-4 规划）。
 7. **未实现**：TTS/语音、微信桥接、图片生成、撤回、记忆查看/删除/导出、Web 控制台、token 成本统计、健康检查端点。
-8. **测试覆盖仍不足**：M0 新增了数据层、消息门上下文、编排器、桥接解析、天气等测试（16 文件 / 270 用例），但真实 QQ/NapCat、真实 LLM 与端到端流程没有集成测试，也没有覆盖率统计。
+8. **测试覆盖仍不足**：M0/M1 新增了数据层、消息门、编排器、桥接解析、天气、关系成长、状态持久化、演化视图、AI 路由/视觉等测试（21 文件 / 330 用例），但真实 QQ/NapCat 与完整对话质量没有自动化集成测试，也没有覆盖率统计。
 9. **人设字段消费不足**：创作者写的底线、软肋、人生目标等字段有一部分不进入 Prompt（审计 2.3）。
 10. **平台风险**：产品命运绑定在非官方 QQ 协议上，封号/协议变更/客户端升级都可能让桥接失效。
 
@@ -296,6 +297,7 @@ npm run dev
 | `npm run persona:create` | 脚手架创建人设 |
 | `npm run persona:narrate` | 叙事式创建人设（正则推导，非 LLM） |
 | `npm run wechat` | 微信桥接（🗺 仅 echo 桩，不可用） |
+| `node scripts/mock-onebot.mjs` | 无 QQ 联调：模拟 NapCat 反向 WS 客户端（需先启动 `npm run qq`） |
 
 ---
 
@@ -345,7 +347,7 @@ karen-persona/
 
 ## 技术栈
 
-Node.js 22+ · TypeScript 5.6 · DeepSeek V4（flash/pro 自动路由）· Qwen-VL Max（图片识别）· OpenWeatherMap（天气）· Unsplash（图库）· better-sqlite3（SQLite）· sqlite-vec（已引入，检索尚未使用）· NapCatQQ / OneBot 11（QQ 桥接）· wechaty（微信，仅桩）· vitest（测试）· GitHub Actions（CI）
+Node.js 22+ · TypeScript 5.6 · DeepSeek V4.1 Flash / V4-Pro（对话 + 视觉 + JSON/Tools，flash 自动路由）· OpenWeatherMap（天气）· Unsplash（图库）· better-sqlite3（SQLite）· sqlite-vec（已引入，检索尚未使用）· NapCatQQ / OneBot 11（QQ 桥接）· wechaty（微信，仅桩）· vitest（测试）· GitHub Actions（CI）
 
 ---
 

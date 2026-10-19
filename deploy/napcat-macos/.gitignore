@@ -1,0 +1,7 @@
+# 根 .gitignore 有一条全局 `docker-compose.yml` 规则（原用于忽略开发者本地的 compose）。
+# 这里显式取消忽略，保证部署资产能被提交；如果你不希望提交，删掉下面这行即可。
+!docker-compose.yml
+
+# 运行时/本地文件：登录态、配置、插件、WebUI token 都不进仓库
+.env
+data/

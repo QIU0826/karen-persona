@@ -175,7 +175,7 @@ function checkApiKey(): CheckItem {
 /** 3 的补充信息：可选 API 配置情况（不影响通过/失败，仅提示） */
 function optionalKeysLine(): string {
   const optional: Array<[string, string]> = [
-    ["QWEN_VL_API_KEY", "图片识别"],
+    ["QWEN_VL_API_KEY", "语义嵌入（可选）"],
     ["OPENWEATHER_API_KEY", "天气感知"],
     ["UNSPLASH_ACCESS_KEY", "主动发图"],
   ];

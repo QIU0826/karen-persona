@@ -342,7 +342,7 @@ async function main() {
       { key: "DEEPSEEK_API_KEY", desc: "DeepSeek（必需 — 文字对话核心）" },
     ];
     const optionalKeys = [
-      { key: "QWEN_VL_API_KEY", desc: "Qwen-VL（图片识别）" },
+      { key: "QWEN_VL_API_KEY", desc: "通义千问（仅语义嵌入，可选；图片识别已内置 DeepSeek）" },
       { key: "OPENWEATHER_API_KEY", desc: "OpenWeatherMap（天气感知）" },
       { key: "UNSPLASH_ACCESS_KEY", desc: "Unsplash（她给你发照片）" },
     ];

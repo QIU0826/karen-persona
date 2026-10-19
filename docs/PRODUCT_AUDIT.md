@@ -30,7 +30,13 @@
 
 **M0 验证结果（2026-10-19）**：`tsc --noEmit` 0 错误；`npm test` **16 文件 / 270 用例全部通过**；全新目录 + `npm run doctor` 6/6 ✅；CLI 首启不再崩溃（无 Key 时优雅提示）；QQ 桥接冒烟：绑定 `127.0.0.1:18099`、白名单生效、SIGTERM 清理正常。
 
-**仍未修复（M1 起）**：多用户隔离、演化状态持久化、`closeness` 关系成长、语义检索接线、QQ 主路径与完整管线彻底统一、真实 QQ/LLM 端到端验证、AI 披露/危机干预等合规项。
+**M1 追加进度（2026-10-19 晚间）**：
+- M1-1 状态持久化 ✅（`src/data/state-store.ts`；重启后情绪/负债/漂移/因果链/叙事弧/herView/关系/计数/天气恢复，真实端到端已验证）
+- M1-2 关系成长 ✅（`src/persona/relationship.ts`；结构性事件驱动、每日上限、里程碑、`/stats` 可见；实测 3.00→3.05 且重启保持）
+- M1-3 演化可见化 ✅（`/journal` `/timeline` `/herview` `/evolution`，21 文件/330 测试）
+- DeepSeek 能力审计与落地 ✅（思考模式默认关闭修复空回复；图片识别改 DeepSeek Flash；模型名 canonical；旁路 LLM 调用统一 thinking；prompt 缓存命中实测）
+- 跨平台 QQ 桥接方案 ✅ 文档化（`docs/QQ_BRIDGE_CROSS_PLATFORM.md` + `deploy/napcat-macos`/`napcat-windows` + `scripts/mock-onebot.mjs`；mock 全链路实测通过；macOS 原生 NapCat 未实机扫码验证）
+- 仍未修复（M1 剩余）：多用户隔离、语义检索接线、QQ 主路径与完整管线彻底统一、多模态/合规项、真实 QQ 端到端。
 
 ---
 

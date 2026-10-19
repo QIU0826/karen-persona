@@ -1,0 +1,69 @@
+# ============================================================================
+# NapCatQQ（OneBot 11 协议端）for macOS Docker Desktop / OrbStack
+# ----------------------------------------------------------------------------
+# 作用：在容器里跑 Linux 版 QQ + NapCat，NapCat 作为「WebSocket 客户端」
+#       反向连接宿主机上的 Karen 桥接（默认 ws://127.0.0.1:18080/onebot/v11/ws）。
+#
+# 前置：macOS 12+（Apple Silicon 直接跑 arm64 镜像，无需 Rosetta），
+#       Docker Desktop 或 OrbStack 已启动；Karen 先 `npm run qq` 常驻。
+#
+# 使用（在本目录）：
+#   cp .env.example .env      # 改 WEBUI_TOKEN
+#   docker compose up -d
+#   docker compose logs -f napcat
+#   浏览器打开 http://127.0.0.1:6099/webui 扫码登录
+#
+# 详细步骤与排障：同目录 README.md；跨平台方案：docs/QQ_BRIDGE_CROSS_PLATFORM.md
+#
+# ⚠️ 固定版本，不要长期用 latest：
+#   NapCat v4.18.38（GitHub Release 2026-10-12）。
+#   项目 CLAUDE.md 记录的 Windows 验证版本是 v4.18.4；若想与 Windows 部署保持一致，
+#   可把 image 改成 mlikiowa/napcat-docker:v4.18.4（同样先核实 tag 是否已发布）。
+#   官方 CI 以 NapCat release tag 作为镜像 tag（vX.Y.Z）并附带 latest：
+#   https://github.com/NapNeko/NapCat-Docker/blob/main/.github/workflows/docker-publish.yml
+#   使用/发布前先核实该 tag 已推送：
+#       docker manifest inspect mlikiowa/napcat-docker:v4.18.38
+#   若不存在，到 https://hub.docker.com/r/mlikiowa/napcat-docker/tags 选最近可用 tag。
+# ============================================================================
+
+name: karen-napcat
+
+services:
+  napcat:
+    image: mlikiowa/napcat-docker:v4.18.38
+    container_name: karen-napcat
+    restart: unless-stopped
+
+    environment:
+      # 反向 WS（NapCat 作客户端）。MODE/ONEBOT_URL 只在首次生成配置时生效，
+      # 之后以 data/config/onebot11*.json / WebUI 中的配置为准。
+      MODE: reverse_ws
+      ONEBOT_URL: ${ONEBOT_URL:-ws://host.docker.internal:18080/onebot/v11/ws}
+
+      # WebUI 登录密码（必填）：至少 32 位随机串，生成方式 openssl rand -hex 24。
+      # 这里用 :? 强制要求设置，避免误用弱默认值。
+      WEBUI_TOKEN: ${WEBUI_TOKEN:?请先复制 .env.example 为 .env 并设置 WEBUI_TOKEN}
+
+      # 容器内写文件用的 uid/gid。macOS 默认用户是 501:20；若你的 uid 不同，
+      # 在 .env 里改 NAPCAT_UID/NAPCAT_GID（`id -u` / `id -g` 查看）。
+      NAPCAT_UID: ${NAPCAT_UID:-501}
+      NAPCAT_GID: ${NAPCAT_GID:-20}
+
+    ports:
+      # 只绑回环：WebUI 绝对不要暴露到公网
+      - "127.0.0.1:6099:6099"
+      # 反向 WS 模式不需要入站端口：NapCat 主动连宿主机的 18080。
+      # 如需正向 WS 调试再临时加 "127.0.0.1:3001:3001"。
+
+    volumes:
+      # 三个目录都要持久化，否则重建容器会丢登录态/配置/插件
+      - ./data/qq:/app/.config/QQ
+      - ./data/config:/app/napcat/config
+      - ./data/plugins:/app/napcat/plugins
+
+    # 容器内没有日志轮转，限制单文件大小避免长期运行写满磁盘
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

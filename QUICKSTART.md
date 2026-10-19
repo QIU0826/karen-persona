@@ -10,9 +10,9 @@
 - **npm**（随 Node 安装；pnpm 仅本地开发可选）——仓库只跟踪 `package-lock.json`，CI 用 `npm ci`
 - **DeepSeek API Key**（[platform.deepseek.com](https://platform.deepseek.com) 创建；新用户额度以平台当前政策为准）——**必填**，没有 Key 无法对话
 - **一个 QQ 小号**（仅 QQ 模式需要，用于 NapCatQQ 登录，建议单独注册）
-- **Windows 10/11**（仅 QQ 模式需要；macOS/Linux 可以跑 CLI 模式）
+- **Windows 10/11 或 macOS 12+**（仅 QQ 模式需要；macOS 用官方原生 NapCat，Linux 可用 Docker；详见 docs/QQ_BRIDGE_CROSS_PLATFORM.md）
 
-> 以下功能可选，不配也能启动，对应功能自动关闭：图片识别 (Qwen-VL)、天气感知 (OpenWeatherMap)、Unsplash 发图。
+> 以下功能可选，不配也能启动，对应功能自动关闭：天气感知 (OpenWeatherMap)、Unsplash 发图。图片识别已内置在 DeepSeek Flash 中，无需额外 Key。
 
 ## 1. 安装
 
