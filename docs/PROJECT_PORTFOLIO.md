@@ -1,5 +1,9 @@
 # Karen — 具备长期记忆一致性与主动交互能力的拟人化对话 Agent
 
+> ⚠️ **归档材料（2026-07 版），请勿作为对外事实来源引用。**
+> 本文中的部分量化指标（如 A/B 99/100、Recall 99.4%、消融 63.2%、检索 8ms、覆盖率 80%+）无法由当前代码复现，已在 [PRODUCT_AUDIT.md](PRODUCT_AUDIT.md) 第 3 节标注。
+> 对外发布/面试引用时，请使用 [README.md](../README.md) 与 [PRODUCT_AUDIT.md](PRODUCT_AUDIT.md) 中的可复现数据（当前：`tsc` 0 错误、`npm test` 16 文件 / 270 用例通过）。
+
 ## 项目信息
 
 | 项目属性 | 详情 |

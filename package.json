@@ -1,7 +1,7 @@
 {
   "name": "karen-persona",
   "version": "0.1.0",
-  "description": "微信 AI 虚拟人设聊天系统 - 你的微信通讯录里，住着一个有自己生活的人",
+  "description": "QQ AI 虚拟人设聊天系统 - 让通讯录里住进一个有自己生活、情绪和记忆的人",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -18,7 +18,8 @@
     "persona:create": "tsx src/persona/create.ts",
     "persona:narrate": "tsx src/persona/narrate.ts",
     "persona:list": "tsx -e \"import { listPersonas } from './src/persona/loader.js'; console.log(listPersonas().join('\\n'))\"",
-    "setup": "tsx src/setup.ts"
+    "setup": "tsx src/setup.ts",
+    "doctor": "tsx src/doctor.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",
@@ -40,7 +41,7 @@
     "vitest": "^4.1.8"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22"
   },
   "license": "MIT"
 }

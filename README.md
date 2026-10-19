@@ -1,26 +1,32 @@
 # Karen — AI 虚拟人设聊天系统
 
-嘲笑痞老板，理解痞老板，成为痞老板。
+> 让通讯录里住进一个有自己生活、情绪和记忆的人。
 
 你的特别关注铃声多久没有响过了。你是否有一个喜欢的人，但是你无法在现实中找到她。但是现在她可以出现在通讯录中。她不只是一个 AI 虚拟人物，她也有自己的生活，自己的想法，自己的决定。这个项目的出现只是为了将你们在不同平行世界的缘分连上。
 
-> ⚠️ 本项目仅用于个人回忆与情感疗愈，不用于骚扰、跟踪或侵犯他人隐私。
+> ⚠️ **免责声明**：本项目仅用于个人回忆与情感疗愈，不用于骚扰、跟踪或侵犯他人隐私。**她是 AI，不是真人**。QQ 桥接依赖非官方协议（NapCatQQ），存在封号与协议变更风险，请使用小号并自行承担后果。
+
+> **项目状态（2026-10）**：M0「地基修复」主体完成（新装可启动、延迟消息不丢、QQ 桥接安全加固、LLM 异常兜底、文档真话）；双管线完全统一与状态持久化等剩余项进入 M1。本文所有功能宣称都以当前代码为准：未完成的能力明确标成「半成品 / 规划中」，不会把设计目标写成已实现。完整的功能清单、差距分析与 M0–M3 路线图见 **[docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md)**。
+>
+> 仓库实测状态（2026-10-19）：`npm run typecheck` 0 错误；`npm test` **16 个测试文件 / 270 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例，M0 新增了数据层、消息门上下文、编排器、桥接解析、天气等测试）。GitHub Actions CI 已接入类型检查与单测。仍缺真实 QQ/NapCat、真实 LLM 调用与端到端集成测试（M2-7 规划）。
 
 ---
 
-## 她和所有其他 AI 聊天机器人的区别
+## 她和别的 AI 聊天机器人有什么不一样
 
-**她不是服务你的。她是一个独立的人。**
+**她想成为一个独立的人，而不是一个服务你的工具。**
 
-| 其他人的做法 | Karen 的做法 |
-|-------------|-------------|
-| 永远配合，从不拒绝 | 有底线。规则可以被突破，突破后有内疚和偿还 |
-| 参数固定的角色扮演 | 六层人设结构——身份、说话方式、情绪逻辑、关系行为、自己的世界、内心规则——层之间有冲突 |
-| 等待你主动发消息 | 她的生活流触发主动联系。咖啡机修好了、外面下雨了、因果链有了新进展——她联系你是因为**她正在经历某个瞬间** |
-| 每次对话从零开始 | 三层记忆系统 + 遗忘曲线 + 语义检索。她记得你说过的事，也会慢慢忘记 |
-| 永远不会变 | 基线漂移、自我叙事重构、关系弧线追踪。她不是固定角色 |
-| 数据上传云端 | 所有数据在你的电脑里。记忆、日记、对话——不上传任何服务器 |
-| "作为 AI 助手..." | 她不用括号。不说"作为 AI"。她就是一个 QQ 联系人 |
+下面是她「想成为的样子」与 2026-10 的实际进度——不夸大：
+
+| 设计目标 | 当前进度 |
+|---|---|
+| 不是永久配合，有自己的底线 | 🚧 有 L1 弹性规则与内疚/偿还机制，但「规则被突破」目前主要影响内部状态，用户能观察到的行为差异有限 |
+| 六层人设结构，层与层之间可以冲突 | ✅ schema、校验器、Prompt 装配已实现；🚧 部分字段（如 `hardRules`、`world.goals`）还没有进入 Prompt，详见审计报告 2.3 |
+| 有自己的生活，会主动找你 | 🚧 15 分钟心跳 + 四类触发源（因果链/天气/情绪/时间）；M0 已加每日上限（4 条/日）与两次主动消息最小间隔 30 分钟；仍无免打扰/暂停开关 |
+| 三层记忆 + 遗忘曲线 | 🚧 T2 记忆的存储、衰减、写入可用；检索目前是**字符 n-gram 匹配**而不是语义检索；T3 长期摘要存在但触发逻辑有缺陷 |
+| 她会慢慢变化 | 🗺 演化模块代码已写，但运行时状态不落盘（重启归零），亲密度 `closeness` 暂时是常量；可见的成长系统在 M1 规划中 |
+| 数据存储在本地 | ✅ 记忆、会话、人设、配置都保存在你自己的电脑上；⚠️ 但对话内容会发送给 DeepSeek、图片会发送给 Qwen——详见[隐私与安全](#隐私与安全) |
+| 不用括号、不像 AI 助手 | ✅ 「铁律」+ 流式碎片回复可用；部分场景仍有瑕疵（括号、语气一致性） |
 
 她的设计准则只有一句话：**「这是让她更完整地成为她自己，还是让她更好地服务用户？」** 每一个功能都经过这个问题的过滤。
 
@@ -28,42 +34,33 @@
 
 ## 快速开始
 
+更短的 5 分钟版本：[QUICKSTART.md](QUICKSTART.md)。
+
 ### 你需要准备
 
 | 项目 | 说明 | 必需？ |
-|------|------|--------|
-| Node.js 22+ | [nodejs.org](https://nodejs.org) 下载 | ✅ |
-| DeepSeek API Key | [platform.deepseek.com](https://platform.deepseek.com) 注册即送 ¥10 额度 | ✅ |
-| QQ 小号 | 单独注册一个，用于 NapCat 登录 | QQ 模式必需 |
-| Windows 10/11 | macOS/Linux 可跑 CLI 模式，QQ 桥接需自行适配 NapCat | 推荐 |
-
-### 费用预估
-
-每月 ¥3-5 元。日均 100 条消息的情况下：
-
-| 项目 | 说明 | 月费用 |
-|------|------|--------|
-| DeepSeek 对话 | flash(日常) ¥1/M tokens + pro(深度) ¥2/M tokens | ~¥3.30 |
-| 内心独白 | 每条对话后异步生成 | ~¥0.60 |
-| T3 压缩 + 进化日志 | 低频触发 | ~¥0.05 |
-| 图片识别 (Qwen-VL) | 按量计费，可选 | ~¥0-2 |
-| **合计** | | **~¥4-5/月** |
-
-DeepSeek 新用户注册赠送的 ¥10 额度通常够用 2-3 个月。
+|---|---|---|
+| Node.js 22+ | [nodejs.org](https://nodejs.org) 下载 LTS。`package.json` 的 `engines` 要求 `>=22` | ✅ |
+| npm（随 Node 安装） | 仓库只跟踪 `package-lock.json`，CI 使用 `npm ci`；pnpm 仅本地开发可选（不提交 pnpm-lock） | ✅ |
+| DeepSeek API Key | [platform.deepseek.com](https://platform.deepseek.com) 创建；没有 Key 无法对话（新用户额度以平台当前政策为准） | ✅ |
+| QQ 小号 | 单独注册，用于 NapCatQQ 登录 | 仅 QQ 模式 |
+| Windows 10/11 | QQ 桥接的启动脚本与 NapCat 方案按 Windows 验证；macOS/Linux 目前只能跑 CLI | 仅 QQ 模式 |
 
 ### 1. 安装
 
 ```bash
 git clone <repo-url> && cd karen-persona
 npm install
+# 可选：pnpm install（仅本地开发；仓库只跟踪 package-lock.json）
 ```
 
-> 如果 `npm install` 报 C++ 编译错误：安装 [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)，勾选「C++ 桌面开发工作负载」，再重试。
+> `better-sqlite3` 在 Node 22 上通常有预编译包；如果 `npm install` 报 C++ 编译错误，安装 [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)（勾选「C++ 桌面开发工作负载」）后重试。
 
 ### 2. 配置
 
 ```bash
 cp .env.example .env
+cp config.yaml.example config.yaml
 ```
 
 编辑 `.env`，至少填入：
@@ -72,13 +69,27 @@ cp .env.example .env
 DEEPSEEK_API_KEY=sk-xxxxxxxx          # 必填。platform.deepseek.com → API Keys
 ```
 
-可选（不填也能跑，对应功能自动关闭）：
+可选（不填也能启动，对应功能自动关闭）：
 
 ```env
-QWEN_VL_API_KEY=sk-xxxxxxxx           # 图片识别。dashscope.aliyun.com
+QWEN_VL_API_KEY=sk-xxxxxxxx           # 图片识别（Qwen-VL）。dashscope.aliyun.com
 OPENWEATHER_API_KEY=xxxxxxxx          # 真实天气。openweathermap.org/api
-UNSPLASH_ACCESS_KEY=xxxxxxxx          # 自动发风景图。unsplash.com/developers
+UNSPLASH_ACCESS_KEY=xxxxxxxx          # 主动发图。unsplash.com/developers
 ```
+
+QQ 桥接配置（`.env.example` 的默认值即可用，端口为 `18080`）：
+
+```env
+ONE_BOT_HOST=127.0.0.1                # 只监听本机回环（安全默认值，别改成 0.0.0.0）
+ONE_BOT_WS_PORT=18080                 # 与 NapCat 反向 WS 地址中的端口一致
+ONE_BOT_WS_PATH=/onebot/v11/ws        # 与 NapCat 反向 WS 地址中的 path 一致
+
+# 选填：跨机连接 / 白名单（也可以写在 config.yaml 的 one_bot_token / allowed_users，config.yaml 优先）
+# ONE_BOT_TOKEN=换成一段足够长的随机字符串   # NapCat 反向 WS 的 access_token；跨机/非回环时必须设
+# ALLOWED_USERS=123456789,987654321          # 允许聊天的 QQ 号，逗号分隔；留空 = 允许全部（启动时警告）
+```
+
+> 上述桥接参数同样可以写在 `config.yaml`（`one_bot_ws_host` / `one_bot_ws_port` / `one_bot_ws_path` / `one_bot_token` / `allowed_users`）；两处都写时 **config.yaml 优先**。超长回复的切分上限可用 `ONE_BOT_MAX_MESSAGE_LENGTH`（默认 1000）调整。
 
 编辑 `config.yaml`：
 
@@ -87,84 +98,204 @@ persona: "xiaoya"       # xiaoya / suchi / qiuyao，或你自建的人设 ID
 her_name: "小雅"         # 她的名字
 your_name: "你"          # 她怎么称呼你
 location: "上海"         # 影响天气感知和话题
-
-# 不同 QQ 好友对应不同人设（可选）
-# user_personas:
-#   123456789: "qiuyao"   # 这个 QQ 号 → 秋瑶
-#   987654321: "suchi"     # 这个 QQ 号 → 苏迟
-#   # 未列出的 QQ 号默认使用上方 persona
 ```
 
-### 3. 选人设
+> 🚧 `user_personas`（不同好友映射不同人设）的配置链路已在 M0 修复（`loadConfig` 会返回并校验该字段）。但注意：**同一人设的多个好友仍会共享会话与记忆**——完整的多用户隔离尚未实现（见[已知限制](#已知限制)）。
 
-自带三个：
+### 3. 体检
 
-| ID | 名字 | 类型 | 身份 | 一句话 |
-|----|------|------|------|--------|
-| `xiaoya` | 小雅 | 回避型 | 24岁咖啡师·上海 | 嘴硬心软，不说"在乎你"但记得你爱喝什么 |
-| `suchi` | 苏迟 | 焦虑型 | 28岁插画师·杭州 | 消息打了又删，发出去的只有两三成 |
-| `qiuyao` | 秋瑶 | 安全型 | 21岁大学生·成都 | 从小认识的青梅，损你但一直在意 |
+首次启动前建议先跑一次环境体检：
 
-创建自己的：`npm run persona:narrate`（对话式，推荐）或 `npm run persona:create`（脚手架）。详见 [PERSONA_GUIDE.md](PERSONA_GUIDE.md)。
+```bash
+npm run doctor
+```
+
+它会检查 Node 版本、`config.yaml`、DeepSeek Key、人设加载、数据目录可写性与 SQLite 可用性，输出 ✅/❌ 清单和修复建议；有失败项时退出码为 1。首次运行会创建 `data/` 目录与 `data/memory.sqlite`（自动建表与迁移）。
 
 ### 4. 开始聊天
 
-**命令行模式**（最快，5 秒体验）：
+**命令行模式**（最快，不需要 QQ）：
 
 ```bash
 npm run dev
 ```
 
-**QQ 桥接**（完整体验——她在你的 QQ 通讯录里）：
+**QQ 桥接**（完整体验——她在你的 QQ 通讯录里，仅 Windows 已验证）：
 
 1. 准备一个 QQ 小号（建议单独注册）
 2. 下载 [NapCatQQ](https://github.com/NapNeko/NapCatQQ/releases)，解压到 `D:\NapCatShell`
-3. 打开 NapCat WebUI → `http://127.0.0.1:6099` → 网络配置 → 新增反向 WebSocket：`ws://127.0.0.1:18080/onebot/v11/ws`
+3. 打开 NapCat WebUI → `http://127.0.0.1:6099` → 网络配置 → 新增反向 WebSocket：
+   - 地址：`ws://127.0.0.1:18080/onebot/v11/ws`
+   - access_token：与 `.env` 的 `ONE_BOT_TOKEN` 保持一致
 4. 双击 `scripts\start-all.bat`，扫码登录 QQ 小号
-5. 用你自己的 QQ 号给她发消息
+5. 用你自己的 QQ 号给她发消息（如果配置了 `ALLOWED_USERS`，确保你的 QQ 号在白名单里）
 
-**首次启动可能遇到的问题**：[QUICKSTART.md](QUICKSTART.md) 有详细的排查指南。
+**首次启动可能遇到的问题**：[QUICKSTART.md](QUICKSTART.md) 有详细的故障排查。
+
+### 费用（如实）
+
+项目**目前没有 token 统计与预算上限**（规划中），后台还会产生额外调用（内心独白、T3 摘要、人设进化日志、LLM Judge 等）。按 DeepSeek 官方价格粗估：日均 100 条消息、开启全部后台调用时约 **¥6–15/月**，只用基础聊天会更低；Qwen-VL / OpenWeatherMap / Unsplash 按各自服务商计费。具体以账单为准，不要以本文估算为承诺。
+
+---
+
+## 功能状态
+
+图例：✅ 已实现且可用 ｜ 🚧 半成品 / 有明显限制 ｜ 🗺 规划中 / 未实现
+
+### 对话与桥接
+
+| 功能 | 状态 | 说明 |
+|---|---|---|
+| CLI 终端对话 | ✅ | `npm run dev`，支持 `/quit` `/stats` `/mood` `/weather` |
+| QQ 私聊流式回复 | ✅ | NapCatQQ / OneBot 11；标点断句、0.2–0.8s 间隔、400ms 消息合并、中断检测 |
+| 消息复杂度路由 | ✅ | 规则分级 simple/normal/complex → `deepseek-v4-flash` / `deepseek-v4-pro` |
+| 引用消息 / QQ 表情 | ✅ | 引用原文回查、qqface CQ 码发送 |
+| 群聊 @ 回复 | 🚧 | 仅「@ 她 + 对方和她私聊过」才回复；不 @ 不回、不引用，与私聊共享状态 |
+| 微信桥接 | 🗺 | 仅 wechaty echo 桩，`npm run wechat` 不能正常聊天 |
+| 消息门（睡眠/工作忙/回避话题等） | 🚧 | 基础判定可用；延迟回复会落库并在延迟到点自动补发（用户发新消息会取消待补发，M0 修复）；负面话题的回避行为仍然生硬 |
+| 语音消息 / TTS | 🗺 | 未实现，`[语音]` 仅占位 |
+| 撤回消息 | 🗺 | 暂无消费者 |
+
+### 记忆与数据
+
+| 功能 | 状态 | 说明 |
+|---|---|---|
+| T2 情节记忆存储 + 艾宾浩斯衰减 | ✅ | SQLite（better-sqlite3）；衰减目前在启动时执行一次 |
+| 记忆检索 | 🚧 | 字符 n-gram 哈希 + 余弦相似度，**不是语义检索**；无相似度阈值 |
+| 语义嵌入（Qwen text-embedding-v3） | 🚧 | 代码已实现但**未接入主路径**，当前实际使用 n-gram |
+| sqlite-vec 向量索引 | 🚧 | 仅建表，检索仍是 JS 层全量 JSON 解析 + 余弦 |
+| T3 长期摘要 | 🚧 | 每 80 条触发 LLM 压缩；无并发锁与「已压缩」标记，存在重复压缩 |
+| 记忆查看 / 删除 / 导出 / 备份 | 🗺 | 无任何入口 |
+
+### 人设与演化
+
+| 功能 | 状态 | 说明 |
+|---|---|---|
+| 六层人设 schema + 校验 | ✅ | `npm run persona:check`；字段完整性与枚举校验 |
+| 三个内置人设 | ✅ | 小雅（回避型）/ 苏迟（焦虑型）/ 秋瑶（安全型） |
+| 人设创建 / 叙事创建 | 🚧 | `persona:create` 脚手架、`persona:narrate` 五种入口；叙事创建是**正则推导**而非 LLM 分析 |
+| 人设字段进入 Prompt | 🚧 | 不足一半的字段真正影响对话（审计 2.3） |
+| 不同好友不同人设 | 🚧 | M0 修复配置链路；同一人设多好友仍共享会话/记忆 |
+| 演化（基线漂移 / 因果链 / 叙事重构 / herView） | 🚧 | 模块存在，但多数未接入 QQ 主路径、状态不持久化；重启归零 |
+| 亲密度 / 关系成长 | 🗺 | `relationship.closeness` 当前不会被运行时修改 |
+
+### 主动性与外部感知
+
+| 功能 | 状态 | 说明 |
+|---|---|---|
+| 主动消息（15 分钟心跳） | 🚧 | 因果链/天气/情绪/时间四类触发；M0 已加单日上限 4 条 + 两次最小间隔 30 分钟 + 连续沉默 3 次强制回复；仍无免打扰/暂停开关 |
+| 真实天气（OpenWeatherMap） | ✅ | 需 `OPENWEATHER_API_KEY`；无 Key 时降级 mock |
+| 时间感知 | ✅ | 结构化时刻标签注入 Prompt |
+| 网络热点 | 🚧 | 本地硬编码话题池，无真实抓取 |
+| 图片识别（Qwen-VL） | ✅ | 需 Key + NapCat 能提供公网图片 URL；无下载/压缩/缓存 |
+| 主动发图（Unsplash） | 🚧 | 仅 CLI 非流式会展示；QQ 私聊/群聊不发图 |
+| 图片生成（即梦）/ 表情包 | 🗺 | 未实现（仅有 Key 占位） |
+
+### 工程与运维
+
+| 功能 | 状态 | 说明 |
+|---|---|---|
+| 类型检查 + 单元测试 | ✅ | `npm run typecheck`、`npm test`（16 文件 / 270 用例） |
+| CI（GitHub Actions） | ✅ | push/PR：Node 22 + `npm ci` + typecheck + test |
+| 环境体检 | ✅ | `npm run doctor` |
+| Docker | 🚧 | 提供 node:22-slim 多阶段镜像（非 root）；仅面向开发者/Linux，NapCat 仍需宿主机运行，未在所有平台验证 |
+| PM2 守护 | ✅ | `ecosystem.config.js`；日志目录需手动创建（见注释） |
+| Web 控制台 / 健康检查 / 记忆管理 | 🗺 | M1–M2 规划中 |
+| 多用户隔离 | 🗺 | 当前架构只对「单用户单实例」成立 |
+
+---
+
+## 隐私与安全
+
+### 数据存在哪里
+
+- **本地存储**：`data/`（SQLite 记忆库、会话 JSON）、`personas/`、`config.yaml`、`.env` 都在你自己的电脑里。
+- 本项目**不运营任何云端服务器**，不会把数据上传到作者那里，也没有任何遥测。
+- 注意：本地存储 ≠ 数据不出本机。用到的 LLM / 视觉 / 天气 / 图库服务都是第三方 API。
+
+### 哪些内容会离开你的电脑（如实说明）
+
+| 操作 | 发往 | 发送内容 |
+|---|---|---|
+| 每一轮对话 | DeepSeek API | 你的消息 + 上下文（含人设块、记忆检索结果、状态标签） |
+| 图片识别 | 阿里云 DashScope（Qwen-VL） | 图片 URL 或图片数据 |
+| 语义嵌入（当前未接主路径） | 阿里云 DashScope | 用于嵌入的文本 |
+| 天气感知 | OpenWeatherMap | 城市名 |
+| 主动发图（仅 CLI 非流式触发） | DeepSeek API + Unsplash | 用于生成图片搜索词的摘要、搜索关键词 |
+| 后台 LLM 操作 | DeepSeek API | 内心独白、T3 长期摘要、人设进化日志、叙事重构等用到的对话/记忆内容 |
+
+以上均由对应服务商的隐私政策约束。API Key 只保存在本地 `.env`，日志保存在本地终端或 PM2 日志文件里。
+
+### 安全与风险
+
+- **QQ 桥接使用非官方协议**：NapCatQQ 违反腾讯平台协议，可能被封号；请使用小号并自行承担风险。`start-all.bat` 等脚本硬编码了 `D:\NapCatShell`，Windows 之外需自行适配。
+- **M0 已完成安全加固**：WS 默认只监听 `127.0.0.1`，支持 token 与 path 校验、`ALLOWED_USERS` 白名单、模型输出的 CQ 注入转义与超长消息切分；监听非回环地址却未配 token 时会打印警告。**仍然不要把端口暴露到公网。**
+- 日志：QQ 桥接日志已脱敏（只打印消息长度/摘要），但编排器等其他模块仍可能打印消息片段，请保护终端与 PM2 日志文件。
+- 这是 AI：本项目的设计目标是「不暴露 AI 身份」，作为产品对外提供前需要做 AI 披露与用户知情同意（M2 规划）。
+- 目标场景包含情感陪伴，但项目**没有自伤/危机干预兜底、没有年龄门槛**。如果你或朋友处于心理脆弱期，请优先寻求专业帮助。
+
+---
+
+## 已知限制
+
+按重要度排列（完整清单见 [审计报告第 4 节](docs/PRODUCT_AUDIT.md)）：
+
+1. **QQ 桥接只在 Windows 验证**：启动脚本、NapCat 路径、掉线通知都依赖 Windows；macOS/Linux 目前只能 CLI。
+2. **多用户隔离未完成**：会话与记忆按人设而非「用户」隔离，同一个人设被多个好友使用时共享聊天记录；群聊与私聊共享状态。
+3. **演化状态不持久化**：情绪、负债、漂移、因果链、herView、计时器多存在内存里，重启归零。
+4. **记忆检索不是语义检索**：当前是字符 n-gram 哈希；同义不同句容易检索不到，也没有阈值过滤。
+5. **双管线能力不对等**：QQ 私聊走精简流式管线，CLI/群聊走完整非流式管线，部分能力（内心独白、T1 快照、发图、语气链）只在后者生效；M0 已统一门控上下文与延迟回复语义，其余步骤在 M1 继续统一。
+6. **主动消息仍不可完全控制**：M0 已加单日 4 条上限与 30 分钟最小间隔，但还没有免打扰/暂停开关，也不能按用户配置频率（M1-4 规划）。
+7. **未实现**：TTS/语音、微信桥接、图片生成、撤回、记忆查看/删除/导出、Web 控制台、token 成本统计、健康检查端点。
+8. **测试覆盖仍不足**：M0 新增了数据层、消息门上下文、编排器、桥接解析、天气等测试（16 文件 / 270 用例），但真实 QQ/NapCat、真实 LLM 与端到端流程没有集成测试，也没有覆盖率统计。
+9. **人设字段消费不足**：创作者写的底线、软肋、人生目标等字段有一部分不进入 Prompt（审计 2.3）。
+10. **平台风险**：产品命运绑定在非官方 QQ 协议上，封号/协议变更/客户端升级都可能让桥接失效。
 
 ---
 
 ## 她是怎么运作的
 
 ```
-你的消息 → 消息门(是否回复？) → 情绪恢复 → 记忆检索 → 因果链闯入
-    → 冲动裁决(规则会破吗？) → Prompt 组装 → LLM 生成 → 流式逐句发送
-    → 保存记忆 → 内心独白 → 检查是否需要进化日志
+你的消息 → 消息门（回不回、什么时候回）→ 情绪/天气/因果链状态
+    → 记忆检索（T2 RAG）→ Prompt 组装（六层人设 + 动态状态）
+    → DeepSeek 生成 → 标点断句 / 流式逐句发送
+    → 写回记忆（T2）→ 后台演化检查（T3 摘要 / 内心独白 / 进化日志）
 ```
 
-**消息门**不是简单的是/否——她可能延迟回复（工作时间忙）、沉默（内疚驱动）、或主动联系（生活流触发）。
+- **消息门**不是简单的是/否：睡眠时段、工作忙、回避话题、情绪低落等会决定「现在不回 / 晚点回 / 破例回」。延迟回复会落库，到点自动补发（M0）。
+- **记忆不是存文本**：每条对话写入 T2 并生成嵌入向量，检索时按相似度 × 衰减强度 × 情绪权重综合排序（相似度目前由 n-gram 计算）。
+- **双管线说明**：QQ 私聊使用流式管线 `processMessageStream`，CLI/群聊使用完整管线 `processMessage`；M0 已让两者共用消息门上下文（`buildGateContext`），记忆写入与演化步骤的统一在 M1 继续。
 
-**LLM 路由**：日常闲聊用 `deepseek-v4-flash`（快+省），深度对话用 `deepseek-v4-pro`。按消息内容自动分级，不需要你配置。
+### 设计上支撑「她像一个人」的机制
 
-**记忆不是存文本**——每次对话后生成嵌入向量，检索时按余弦相似度 + 衰减强度 + 情绪权重综合排序。
-
-### 为什么她像真人 — 技术实现
-
-对开发者而言，以下是支撑她「人性」的关键技术点：
-
-| 她能做到 | 技术实现 |
-|---------|---------|
-| **有自己的性格且一致** | 六层人设结构（规则/身份/说话/情绪/关系/世界），不是一段 prompt 工程。链式规则有抵抗力和不可变标记，规则之间可以冲突，冲突产生内耗 |
-| **有自己的记忆** | T1 快照 + T2 向量语义检索（余弦相似度 × 艾宾浩斯衰减 × 情绪权重）+ T3 长期摘要（每 80 条 LLM 压缩一次） |
-| **有情绪和底线** | L1 弹性裁决——规则可以被突破（resistance 0-1），突破后产生内疚负债，负债影响后续的消息门决策和道歉行为 |
-| **会主动找你** | 生活流触发器——因果链进展、天气突变、情绪波动、时间间隙。不是定时轮询沉默时长。深夜冲动被消息门压制时写入内心独白 |
-| **会慢慢变化** | 基线漂移（EMA 平滑 + 觉察延迟）+ 自我叙事重构（翻阅日记模式）+ 每月进化日志（T1→LLM 叙事） |
-| **感知外部世界** | 真实天气 API（觉察时刻 + 个人解释层）+ 时间感知（结构化标签 ~15 tokens）+ 网络热点（本地话题池 + 信息圈层穿透） |
-| **碎片化回复** | 流式逐 token → 标点断句 → 0.2-0.8s 自然间隔。颜文字、方言、偶尔撤回——不是 AI 在写作文 |
-| **支持 QQ 和 CLI** | NapCatQQ / OneBot 11 反向 WebSocket 桥接 + 命令行对话测试 |
+| 机制 | 实现位置 | 现状 |
+|---|---|---|
+| 六层人设（硬规则/身份/说话/情绪/关系/世界） | `src/persona/` | ✅ schema 与 Prompt 装配；部分字段未消费 |
+| L1 弹性规则裁决（resistance / immutable / 三阶段） | `src/persona/prompt-builder.ts` | 🚧 只在非流式路径生效；突破主要影响内部状态 |
+| 消息门 + 破例 | `src/impulse/` | 🚧 基础可用，延迟回复已落库+补发 |
+| T2 情节记忆 + 衰减 | `src/data/` | ✅ 存储/衰减可用；检索为字符匹配 |
+| 主动生活流（心跳触发） | `src/pipeline/orchestrator.ts` | 🚧 可用，M0 已加日上限与最小间隔 |
+| 基线漂移 / 因果链 / 自我叙事 / 内心独白 | `src/evolution/` | 🚧 模块存在、多未闭环或未持久化 |
+| 外部感知（天气/时间/热点） | `src/world/` | 🚧 天气与时间可用；热点是硬编码话题池 |
 
 ---
 
 ## 命令行
 
-| 命令 | 功能 |
-|------|------|
-| `/quit` | 退出 |
-| `/stats` | 会话统计（消息数、记忆状态、在线时长） |
-| `/weather` | 今天的天气和她的感受 |
+| 命令 | 作用 |
+|---|---|
+| `npm run doctor` | 环境体检（推荐第一步） |
+| `npm run dev` | CLI 对话模式 |
+| `npm run qq` | QQ 桥接模式（NapCatQQ / OneBot 11） |
+| `npm run setup` | 交互式配置向导 |
+| `npm run typecheck` | TypeScript 类型检查（0 错误） |
+| `npm test` | 运行单元测试（vitest） |
+| `npm run build` | 编译到 `dist/`（`npm start` 启动的是微信桩入口，不是主入口） |
+| `npm run persona:list` | 列出可用人设 |
+| `npm run persona:check <id>` | 校验指定人设 |
+| `npm run persona:create` | 脚手架创建人设 |
+| `npm run persona:narrate` | 叙事式创建人设（正则推导，非 LLM） |
+| `npm run wechat` | 微信桥接（🗺 仅 echo 桩，不可用） |
 
 ---
 
@@ -175,11 +306,12 @@ npm run dev
 **方式**：Fork 项目 → 在 `personas/` 下新建目录 → 放入 `persona.json` 和 `SKILL.md` → 提 PR。
 
 **提交前检查**：
+
 ```bash
 npm run persona:check <your-persona-id>   # 零错误才能通过
 ```
 
-**人设创作指南**：[PERSONA_GUIDE.md](PERSONA_GUIDE.md)——从五种创作入口开始。
+**人设创作指南**：[PERSONA_GUIDE.md](PERSONA_GUIDE.md)——从五种创作入口开始。注意：指南中的部分校验规则与字段消费说明尚未与代码对齐（审计 3-16），以实际 `persona:check` 结果为准。
 
 **注意**：提交的人设不要包含真实个人信息。`persona.json` 中的 `howWeMet`、`keyEvents` 等字段应是虚构内容。
 
@@ -190,37 +322,41 @@ npm run persona:check <your-persona-id>   # 零错误才能通过
 ```
 karen-persona/
 ├── src/
-│   ├── persona/       # 人设引擎（六层结构、情绪、规则裁决）
-│   ├── evolution/     # 演化引擎（漂移、因果链、记忆代谢、进化日志）
-│   ├── impulse/       # 冲动引擎（消息门、触发、沉默弧线、Unsplash）
-│   ├── world/         # 外部感知（天气、时间、网络热点）
-│   ├── ai/            # AI 引擎（多模型路由、流式、视觉）
-│   ├── data/          # 记忆系统（向量存储、RAG 检索、对话历史）
-│   ├── pipeline/      # 管线编排器
-│   ├── bridge/        # QQ 桥接（NapCat/OneBot）
-│   └── router/        # 消息路由 + 复杂度分级
-├── personas/          # 人设模板 + Skill 定义
-├── data/              # 运行时数据（记忆、会话）
-├── scripts/           # 启动/部署工具
-└── config.yaml        # 用户配置
+│   ├── persona/       # 人设引擎（六层 schema、校验、情绪、Prompt 组装）
+│   ├── evolution/     # 演化引擎（漂移、因果链、记忆代谢、进化日志）—— 🚧 多未闭环
+│   ├── impulse/       # 冲动引擎（消息门、触发、沉默弧线、表达渲染）—— 🚧
+│   ├── world/         # 外部感知（天气、时间、热点）
+│   ├── ai/            # AI 引擎（DeepSeek 路由、流式、视觉、Unsplash）
+│   ├── data/          # 记忆系统（SQLite 存储、RAG 检索、会话历史、路径解析）
+│   ├── pipeline/      # 管线编排器（orchestrator）
+│   ├── bridge/        # QQ 桥接（NapCat/OneBot 11）；wechaty 为微信桩
+│   ├── eval/          # 评估脚本与实验代码（无产品入口）—— 🚧
+│   ├── router/        # 消息路由实验代码（当前未被主路径引用）—— 💀
+│   ├── doctor.ts      # 环境体检
+│   └── setup.ts       # 配置向导
+├── personas/          # 人设模板（persona.json + SKILL.md）
+├── scripts/           # Windows 启动/托盘脚本
+├── docs/              # 产品审计报告等
+├── data/              # 运行时数据（gitignore，首次启动创建）
+└── config.yaml        # 用户配置（从 config.yaml.example 复制）
 ```
 
 ---
 
 ## 技术栈
 
-Node.js + TypeScript · DeepSeek V4 (flash/pro 自动路由) · Qwen-VL Max · sqlite-vec · NapCatQQ / OneBot 11
+Node.js 22+ · TypeScript 5.6 · DeepSeek V4（flash/pro 自动路由）· Qwen-VL Max（图片识别）· OpenWeatherMap（天气）· Unsplash（图库）· better-sqlite3（SQLite）· sqlite-vec（已引入，检索尚未使用）· NapCatQQ / OneBot 11（QQ 桥接）· wechaty（微信，仅桩）· vitest（测试）· GitHub Actions（CI）
 
 ---
 
 ## 注意事项
 
 - **这是 AI，不是真人。** 请勿在心理脆弱期过度依赖。
-- QQ 桥接使用 NapCatQQ 协议，本项目不提供 QQ 账号。
+- QQ 桥接使用 NapCatQQ 协议，本项目不提供 QQ 账号，封号风险由使用者承担。
 - 本项目为开源学习与个人疗愈用途。使用者自行承担使用后果。
 
 ---
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2026 QIU0826

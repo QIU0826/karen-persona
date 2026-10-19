@@ -1,0 +1,35 @@
+name: CI
+
+# 提交到任意分支、以及所有 PR 都会跑：
+#   安装锁定依赖（npm ci）→ 类型检查（tsc --noEmit）→ 单元测试（vitest run）
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: typecheck & test (Node 22)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # 仓库使用 npm + package-lock.json；CI 用 npm ci 保证可复现安装
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
