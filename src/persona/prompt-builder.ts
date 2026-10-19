@@ -219,8 +219,8 @@ export function checkRuleBreach(
 function detectByKeywords(text: string, mode: InnerMode): ScriptTrigger | null {
   const t = text.trim();
 
-  // P1-3: 媒体合成标记 → media_shared
-  if (/^\[图片\]|^\[语音\]/.test(t)) return "media_shared";
+  // P1-3: 媒体合成标记 → media_shared（图片/语音/QQ 表情/表情包/引用图）
+  if (/^\[(图片|语音|表情|表情包)/.test(t)) return "media_shared";
 
   // positive_affection — 仅对短消息
   if (t.length <= 8) {
@@ -479,10 +479,13 @@ export function buildScriptsPart(active: ActiveScript): string {
   ];
   if (s.rhythm) lines.push(`说话节奏：${s.rhythm}`);
 
-  // media_shared: 图片内容已在消息中描述（[图片：...]），自然回应即可
+  // media_shared: 图片内容已在消息中描述，自然回应即可
   if (s.trigger === "media_shared") {
     lines.push("");
-    lines.push("图片内容已经在消息里描述了（[图片：...]里面的就是），根据描述自然回应，不用假装看不见。");
+    lines.push(
+      "图片/表情的内容已经在消息里描述了（[图片：...] / [表情：...] / [表情包：...]），根据描述自然回应，不用假装看不见。" +
+        "如果是表情，可以回一个语气词、颜文字或反手用一个表情，不必长篇解释。",
+    );
   }
 
   return lines.join("\n");

@@ -66,6 +66,7 @@ import {
   type CqCode,
 } from "./onebot.js";
 import { describeImage } from "../ai/vision.js";
+import { pickSticker, toStickerCqCode } from "../impulse/stickers.js";
 import { execSync } from "node:child_process";
 import { createLogger, configureLogger } from "../obs/logger.js";
 import { startHealthServer, type HealthServerHandle } from "../obs/health-server.js";
@@ -83,6 +84,10 @@ const MIN_DEFERRED_DELAY_MS = 500;
 const MAX_DEFERRED_DELAY_MS = 24 * 60 * 60 * 1000;
 /** 非法连接/握手失败的日志里最多展示多少字符 */
 const MAX_LOG_VALUE_LENGTH = 120;
+/** 贴纸：主动发图概率 / 冷却（同一用户） / 收到表情后的回应概率 */
+const STICKER_PROBABILITY = 0.22;
+const STICKER_REPLY_TO_STICKER_PROBABILITY = 0.55;
+const STICKER_COOLDOWN_MS = 5 * 60 * 1000;
 
 /** 结构化日志 scope=qq（脱敏、TTY 可读；只记录长度/摘要，不落消息正文）。 */
 const log = createLogger("qq");
@@ -100,6 +105,11 @@ function errMessage(err: unknown): string {
 /** 把 orchestrator 产出的 qqFace CQ 码包装为受控 CQ 消息（避免被当作普通文本转义） */
 function asCqCode(cq: string): CqCode {
   return { type: "cqcode", cq };
+}
+
+/** 去掉 raw_message 中的 CQ 码，只留纯文本（用于图片/表情附带文字） */
+function stripCqCodes(raw: string): string {
+  return raw.replace(/\[CQ:[^\]]+\]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 /** 只保留长度信息：日志中不落任何消息正文 */
@@ -160,6 +170,8 @@ const userMessageTimestamps = new Map<number, number[]>();
 const messageDedup = new MessageIdDedup(DEDUP_CAPACITY);
 /** 每个用户最多一个待补发的延迟回复（timer + 持久化记录 id） */
 const userDeferredTimers = new Map<number, { timer: ReturnType<typeof setTimeout>; pendingId: number }>();
+/** 上次发贴纸的时间（每用户冷却） */
+const userLastStickerAt = new Map<number, number>();
 
 // 静默忽略的非白名单账号（只统计数量，日志不落 QQ 号）
 let ignoredNonWhitelistedMessages = 0;
@@ -939,6 +951,43 @@ async function streamPrivateReply(params: {
   return { sentCount, interrupted: false };
 }
 
+/**
+ * 文字回复后，按情绪/时段「顺手」发一个本地贴纸。
+ * - 冷却 5 分钟；收到对方表情时更愿意回一个；
+ * - 冲突未化解时不发；资源/发送失败静默降级。
+ */
+function maybeSendSticker(
+  userId: number,
+  state: ConversationState,
+  inboundSticker: boolean,
+): void {
+  if (process.env.STICKER_ENABLED === "0") return;
+
+  const now = Date.now();
+  const last = userLastStickerAt.get(userId) ?? 0;
+  if (now - last < STICKER_COOLDOWN_MS) return;
+
+  const conflictAt = state.relationshipState.lastConflictAt;
+  const conflictActive = conflictAt !== null && now - conflictAt < 24 * 60 * 60 * 1000;
+
+  const sticker = pickSticker({
+    emotion: state.emotionState.vector,
+    hour: new Date(now).getHours(),
+    conflictActive,
+  });
+  if (!sticker) return;
+
+  const probability = inboundSticker ? STICKER_REPLY_TO_STICKER_PROBABILITY : STICKER_PROBABILITY;
+  if (Math.random() > probability) return;
+
+  const cq = toStickerCqCode(sticker);
+  if (!cq) return;
+
+  userLastStickerAt.set(userId, now);
+  sendPrivateMsg(userId, asCqCode(cq));
+  log.info("sticker.sent", { user_id: userId, sticker: sticker.id, reply_to_sticker: inboundSticker });
+}
+
 async function handlePrivateBatch(
   events: PrivateMessageEvent[],
   sharedBase: SharedBase,
@@ -951,12 +1000,14 @@ async function handlePrivateBatch(
 
   // 处理每个事件的媒体，合并文本
   const texts: string[] = [];
+  let inboundSticker = false;
   for (const event of events) {
     const media = detectMedia(event);
 
-    // 表情包 → 跳过
+    // 表情/表情包不再丢弃：转成 [表情：xxx] 合成文本，让她能做出反应
     if (media && (media.type === "face" || media.type === "mface")) {
-      continue;
+      inboundSticker = true;
+      log.info("sticker.received", { user_id: userId, type: media.type });
     }
 
     // P2-e: 图片识别
@@ -969,8 +1020,12 @@ async function handlePrivateBatch(
       }
     }
 
-    // 引用消息：拼接引用原文
+    // 图片/表情附带文字时保留文字（raw_message 去掉 CQ 码后的残余）
     let rawText = syntheticText || event.raw_message || "";
+    if (syntheticText && (media?.type === "image" || media?.type === "face" || media?.type === "mface")) {
+      const residual = stripCqCodes(event.raw_message ?? "");
+      if (residual) rawText = `${syntheticText} ${residual}`;
+    }
     if (media?.type === "reply") {
       let quoted = getReplyContext(media.data);
       // 回退：NapCatQQ 未附带原文时，用 message_id 调 get_msg API 回查
@@ -1044,6 +1099,8 @@ async function handlePrivateBatch(
         { userId, userName, text, state, sharedBase },
         outcome.deferredDelayMs,
       );
+    } else if (outcome.sentCount > 0) {
+      maybeSendSticker(userId, state, inboundSticker);
     }
   } catch (err: unknown) {
     log.error("reply.failed", { user_id: userId, error: errMessage(err) });

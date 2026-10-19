@@ -228,13 +228,25 @@ describe("detectMedia", () => {
     expect(media!.data?.text).toBe("原始消息内容");
   });
 
-  it("表情包返回空 syntheticText", () => {
-    const event = makePrivateEvent([
-      { type: "face", data: { id: "178" } },
-    ]);
+  it("QQ 表情转成可理解的合成文本", () => {
+    const event = makePrivateEvent([{ type: "face", data: { id: "14" } }]);
     const media = detectMedia(event);
     expect(media!.type).toBe("face");
-    expect(media!.syntheticText).toBe("");
+    expect(media!.syntheticText).toBe("[表情：微笑]");
+  });
+
+  it("未知 QQ 表情回退为「表情」", () => {
+    const event = makePrivateEvent([{ type: "face", data: { id: "9999" } }]);
+    expect(detectMedia(event)!.syntheticText).toBe("[表情：表情]");
+  });
+
+  it("表情包（mface）转成合成文本", () => {
+    const event = makePrivateEvent([
+      { type: "mface", data: { summary: "[动画表情]", url: "http://example.com/a.gif" } },
+    ]);
+    const media = detectMedia(event);
+    expect(media!.type).toBe("mface");
+    expect(media!.syntheticText).toBe("[表情包：动画表情]");
   });
 });
 
@@ -366,6 +378,13 @@ describe("isAllowedCqCode", () => {
     expect(isAllowedCqCode("[CQ:face,id=178]")).toBe(true);
     expect(isAllowedCqCode("[CQ:face,id=0]")).toBe(true);
     expect(isAllowedCqCode("  [CQ:face,id=12]  ")).toBe(true);
+  });
+
+  it("放行内部生成的贴纸 base64 图片", () => {
+    const b64 = "A".repeat(80);
+    expect(isAllowedCqCode(`[CQ:image,file=base64://${b64}]`)).toBe(true);
+    expect(isAllowedCqCode("[CQ:image,file=http://evil.com/a.png]")).toBe(false);
+    expect(isAllowedCqCode("[CQ:image,file=base64://short]")).toBe(false);
   });
 
   it("拒绝其它 CQ 码", () => {

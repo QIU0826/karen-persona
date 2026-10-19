@@ -18,7 +18,13 @@ import { timingSafeEqual } from "node:crypto";
 export const QQ_MAX_MESSAGE_LENGTH = 1000;
 
 /** 唯一允许绕过 CQ 转义的受控 CQ 码：QQ 内置表情 */
-const ALLOWED_CQ_PATTERN = /^\[CQ:face,id=\d{1,4}\]$/;
+/**
+ * 允许出站的 CQ 码白名单：
+ * - face：QQ 内置表情（qqFace）
+ * - image：本地贴纸（base64，仅由 stickers.ts 生成，模型输出永远不会走到这里——
+ *   模型文本会先经过 escapeCqText，CQ 码只可能由内部代码构造）
+ */
+const ALLOWED_CQ_PATTERN = /^\[CQ:(face,id=\d{1,4}|image,file=base64:\/\/[A-Za-z0-9+/=]{50,})\]$/;
 
 const VALID_POST_TYPES = new Set(["message", "notice", "request", "meta_event"]);
 
@@ -709,6 +715,32 @@ export interface MessageMedia {
  * 检测消息中的媒体类型并返回合成标记。
  * 对畸形/缺失的 message 字段容错：无法识别时返回 null。
  */
+// ── QQ 内置表情（face）名称 ────────────────────
+
+/** 常用 QQ face id → 中文名；只用于把入站表情转成可理解的合成文本 */
+const QQ_FACE_NAMES: Record<string, string> = {
+  "0": "惊讶", "1": "撇嘴", "2": "色", "3": "发呆", "4": "得意", "5": "流泪",
+  "6": "害羞", "7": "闭嘴", "8": "睡", "9": "大哭", "10": "尴尬", "11": "发怒",
+  "12": "调皮", "13": "呲牙", "14": "微笑", "15": "难过", "16": "酷", "17": "冷汗",
+  "18": "抓狂", "19": "吐", "20": "偷笑", "21": "可爱", "22": "白眼", "23": "傲慢",
+  "24": "饥饿", "25": "困", "26": "惊恐", "27": "流汗", "28": "憨笑", "29": "悠闲",
+  "30": "奋斗", "31": "咒骂", "32": "疑问", "33": "嘘", "34": "晕", "35": "折磨",
+  "36": "衰", "37": "骷髅", "38": "敲打", "39": "再见", "40": "擦汗", "41": "抠鼻",
+  "42": "鼓掌", "43": "糗大了", "44": "坏笑", "45": "左哼哼", "46": "右哼哼",
+  "47": "哈欠", "48": "鄙视", "49": "委屈", "50": "快哭了", "51": "阴险",
+  "52": "亲亲", "53": "吓", "54": "可怜", "55": "爱心", "56": "心碎", "57": "啤酒",
+  "58": "咖啡", "59": "蛋糕", "60": "玫瑰", "61": "凋谢", "62": "示爱", "63": "爱心",
+  "64": "男孩", "65": "女孩", "66": "握手", "67": "胜利", "68": "抱拳", "69": "勾引",
+  "70": "拳头", "71": "差劲", "72": "爱你", "73": "NO", "74": "OK", "75": "爱情",
+  "76": "飞吻", "77": "跳跳", "78": "发抖", "79": "怄火", "80": "西瓜", "81": "啤酒",
+};
+
+/** 把入站 QQ 内置表情 id 转成中文名（未知回退「表情」） */
+export function describeQqFace(id: string | undefined | null): string {
+  if (!id) return "表情";
+  return QQ_FACE_NAMES[id] ?? "表情";
+}
+
 export function detectMedia(event: PrivateMessageEvent): MessageMedia | null {
   if (!event) return null;
   const segments = getSegments(event.message);
@@ -736,13 +768,23 @@ export function detectMedia(event: PrivateMessageEvent): MessageMedia | null {
         syntheticText: typeof event.raw_message === "string" ? event.raw_message : "",
         data: extractCqData(segments, "reply"),
       };
-    case "face":
-    case "mface":
+    case "face": {
+      const data = extractCqData(segments, "face");
       return {
-        type: cqType,
-        syntheticText: "",
-        data: null,
+        type: "face",
+        syntheticText: `[表情：${describeQqFace(data?.id)}]`,
+        data,
       };
+    }
+    case "mface": {
+      const data = extractCqData(segments, "mface");
+      const summary = data?.summary?.replace(/^\[|\]$/g, "").slice(0, 20);
+      return {
+        type: "mface",
+        syntheticText: summary ? `[表情包：${summary}]` : "[表情包]",
+        data,
+      };
+    }
     default:
       return {
         type: cqType as MediaType,

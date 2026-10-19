@@ -93,6 +93,7 @@
 - **BUG-2 延迟队列持久化**：`src/data/pending-queue.ts` + 桥接恢复；实测重启后到点补发成功。
 - **IMP-1 图片描述增强**：30–60 字描述 + max_tokens 240，单测已更新。
 - **步骤 3 可观测最小闭环（已完成）**：`src/obs/logger.ts`（JSON lines/脱敏/TTY 可读）、`cost-tracker.ts`（SQLite `llm_usage`，DeepSeek 峰谷价）、`health-server.ts`（`/health` + `/cost`，仅 127.0.0.1:18081）；qq/chat 关键链路接结构化日志；PM2 改跑 dist。实测 `/health` 200、单次调用成本正确入账；30 文件 / 419 用例全绿。
+- **步骤 4 表情/贴纸（已完成）**：入站 face/mface 转合成文本；本地贴纸库（11 个 Twemoji，CC-BY 4.0）；按情绪/时段/冲突状态选择，22% 概率（收到表情 55%）、5 分钟冷却；仅私聊；CQ 白名单只放行内部 base64 图片。31 文件 / 429 用例全绿。
 - **P0 记忆检索闭环（技术雷达第 1 件事）**：语义 embedding 双列、sqlite-vec 启用、FTS5 中文 BM25、RRF 混合、阈值/去重/来源过滤；真实库 22 条记忆 schema v2 迁移验证通过；27 文件 / 386 用例全绿。语义路径需 Qwen Key 才能实跑（当前降级 n-gram+BM25）。
 
 ## 三、修复顺序（已批准）
