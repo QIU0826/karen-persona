@@ -5,9 +5,12 @@
  */
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
+import { dbPath, ensureDataDir } from "./paths.js";
 
 let db: Database.Database | null = null;
-const DB_PATH = "data/memory.sqlite";
+
+/** 当前 schema 版本（PRAGMA user_version）。修改表结构时 +1 并补迁移。 */
+const SCHEMA_VERSION = 1;
 
 let currentPersona: string | null = null;
 
@@ -22,10 +25,14 @@ export function getCurrentPersona(): string {
 
 export function getVectorDb(): Database.Database {
   if (db) return db;
-  db = new Database(DB_PATH);
+  ensureDataDir();
+  db = new Database(dbPath());
   db.pragma("journal_mode = WAL");
+  db.pragma("busy_timeout = 5000");
+  db.pragma("synchronous = NORMAL");
   sqliteVec.load(db);
   initTables(db);
+  migrate(db);
   return db;
 }
 
@@ -56,7 +63,8 @@ function initTables(db: Database.Database): void {
       half_life_days REAL DEFAULT 30.0,
       emotional_weight REAL DEFAULT 0.0,
       created_at TEXT DEFAULT (datetime('now')),
-      last_recalled_at TEXT DEFAULT (datetime('now'))
+      last_recalled_at TEXT DEFAULT (datetime('now')),
+      embedding TEXT
     )
   `);
 
@@ -74,10 +82,44 @@ function initTables(db: Database.Database): void {
 }
 
 function migrateAddColumn(db: Database.Database, table: string, column: string, def: string): void {
+  if (hasColumn(db, table, column)) return;
   try {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`);
   } catch {
-    // 列已存在 → 忽略
+    // 并发场景下表结构可能刚被其他进程改过 → 忽略
+  }
+}
+
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.some((r) => r.name === column);
+}
+
+/**
+ * 幂等迁移。修复历史库缺失 embedding 列的问题（新库建表已包含）。
+ * 同时创建检索所需索引、写入 schema 版本。
+ */
+function migrate(db: Database.Database): void {
+  // v1：t2_episodes.embedding（历史库缺失会导致 backfill/检索直接报错）
+  migrateAddColumn(db, "t2_episodes", "embedding", "TEXT");
+  migrateAddColumn(db, "t2_episodes", "last_recalled_at", "TEXT");
+
+  // 索引尽力而为：历史库可能缺列，不应让启动失败
+  for (const stmt of [
+    "CREATE INDEX IF NOT EXISTS idx_t2_persona_strength ON t2_episodes(persona_id, strength DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_t2_persona_created ON t2_episodes(persona_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_t1_persona_created ON t1_snapshots(persona_id, created_at DESC)",
+  ]) {
+    try {
+      db.exec(stmt);
+    } catch {
+      // 老库列不齐时跳过
+    }
+  }
+
+  const current = Number(db.pragma("user_version", { simple: true })) || 0;
+  if (current !== SCHEMA_VERSION) {
+    db.pragma(`user_version = ${SCHEMA_VERSION}`);
   }
 }
 

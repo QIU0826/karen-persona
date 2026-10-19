@@ -2,7 +2,7 @@
 import { chat, chatStream } from "../ai/chat.js";
 import { classifyComplexity } from "../ai/router.js";
 import { addMessage, buildChatMessages, loadSession, type ConversationSession } from "../data/history.js";
-import { decideGate, getBusyLevel, type GateContext } from "../impulse/message-gate.js";
+import { decideGate, getBusyLevel, type GateAction, type GateContext } from "../impulse/message-gate.js";
 import { insertT1Snapshot, insertEpisode, setCurrentPersona, applyGlobalDecay, archiveDecayedEpisodes, closeVectorDb, backfillEpisodeVectors } from "../data/vector.js";
 import { generateEmbedding } from "../data/embedding.js";
 import {
@@ -40,7 +40,7 @@ import {
   type CorrectionOverlay,
   type InnerState,
 } from "../persona/prompt-builder.js";
-import { mockWeather, fetchWeather, perceiveWeather, type WeatherPerception } from "../world/weather.js";
+import { mockWeather, fetchWeather, perceiveWeather, clearWeatherCache, type WeatherPerception } from "../world/weather.js";
 import { getTrendingTopics, matchTrendingTopics, buildTrendingContext } from "../world/trending-fetcher.js";
 import { deriveStance } from "../world/stance.js";
 import { perceiveTime, buildMomentTag } from "../world/time-awareness.js";
@@ -142,6 +142,16 @@ export interface ConversationState {
   lastViewUpdateAt: number | null;
   /** 是否正在生成 herView（防止并发） */
   herViewGenerating: boolean;
+  /** 连续被消息门沉默的次数（≥3 时强制回复，避免长期「装死」） */
+  consecutiveSilences: number;
+  /** 上次天气拉取时间戳（30 分钟 TTL，避免只在启动时拉一次） */
+  weatherFetchedAt: number;
+  /** 上次主动消息发送时间戳（治理：避免高频主动打扰） */
+  lastProactiveSentAt: number;
+  /** 当天主动消息计数 */
+  proactiveCountToday: number;
+  /** 主动消息计数所属日期（YYYY-MM-DD，本地时区） */
+  proactiveDay: string;
 }
 
 export interface PipelineResult {
@@ -153,6 +163,18 @@ export interface PipelineResult {
   imageUrl?: string;
   /** P2-c: 配图文字 */
   imageCaption?: string;
+  /** 消息门判定「晚点回」：调用方应在 delayMs 后以 {bypassGate:true, skipUserPersist:true} 重新调用 */
+  deferred?: { delayMs: number };
+  /** 消息门判定「这一轮不回」（沉默） */
+  silenced?: boolean;
+}
+
+/** processMessage / processMessageStream 的可选行为开关 */
+export interface ProcessOptions {
+  /** 跳过消息门，强制回复（用于延迟补回复/连续沉默兜底） */
+  bypassGate?: boolean;
+  /** 跳过用户消息落库（延迟补回复时原消息已落库） */
+  skipUserPersist?: boolean;
 }
 
 // ── 初始化 ────────────────────────────────────
@@ -217,6 +239,11 @@ export async function initConversation(persona: Persona, config: AppConfig): Pro
     lastViewUpdateCloseness: persona.relationship.closeness,
     lastViewUpdateAt: null,
     herViewGenerating: false,
+    consecutiveSilences: 0,
+    weatherFetchedAt: Date.now(),
+    lastProactiveSentAt: 0,
+    proactiveCountToday: 0,
+    proactiveDay: "",
   };
 }
 
@@ -329,15 +356,114 @@ function defaultBehavioralScripts(): BehavioralScript[] {
   ];
 }
 
+// ── M0: 共享门控上下文 / 天气刷新 ──────────────
+
+const WEATHER_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * 构造消息门上下文。
+ * CLI 与 QQ、流式与非流式共用同一套上下文，避免「写死 messageCountToday=0」导致的门控失真。
+ */
+export function buildGateContext(
+  state: ConversationState,
+  userInput: string,
+  now: Date = new Date(),
+): GateContext {
+  const { persona, emotionState, guiltState, session } = state;
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const userMsgsToday = session.messages.filter(
+    (m) => m.role === "user" && m.timestamp >= todayStart
+  );
+  const messageCountToday = userMsgsToday.length;
+  const isRapidFollowUp =
+    userMsgsToday.length >= 2 &&
+    userMsgsToday[userMsgsToday.length - 1].timestamp -
+      userMsgsToday[userMsgsToday.length - 2].timestamp <
+      5 * 60 * 1000;
+
+  const trimmed = userInput.trim();
+  const msgType: GateContext["messageType"] =
+    /^\[图片/.test(trimmed) ? "image" : /^\[语音/.test(trimmed) ? "voice" : "text";
+
+  return {
+    personaId: persona.name,
+    currentHour: now.getHours(),
+    isWorkHours: now.getHours() >= 8 && now.getHours() < 17,
+    emotionVector: emotionState.vector,
+    guilt: guiltState.guilt,
+    messageType: msgType,
+    isAvoidedTopic: persona.hardRules.triggerWords.some((t) => userInput.includes(t.word)),
+    isNaturalEnding: /^(嗯|好|ok|哈哈|好的|行|哦)$/i.test(trimmed),
+    messageCountToday,
+    isRapidFollowUp,
+    isQuickChat: trimmed.length <= 6 && /[\?？]/.test(trimmed),
+    closeness: persona.relationship.closeness,
+    dailyRhythm: persona.world.dailyRhythm as Array<{ time: string; activity: string }>,
+  };
+}
+
+/**
+ * 决定本轮门控动作。
+ * - bypassGate：延迟补回复 / 连续沉默兜底时强制回复
+ * - consecutiveSilences ≥ 3：即使门控想沉默，也强制回一次，避免用户被永久 ghost
+ */
+function decideGateForTurn(
+  state: ConversationState,
+  ctx: GateContext,
+  opts: ProcessOptions,
+): GateAction {
+  if (opts.bypassGate) return { type: "reply", delayMs: 800 };
+  if (state.consecutiveSilences >= 3) {
+    console.log(`[消息门] 连续沉默 ${state.consecutiveSilences} 次，强制回复一次`);
+    return { type: "reply", delayMs: 1200 };
+  }
+  return decideGate(ctx);
+}
+
+/** 天气每 30 分钟刷新一次；失配时重新允许应用 moodOffset */
+export async function refreshWeatherIfStale(state: ConversationState): Promise<void> {
+  if (Date.now() - state.weatherFetchedAt < WEATHER_TTL_MS) return;
+  state.weatherFetchedAt = Date.now();
+  try {
+    // 绕过 weather.ts 的 30 分钟缓存，确保到达 TTL 时真的取到新数据
+    clearWeatherCache();
+    const weather = await fetchWeather(state.config.location);
+    if (!weather) return;
+    const oldCondition = state.weatherPerception.raw.condition;
+    state.weatherPerception = perceiveWeather(
+      weather,
+      state.stance.weather,
+      state.emotionState.baseline,
+      null,
+    );
+    if (oldCondition !== weather.condition) {
+      state.weatherApplied = false;
+      console.log(`[天气] 刷新: ${weather.description} ${weather.temp}°C`);
+    }
+  } catch {
+    // 天气失败不影响对话
+  }
+}
+
+/** 合并附加上下文（保持拼接顺序稳定，便于排查） */
+function narrationContext(style: string, trending: string, interrupt: string, narrative: string): string {
+  return style + trending + interrupt + narrative;
+}
+
 // ── 单轮处理 ──────────────────────────────────
+
 
 export async function processMessage(
   state: ConversationState,
   userInput: string,
+  opts: ProcessOptions = {},
 ): Promise<PipelineResult> {
   const logs: string[] = [];
   const now = new Date();
   const { persona, config, emotionState, guiltState, socialTact, driftState, causalChains, silenceState, session, stance, weatherPerception } = state;
+
+  // A0. 天气定时刷新（30 分钟 TTL）
+  await refreshWeatherIfStale(state);
 
   // A. 情绪自然恢复
   Object.assign(emotionState, naturalRecover(emotionState));
@@ -374,41 +500,24 @@ export async function processMessage(
   Object.assign(guiltState, dailyDecay(guiltState));
   const resentment = resentmentEffect(guiltState);
 
-  // E. 消息门
-  // 当天消息计数 + 连续消息检测
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const userMsgsToday = session.messages.filter(
-    m => m.role === "user" && m.timestamp >= todayStart
-  );
-  const messageCountToday = userMsgsToday.length;
-  const isRapidFollowUp =
-    userMsgsToday.length >= 2 &&
-    (userMsgsToday[userMsgsToday.length - 1].timestamp -
-       userMsgsToday[userMsgsToday.length - 2].timestamp) < 5 * 60 * 1000;
-  const trimmed = userInput.trim();
-  const isQuickChat = trimmed.length <= 6 && /[\?？]/.test(trimmed);
+  // E. 消息门（与流式路径共用 buildGateContext）
+  const gateContext = buildGateContext(state, userInput, now);
+  const gate = decideGateForTurn(state, gateContext, opts);
 
-  // P1-3: 从合成标记推断消息类型
-  const msgType: GateContext["messageType"] =
-    /^\[图片\]/.test(trimmed) ? "image" :
-    /^\[语音\]/.test(trimmed) ? "voice" :
-    "text";
-
-  const gate = decideGate({
-    personaId: persona.name,
-    currentHour: now.getHours(),
-    isWorkHours: now.getHours() >= 8 && now.getHours() < 17,
-    emotionVector: emotionState.vector,
-    guilt: guiltState.guilt,
-    messageType: msgType,
-    isAvoidedTopic: persona.hardRules.triggerWords.some(t => userInput.includes(t.word)),
-    isNaturalEnding: /^(嗯|好|ok|哈哈|好的|行|哦)$/i.test(trimmed),
-    messageCountToday,
-    isRapidFollowUp,
-    isQuickChat,
-    closeness: persona.relationship.closeness,
-    dailyRhythm: persona.world.dailyRhythm as Array<{ time: string; activity: string }>,
-  });
+  if (gate.type === "delay") {
+    logs.push(`[消息门] 延迟 ${Math.round(gate.resumeAfterMs / 1000)}s: ${gate.reason}`);
+    if (!opts.skipUserPersist) addMessage(session, "user", userInput);
+    return { reply: "", logs, deferred: { delayMs: gate.resumeAfterMs } };
+  }
+  if (gate.type === "silence") {
+    logs.push(`[消息门] 沉默: ${gate.reason}`);
+    if (gate.silenceType === "guilt_driven") {
+      Object.assign(guiltState, incurGuilt(guiltState, 0.05, "因沉默逃避而加重负债"));
+    }
+    if (!opts.skipUserPersist) addMessage(session, "user", userInput);
+    state.consecutiveSilences += 1;
+    return { reply: "", logs, silenced: true };
+  }
 
   // P2-b+P2-1: 自我叙事弧线
   const diaryReaction = await flipThroughDiary();
@@ -430,21 +539,8 @@ export async function processMessage(
     logs.push("[叙事] 弧线注入 prompt");
   }
 
-  if (gate.type === "delay") {
-    logs.push(`[消息门] 延迟: ${gate.reason}`);
-    return { reply: "", logs };
-  }
-  if (gate.type === "silence") {
-    logs.push(`[消息门] 沉默: ${gate.reason}`);
-    if (gate.silenceType === "guilt_driven") {
-      Object.assign(guiltState, incurGuilt(guiltState, 0.05, "因沉默逃避而加重负债"));
-    }
-    addMessage(session, "user", userInput);
-    return { reply: "", logs };
-  }
-
-  // F. 保存用户消息
-  addMessage(session, "user", userInput);
+  // F. 保存用户消息（延迟/沉默已提前返回；补回复模式跳过，避免重复）
+  if (!opts.skipUserPersist) addMessage(session, "user", userInput);
 
   // G. 纠正层
   const correction = applyCorrections(persona.name, userInput);
@@ -581,7 +677,7 @@ export async function processMessage(
   }
 
   // 结构化标签 + 风格参考 + RAG + 热点作为额外上下文
-  const fullSystem = systemPrompt + styleContext + trendingContext + interruptedNote + `\n${momentTag}`;
+  const fullSystem = systemPrompt + narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) + `\n${momentTag}`;
   const messages = buildChatMessages(session, fullSystem);
 
   // M. AI 回复（短期上下文 + 长期 RAG 上下文，均通过 ChatOptions 注入）
@@ -715,6 +811,7 @@ export async function processMessage(
     logs.push(`[Unsplash] 发图失败: ${err instanceof Error ? err.message : "未知错误"}`);
   }
 
+  state.consecutiveSilences = 0;
   return { reply, logs, qqFace: rendered.qqFace, imageUrl, imageCaption };
 }
 
@@ -779,6 +876,8 @@ export interface StreamFragment {
   text: string;
   /** QQ 表情 CQ 码（流结束后单独发送，仅最后一条 fragment 可能有值） */
   qqFace?: string;
+  /** 消息门判定「晚点回」：调用方应在 delayMs 后以 {bypassGate:true, skipUserPersist:true} 重新调用 */
+  deferred?: { delayMs: number };
 }
 
 /**
@@ -789,37 +888,39 @@ export interface StreamFragment {
 export async function* processMessageStream(
   state: ConversationState,
   userInput: string,
+  opts: ProcessOptions = {},
 ): AsyncGenerator<StreamFragment> {
-  const { persona, config, emotionState, guiltState, socialTact, session, weatherPerception } = state;
+  const { persona, config, emotionState, guiltState, socialTact, session, silenceState, weatherPerception } = state;
 
-  // 状态维护（精简版）
+  // 状态维护（与非流式保持一致：天气刷新/情绪恢复/沉默追踪）
+  await refreshWeatherIfStale(state);
   Object.assign(emotionState, naturalRecover(emotionState));
   Object.assign(guiltState, dailyDecay(guiltState));
+  if (!state.weatherApplied && Math.abs(weatherPerception.moodOffset) > 0.01) {
+    Object.assign(emotionState, adjustEmotion(emotionState, weatherPerception.moodOffset, "天气感知"));
+    state.weatherApplied = true;
+  }
+  Object.assign(silenceState, touchUserActivity(silenceState, userInput));
 
   const now = new Date();
   const hour = now.getHours();
 
-  // 消息门
-  const trimmed = userInput.trim();
-  const gate = decideGate({
-    personaId: persona.name,
-    currentHour: hour,
-    isWorkHours: hour >= 8 && hour < 17,
-    emotionVector: emotionState.vector,
-    guilt: guiltState.guilt,
-    messageType: /^\[图片\]/.test(trimmed) ? "image" : "text",
-    isAvoidedTopic: persona.hardRules.triggerWords.some(t => userInput.includes(t.word)),
-    isNaturalEnding: /^(嗯|好|ok|哈哈|好的|行|哦)$/i.test(trimmed),
-    messageCountToday: 0,
-    isRapidFollowUp: false,
-    isQuickChat: trimmed.length <= 6 && /[\?？]/.test(trimmed),
-    closeness: persona.relationship.closeness,
-    dailyRhythm: persona.world.dailyRhythm as Array<{ time: string; activity: string }>,
-  });
+  // 消息门（与 CLI/群聊共用同一上下文；修复此前写死 messageCountToday=0 的问题）
+  const gateContext = buildGateContext(state, userInput, now);
+  const gate = decideGateForTurn(state, gateContext, opts);
 
-  if (gate.type !== "reply") return;
+  if (gate.type === "delay") {
+    if (!opts.skipUserPersist) addMessage(session, "user", userInput);
+    yield { text: "", deferred: { delayMs: gate.resumeAfterMs } };
+    return;
+  }
+  if (gate.type === "silence") {
+    if (!opts.skipUserPersist) addMessage(session, "user", userInput);
+    state.consecutiveSilences += 1;
+    return;
+  }
 
-  addMessage(session, "user", userInput);
+  if (!opts.skipUserPersist) addMessage(session, "user", userInput);
 
   // 中断恢复
   let interruptedNote = "";
@@ -864,71 +965,104 @@ export async function* processMessageStream(
 
   // 流式 LLM 调用
   let fullReply = "";
+  let sentReply = "";
   let buffer = "";
   const BREAKS = /[\n。！？…]/;
   const SOFT_BREAKS = /[，,、]/;
+  let yieldedAny = false;
 
   const complexity = classifyComplexity(userInput);
 
   try {
-    const stream = chatStream(messages, persona, { ragContext, shortTermContext, complexity });
+    try {
+      const stream = chatStream(messages, persona, { ragContext, shortTermContext, complexity });
 
-    for await (const token of stream) {
-      fullReply += token;
-      buffer += token;
+      for await (const token of stream) {
+        fullReply += token;
+        buffer += token;
 
-      // 遇到自然断点 → 立即发送
-      const shouldSend =
-        BREAKS.test(token) ||
-        (SOFT_BREAKS.test(token) && buffer.length > 12);
+        // 遇到自然断点 → 立即发送
+        const shouldSend =
+          BREAKS.test(token) ||
+          (SOFT_BREAKS.test(token) && buffer.length > 12);
 
-      if (shouldSend) {
+        if (shouldSend) {
+          const frag = buffer.trim();
+          if (frag) {
+            sentReply += frag;
+            yieldedAny = true;
+            yield { text: frag };
+          }
+          buffer = "";
+        }
+      }
+
+      // 发送剩余内容
+      if (buffer.trim()) {
         const frag = buffer.trim();
-        if (frag) yield { text: frag };
-        buffer = "";
+        sentReply += frag;
+        yieldedAny = true;
+        yield { text: frag };
+      }
+    } catch (err) {
+      // 流式失败：仅在尚未发送任何内容时降级为非流式，避免「半句 + 完整」重复发送
+      if (!yieldedAny) {
+        console.log("[流式] 失败，回落到非流式");
+        fullReply = await chat(messages, persona, { ragContext, shortTermContext });
+        const lines = fullReply.split("\n").filter(Boolean);
+        for (const line of lines) {
+          const frag = line.trim();
+          if (!frag) continue;
+          sentReply += frag;
+          yieldedAny = true;
+          yield { text: frag };
+        }
+      } else {
+        console.log(
+          `[流式] 已发送部分内容后中断，跳过降级: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 
-    // 发送剩余内容
-    if (buffer.trim()) {
-      yield { text: buffer.trim() };
+    // 后处理：QQ 表情
+    const rendered = renderExpression(fullReply, {
+      emojiStyle: "动物系", stickerFrequency: 0.3,
+      isChatty: persona.speaking.catchphrases.some(p => p.includes("跟你说")),
+      stickerMode: state.stickerMode,
+      tone: {
+        style: persona.speaking.toneStyle || "natural",
+        frequency: persona.speaking.toneFrequency ?? 0.5,
+      },
+    }, {
+      impulseIntensity,
+      hasInternalStruggle: false,
+      emotionVector: emotionState.vector,
+      guilt: guiltState.guilt,
+      busyLevel: getBusyLevel(hour, persona.world.dailyRhythm as Array<{ time: string; activity: string }>),
+    });
+
+    if (rendered.qqFace) {
+      yield { text: "", qqFace: rendered.qqFace };
     }
-  } catch {
-    // 流式失败回落：用非流式 chat() 兜底
-    console.log("[流式] 失败，回落到非流式");
-    fullReply = await chat(messages, persona, { ragContext, shortTermContext });
-    const lines = fullReply.split("\n").filter(Boolean);
-    for (const line of lines) {
-      yield { text: line.trim() };
+  } finally {
+    // 无论正常结束还是被消费方中断（break），都持久化「实际已发送」的内容，避免记忆丢失
+    const persisted = sentReply || fullReply;
+    if (persisted) {
+      addMessage(session, "assistant", persisted);
+      storeConversationEpisode(userInput, persisted, emotionState.vector);
+      maybeCompressToT3();
+      maybeGenerateJournal();
+      insertT1Snapshot({
+        content: `用户: ${userInput.slice(0, 60)} | Karen: ${persisted.slice(0, 60)}`,
+        emotionVector: emotionState.vector,
+        closeness: persona.relationship.closeness,
+        guilt: guiltState.guilt,
+        summary: "[stream]",
+      });
+      triggerMonologue(state, userInput, persisted);
+      state.consecutiveSilences = 0;
     }
   }
-
-  // 后处理：QQ 表情
-  const rendered = renderExpression(fullReply, {
-    emojiStyle: "动物系", stickerFrequency: 0.3,
-    isChatty: persona.speaking.catchphrases.some(p => p.includes("跟你说")),
-    stickerMode: state.stickerMode,
-    tone: {
-      style: persona.speaking.toneStyle || "natural",
-      frequency: persona.speaking.toneFrequency ?? 0.5,
-    },
-  }, {
-    impulseIntensity,
-    hasInternalStruggle: false,
-    emotionVector: emotionState.vector,
-    guilt: guiltState.guilt,
-    busyLevel: getBusyLevel(hour, persona.world.dailyRhythm as Array<{ time: string; activity: string }>),
-  });
-
-  if (rendered.qqFace) {
-    yield { text: "", qqFace: rendered.qqFace };
-  }
-
-  // 保存
-  addMessage(session, "assistant", fullReply);
-  storeConversationEpisode(userInput, fullReply, emotionState.vector);
-  maybeCompressToT3();
-  maybeGenerateJournal();
 }
 
 /**
@@ -945,6 +1079,7 @@ export async function processProactive(
     causalChains, weatherPerception } = state;
 
   // 状态维护
+  await refreshWeatherIfStale(state);
   Object.assign(emotionState, naturalRecover(emotionState));
   Object.assign(guiltState, dailyDecay(guiltState));
 
@@ -956,6 +1091,19 @@ export async function processProactive(
     return null;
   }
   state.lastHeartbeatAt = now.getTime();
+
+  // 主动消息治理：单日上限 + 两次主动消息最小间隔（避免刷屏/打扰）
+  const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+  if (state.proactiveDay !== dayKey) {
+    state.proactiveDay = dayKey;
+    state.proactiveCountToday = 0;
+  }
+  const MAX_PROACTIVE_PER_DAY = 4;
+  const MIN_PROACTIVE_GAP_MS = 30 * 60 * 1000;
+  if (state.proactiveCountToday >= MAX_PROACTIVE_PER_DAY) return null;
+  if (state.lastProactiveSentAt && now.getTime() - state.lastProactiveSentAt < MIN_PROACTIVE_GAP_MS) {
+    return null;
+  }
 
   // ── 1. 收集触发候选 ──────────────────────────
 
@@ -1155,6 +1303,9 @@ export async function processProactive(
   // 保存到对话历史
   addMessage(session, "assistant", rawReply);
   session.t3.currentTopic = picked.description;
+  state.consecutiveSilences = 0;
+  state.lastProactiveSentAt = now.getTime();
+  state.proactiveCountToday += 1;
 
   logs.push(`[主动] 已发送: "${reply.slice(0, 50)}..."`);
   return { reply, logs, qqFace: rendered.qqFace };

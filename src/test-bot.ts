@@ -15,6 +15,53 @@ import {
 } from "./pipeline/orchestrator.js";
 import readline from "node:readline";
 
+/** 打印一轮结果（即时回复与延迟补回复共用） */
+function printResult(
+  personaName: string,
+  result: { reply: string; logs: string[]; imageUrl?: string; imageCaption?: string; silenced?: boolean },
+): void {
+  for (const log of result.logs) console.log(log);
+
+  if (!result.reply) {
+    if (result.silenced) console.log("（她这次没回——也可能只是去忙别的了）");
+    return;
+  }
+
+  const lines = result.reply.split("\n").filter(Boolean);
+  for (const line of lines) {
+    console.log(`${personaName}: ${line.trim()}`);
+  }
+  if (result.imageUrl) {
+    console.log(`\n📷 [${personaName} 分享了一张图] ${result.imageCaption ?? ""}`);
+    console.log(`   ${result.imageUrl}`);
+  }
+}
+
+/** 门控判定「晚点回」：到点后用 bypassGate 补一次回复，不重复保存用户消息 */
+function scheduleDelayedReply(
+  state: Awaited<ReturnType<typeof initConversation>>,
+  input: string,
+  delayMs: number,
+  personaName: string,
+): void {
+  const wait = Math.max(1_000, Math.min(delayMs, 12 * 60 * 60 * 1000));
+  const seconds = Math.round(wait / 1000);
+  console.log(`[她晚点回] 大约 ${seconds}s 后补回复（期间可以继续输入）`);
+  const timer = setTimeout(async () => {
+    try {
+      const result = await processMessage(state, input, {
+        bypassGate: true,
+        skipUserPersist: true,
+      });
+      console.log(`\n[补回复] 距离上次消息 ${seconds}s`);
+      printResult(personaName, result);
+    } catch (err: unknown) {
+      console.log(`[补回复失败] ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, wait);
+  timer.unref?.();
+}
+
 async function main() {
   console.log("╔══════════════════════════════════════╗");
   console.log("║   Karen — CLI 对话测试              ║");
@@ -111,19 +158,11 @@ async function main() {
     try {
       const result = await processMessage(state, input);
 
-      for (const log of result.logs) console.log(log);
-
-      if (result.reply) {
-        const lines = result.reply.split("\n").filter(Boolean);
-        for (let i = 0; i < lines.length; i++) {
-          if (i > 0) await new Promise(r => setTimeout(r, 400 + Math.random() * 800));
-          console.log(`${persona.name}: ${lines[i].trim()}`);
-        }
-      }
-
-      if (result.imageUrl) {
-        console.log(`\n📷 [${persona.name} 分享了一张图] ${result.imageCaption ?? ""}`);
-        console.log(`   ${result.imageUrl}`);
+      if (result.deferred) {
+        printResult(persona.name, result);
+        scheduleDelayedReply(state, input, result.deferred.delayMs, persona.name);
+      } else {
+        printResult(persona.name, result);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "未知错误";
@@ -134,7 +173,14 @@ async function main() {
   }
 
   rl.close();
+  closeVectorDb();
 }
+
+process.on("SIGINT", () => {
+  console.log("\n[退出] 正在清理...");
+  closeVectorDb();
+  process.exit(0);
+});
 
 main().catch((err) => {
   console.error("[致命错误]", err instanceof Error ? err.message : err);

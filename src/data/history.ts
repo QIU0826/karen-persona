@@ -1,5 +1,14 @@
+/**
+ * 会话历史（T0）持久化。
+ *
+ * 设计要点（M0 地基修复）：
+ * - 路径统一走 data/paths.ts，支持 KAREN_DATA_DIR
+ * - 原子写：先写 *.tmp 再 rename，避免进程被杀时留下半个 JSON
+ * - 同步写：会话文件很小（≤200 条消息），每条消息同步落盘换取可靠性
+ * - 容错：损坏的会话文件自动备份为 *.corrupt-<ts>，不阻塞启动
+ */
 import fs from "node:fs";
-import path from "node:path";
+import { dataFile, ensureDataDir, safeFileStem } from "./paths.js";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -20,31 +29,23 @@ export interface ConversationSession {
   };
 }
 
-const DATA_DIR = path.resolve("data");
+/** 单会话最多保留的消息条数（滚动窗口，旧消息归档） */
+const MAX_MESSAGES = 200;
 
 function getSessionPath(personaId: string): string {
-  return path.join(DATA_DIR, `${personaId}-session.json`);
+  return dataFile(`${safeFileStem(personaId)}-session.json`);
 }
 
 function getArchivePath(personaId: string, date: string): string {
-  return path.join(DATA_DIR, `${personaId}-archive-${date}.json`);
+  return dataFile(`${safeFileStem(personaId)}-archive-${date}.json`);
 }
 
-/** 加载或创建会话 */
-export function loadSession(personaId: string): ConversationSession {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-
-  const p = getSessionPath(personaId);
-  if (fs.existsSync(p)) {
-    return JSON.parse(fs.readFileSync(p, "utf-8")) as ConversationSession;
-  }
-
+function freshSession(personaId: string): ConversationSession {
+  const now = Date.now();
   return {
     personaId,
-    startedAt: Date.now(),
-    lastActiveAt: Date.now(),
+    startedAt: now,
+    lastActiveAt: now,
     messages: [],
     t3: {
       currentTopic: "",
@@ -54,14 +55,73 @@ export function loadSession(personaId: string): ConversationSession {
   };
 }
 
-/** 保存会话（异步，避免阻塞消息处理） */
-export async function saveSession(session: ConversationSession): Promise<void> {
-  session.lastActiveAt = Date.now();
-  const p = getSessionPath(session.personaId);
-  await fs.promises.writeFile(p, JSON.stringify(session, null, 2), "utf-8");
+/** 兼容旧版会话文件：补齐缺失字段，过滤非法消息 */
+function normalizeSession(raw: unknown, personaId: string): ConversationSession {
+  const base = freshSession(personaId);
+  if (!raw || typeof raw !== "object") return base;
+
+  const obj = raw as Partial<ConversationSession>;
+  const messages = Array.isArray(obj.messages)
+    ? obj.messages.filter(
+        (m): m is ChatMessage =>
+          !!m &&
+          (m.role === "user" || m.role === "assistant") &&
+          typeof m.content === "string" &&
+          typeof m.timestamp === "number",
+      )
+    : [];
+
+  return {
+    personaId,
+    startedAt: typeof obj.startedAt === "number" ? obj.startedAt : base.startedAt,
+    lastActiveAt: typeof obj.lastActiveAt === "number" ? obj.lastActiveAt : base.lastActiveAt,
+    messages,
+    t3: {
+      currentTopic: obj.t3?.currentTopic ?? "",
+      emotionVector: typeof obj.t3?.emotionVector === "number" ? obj.t3.emotionVector : 0,
+      activeThreads: Array.isArray(obj.t3?.activeThreads) ? obj.t3.activeThreads : [],
+    },
+  };
 }
 
-/** 添加消息到会话 */
+/** 加载或创建会话（不存在则创建；损坏则备份后重建） */
+export function loadSession(personaId: string): ConversationSession {
+  ensureDataDir();
+
+  const p = getSessionPath(personaId);
+  if (!fs.existsSync(p)) return freshSession(personaId);
+
+  try {
+    const raw = fs.readFileSync(p, "utf-8");
+    return normalizeSession(JSON.parse(raw), personaId);
+  } catch (err) {
+    const backup = `${p}.corrupt-${Date.now()}`;
+    try {
+      fs.renameSync(p, backup);
+      console.warn(`[会话] 文件损坏，已备份到 ${backup}，将创建新会话`);
+    } catch {
+      // 备份失败也不能阻塞启动
+    }
+    console.warn(`[会话] 解析失败: ${err instanceof Error ? err.message : String(err)}`);
+    return freshSession(personaId);
+  }
+}
+
+/** 原子写入会话（同步，确保进程退出/崩溃时不丢最后一条消息） */
+export function saveSessionSync(session: ConversationSession): void {
+  session.lastActiveAt = Date.now();
+  const p = getSessionPath(session.personaId);
+  const tmp = `${p}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(session, null, 2), "utf-8");
+  fs.renameSync(tmp, p);
+}
+
+/** 异步兼容包装（保留旧调用方式） */
+export async function saveSession(session: ConversationSession): Promise<void> {
+  saveSessionSync(session);
+}
+
+/** 添加消息到会话并立即持久化 */
 export function addMessage(
   session: ConversationSession,
   role: "user" | "assistant",
@@ -73,25 +133,30 @@ export function addMessage(
     timestamp: Date.now(),
   });
 
-  // 保持最近 200 条消息（滑动窗口）
-  if (session.messages.length > 200) {
-    const toArchive = session.messages.slice(0, session.messages.length - 200);
-    session.messages = session.messages.slice(session.messages.length - 200);
-
-    // 异步归档旧消息
-    const date = new Date().toISOString().split("T")[0];
-    const archivePath = getArchivePath(session.personaId, date);
-    fs.promises.readFile(archivePath, "utf-8")
-      .then(raw => JSON.parse(raw) as ChatMessage[])
-      .catch(() => [] as ChatMessage[])
-      .then(existing => {
-        return fs.promises.writeFile(archivePath, JSON.stringify([...existing, ...toArchive], null, 2), "utf-8");
-      })
-      .catch(() => { /* 归档失败不阻塞 */ });
+  // 保持最近 MAX_MESSAGES 条消息（滑动窗口）
+  if (session.messages.length > MAX_MESSAGES) {
+    const toArchive = session.messages.slice(0, session.messages.length - MAX_MESSAGES);
+    session.messages = session.messages.slice(session.messages.length - MAX_MESSAGES);
+    archiveMessages(session.personaId, toArchive);
   }
 
-  // fire-and-forget 保存
-  saveSession(session).catch(() => {});
+  saveSessionSync(session);
+}
+
+/** 归档旧消息（尽力而为，失败不影响主流程） */
+function archiveMessages(personaId: string, messages: ChatMessage[]): void {
+  const date = new Date().toISOString().split("T")[0];
+  const archivePath = getArchivePath(personaId, date);
+  try {
+    const existing: ChatMessage[] = fs.existsSync(archivePath)
+      ? (JSON.parse(fs.readFileSync(archivePath, "utf-8")) as ChatMessage[])
+      : [];
+    const tmp = `${archivePath}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify([...existing, ...messages], null, 2), "utf-8");
+    fs.renameSync(tmp, archivePath);
+  } catch {
+    // 归档失败不阻塞对话
+  }
 }
 
 /** 构建发送给 AI 的消息列表（最近 N 条 + 较早消息的摘要 + System Prompt） */
