@@ -1,0 +1,46 @@
+{
+  "name": "karen-persona",
+  "version": "0.1.0",
+  "description": "微信 AI 虚拟人设聊天系统 - 你的微信通讯录里，住着一个有自己生活的人",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/test-bot.ts",
+    "chat": "tsx src/test-bot.ts",
+    "qq": "tsx src/bridge/qq.ts",
+    "wechat": "tsx src/index.ts",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "persona:check": "tsx src/persona/check.ts",
+    "persona:create": "tsx src/persona/create.ts",
+    "persona:narrate": "tsx src/persona/narrate.ts",
+    "persona:list": "tsx -e \"import { listPersonas } from './src/persona/loader.js'; console.log(listPersonas().join('\\n'))\"",
+    "setup": "tsx src/setup.ts"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.4.0",
+    "node-cron": "^3.0.0",
+    "openai": "^4.70.0",
+    "sqlite-vec": "^0.1.9",
+    "wechaty": "^1.20.0",
+    "ws": "^8.18.0",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

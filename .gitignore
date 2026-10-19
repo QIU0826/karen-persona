@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+config.yaml
+.claude/
+docker-compose.yml
+data/*.sqlite
+data/*.sqlite-*
+data/*.json
+data/qq/
+*.log
+.DS_Store
+personas/*/corrections.md
+personas/*/memory.md
