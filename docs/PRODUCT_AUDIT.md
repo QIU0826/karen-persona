@@ -321,8 +321,8 @@ QQ 好友消息
 
 | ID | 问题 | 证据 | 影响 |
 |---|---|---|---|
-| P0-1 | 无 `data/` 目录时直接 open SQLite → `SQLITE_CANTOPEN` | `vector.ts:10,25`；`test-bot.ts:32`、`qq.ts:198` 先于 `loadSession` 的 mkdir 执行 | CLI/QQ 首次启动即崩 |
-| P0-2 | `t2_episodes` 建表缺 `embedding` 列，但插入/查询/回填都引用它 | `vector.ts:49-61` vs `vector.ts:230,251,272` | 记忆写入/检索全断，`initConversation` 抛错 |
+| P0-1 | 无 `data/` 目录时直接 open SQLite → `SQLITE_CANTOPEN` | `vector.ts:10,25`；`test-bot.ts:32`、`qq.ts:198` 先于 `loadSession` 的 mkdir 执行。**实测**：`npm run dev` 加载完人设后直接 `[致命错误] Cannot open database because the directory does not exist` | CLI/QQ 首次启动即崩 |
+| P0-2 | `t2_episodes` 建表缺 `embedding` 列，但插入/查询/回填都引用它 | `vector.ts:49-61` vs `vector.ts:230,251,272`。**实测**：建 `data/` 后 `backfillEpisodeVectors()` 抛 `SQLITE_ERROR: no such column: embedding` | 记忆写入/检索全断，`initConversation` 抛错 |
 | P0-3 | 没有 `config.yaml` 的引导（README 只说「编辑」） | README:83；setup 可生成，但 README 主路径没提 | 用户卡在第一步 |
 | P0-4 | `user_personas` 被 `loadConfig` 丢弃 | `store.ts:32-43` | 文档宣称的多好友多人设功能不存在 |
 | P0-5 | WS 默认绑 `0.0.0.0`、任意 path、无 token、无白名单 | `qq.ts:220-227` | 局域网任意程序可伪装事件、花你的 API 钱、读 `/stats` |
