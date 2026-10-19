@@ -90,6 +90,20 @@ import {
 } from "../impulse/silence-arc.js";
 import type { Persona } from "../persona/loader.js";
 import type { AppConfig } from "../data/store.js";
+import {
+  loadPersonaState,
+  savePersonaState,
+  PERSONA_STATE_VERSION,
+  type PersistedPersonaState,
+} from "../data/state-store.js";
+import {
+  evaluateRelationshipEvent,
+  applyRelationshipEvent,
+  touchInteraction,
+  closenessLabel,
+  createRelationshipState,
+  type RelationshipState,
+} from "../persona/relationship.js";
 
 // ── 会话状态 ──────────────────────────────────
 
@@ -152,6 +166,8 @@ export interface ConversationState {
   proactiveCountToday: number;
   /** 主动消息计数所属日期（YYYY-MM-DD，本地时区） */
   proactiveDay: string;
+  /** M1-2: 关系状态（亲密度/事件/里程碑），持久化于 persona-state */
+  relationshipState: RelationshipState;
 }
 
 export interface PipelineResult {
@@ -187,32 +203,53 @@ export async function initConversation(persona: Persona, config: AppConfig): Pro
   const chainRules = persona.chainRules ?? defaultChainRules();
   const behavioralScripts = persona.behavioralScripts ?? defaultBehavioralScripts();
 
-  const emotionState = createEmotionState();
-  const guiltState = createGuiltState();
+  // M1-1: 先加载持久化的人格运行时状态（情绪/负债/漂移/关系/因果链/herView…）
+  const persisted = loadPersonaState(persona.name, persona.relationship.closeness);
+
+  const emotionState = persisted?.emotion ?? createEmotionState();
+  const guiltState = persisted?.guilt ?? createGuiltState();
   const socialTact = createSocialTact(persona.emotions.attachmentStyle);
-  const driftState = createDriftState(emotionState.baseline);
-  const causalChains: CausalChain[] = [
-    createChain("coffee-machine", "continuous", "咖啡机老化", "咖啡机最近不太稳定", 0.2),
-    createChain("shop-business", "continuous", "咖啡店生意", "这个月客流比上个月少", 0.15),
-    createChain("xiaoyu-relationship", "relational", "小雨的恋爱", "小雨说她男朋友最近很忙", 0.1),
-  ];
-  const silenceState = createSilenceState();
+  const driftState = persisted?.drift ?? createDriftState(emotionState.baseline);
+  const causalChains: CausalChain[] =
+    persisted?.causalChains && persisted.causalChains.length > 0
+      ? persisted.causalChains
+      : defaultCausalChains();
+  const silenceState = persisted?.silence ?? createSilenceState();
+  const narrativeArc = persisted?.narrativeArc ?? createNarrativeArc();
+  const relationshipState = persisted?.relationship ?? createRelationshipState(persona.relationship.closeness);
+  // persona.relationship.closeness 是全代码读取的唯一来源：用持久化值覆盖静态人设值
+  persona.relationship.closeness = relationshipState.closeness;
+
   const session = loadSession(persona.name);
   const personaType = inferPersonaType(persona.speaking.tone, persona.emotions.attachmentStyle);
   const stance = deriveStance(persona.identity.age, persona.emotions.attachmentStyle);
-  // 真实天气优先，失败降级 mock
-  const weather = (await fetchWeather(config.location)) ?? mockWeather(config.location);
-  const weatherPerception = perceiveWeather(weather, stance.weather, emotionState.baseline, null);
+
+  // 天气：优先复用持久化快照（刷新逻辑在每轮消息里按 TTL 触发）
+  let weatherPerception: WeatherPerception;
+  let weatherFetchedAt: number;
+  if (persisted?.weather) {
+    weatherPerception = perceiveWeather(
+      persisted.weather.raw,
+      stance.weather,
+      emotionState.baseline,
+      null,
+    );
+    weatherFetchedAt = persisted.weather.fetchedAt;
+  } else {
+    const weather = (await fetchWeather(config.location)) ?? mockWeather(config.location);
+    weatherPerception = perceiveWeather(weather, stance.weather, emotionState.baseline, null);
+    weatherFetchedAt = Date.now();
+  }
 
   // V2: 初始内心状态
   const now = new Date();
   const innerState: InnerState = {
-    exposure: exposureRatio(socialTact, persona.relationship.closeness),
+    exposure: exposureRatio(socialTact, relationshipState.closeness),
     guilt: guiltState.guilt,
     emotion: emotionState.vector,
     hour: now.getHours(),
     mode: "neutral",
-    closeness: persona.relationship.closeness,
+    closeness: relationshipState.closeness,
   };
 
   // 一次性回填历史记忆的嵌入向量（幂等）
@@ -221,6 +258,9 @@ export async function initConversation(persona: Persona, config: AppConfig): Pro
     console.log(`[向量] 已为 ${backfilled} 条历史记忆生成嵌入`);
   }
 
+  const counters = persisted?.counters;
+  const herView = persisted?.herView;
+
   return {
     persona, config, chainRules, behavioralScripts,
     corrections: [],
@@ -228,23 +268,34 @@ export async function initConversation(persona: Persona, config: AppConfig): Pro
     emotionState, guiltState, socialTact,
     driftState, causalChains, silenceState, session, personaType, stance,
     weatherPerception, weatherApplied: false,
-    lastSharedWeather: null, lastHeartbeatAt: 0,
-    lastTrendingInject: 0,
-    interrupted: false,
+    lastSharedWeather: counters?.lastSharedWeather ?? null,
+    lastHeartbeatAt: counters?.lastHeartbeatAt ?? 0,
+    lastTrendingInject: counters?.lastTrendingInject ?? 0,
+    interrupted: counters?.interrupted ?? false,
     stickerMode: "kaomoji", // CLI default, QQ bridge overrides
-    narrativeArc: createNarrativeArc(),
-    lastNarrativeStage: null,
-    herViewOfYou: persona.relationship.herViewOfYou ?? null,
-    previousViewOfYou: null,
-    lastViewUpdateCloseness: persona.relationship.closeness,
-    lastViewUpdateAt: null,
+    narrativeArc,
+    lastNarrativeStage: persisted ? null : null,
+    herViewOfYou: herView?.current ?? persona.relationship.herViewOfYou ?? null,
+    previousViewOfYou: herView?.previous ?? null,
+    lastViewUpdateCloseness: herView?.lastUpdateCloseness ?? relationshipState.closeness,
+    lastViewUpdateAt: herView?.lastUpdateAt ?? null,
     herViewGenerating: false,
-    consecutiveSilences: 0,
-    weatherFetchedAt: Date.now(),
-    lastProactiveSentAt: 0,
-    proactiveCountToday: 0,
-    proactiveDay: "",
+    consecutiveSilences: counters?.consecutiveSilences ?? 0,
+    weatherFetchedAt,
+    lastProactiveSentAt: counters?.lastProactiveSentAt ?? 0,
+    proactiveCountToday: counters?.proactiveCountToday ?? 0,
+    proactiveDay: counters?.proactiveDay ?? "",
+    relationshipState,
   };
+}
+
+/** 默认因果链（人设没配时使用） */
+function defaultCausalChains(): CausalChain[] {
+  return [
+    createChain("coffee-machine", "continuous", "咖啡机老化", "咖啡机最近不太稳定", 0.2),
+    createChain("shop-business", "continuous", "咖啡店生意", "这个月客流比上个月少", 0.15),
+    createChain("xiaoyu-relationship", "relational", "小雨的恋爱", "小雨说她男朋友最近很忙", 0.1),
+  ];
 }
 
 // ── V2: 默认链式规则和行为脚本（persona.json 缺失时回退） ─
@@ -450,7 +501,91 @@ function narrationContext(style: string, trending: string, interrupt: string, na
   return style + trending + interrupt + narrative;
 }
 
+// ── M1-1/M1-2: 状态持久化与关系成长 ─────────────
+
+/** 把当前运行时状态落盘（每个处理回合结束时调用；失败不影响对话） */
+export function persistRuntimeState(state: ConversationState): void {
+  try {
+    const snapshot: PersistedPersonaState = {
+      version: PERSONA_STATE_VERSION,
+      personaId: state.persona.name,
+      savedAt: Date.now(),
+      emotion: state.emotionState,
+      guilt: state.guiltState,
+      drift: state.driftState,
+      silence: state.silenceState,
+      causalChains: state.causalChains,
+      narrativeArc: state.narrativeArc,
+      herView: {
+        current: state.herViewOfYou,
+        previous: state.previousViewOfYou,
+        lastUpdateCloseness: state.lastViewUpdateCloseness,
+        lastUpdateAt: state.lastViewUpdateAt,
+      },
+      relationship: state.relationshipState,
+      counters: {
+        consecutiveSilences: state.consecutiveSilences,
+        lastProactiveSentAt: state.lastProactiveSentAt,
+        proactiveCountToday: state.proactiveCountToday,
+        proactiveDay: state.proactiveDay,
+        lastHeartbeatAt: state.lastHeartbeatAt,
+        lastTrendingInject: state.lastTrendingInject,
+        lastSharedWeather: state.lastSharedWeather,
+        interrupted: state.interrupted,
+      },
+      weather: { raw: state.weatherPerception.raw, fetchedAt: state.weatherFetchedAt },
+    };
+    savePersonaState(snapshot);
+  } catch (err) {
+    console.log(`[状态] 保存失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** 本轮结束后更新关系（含里程碑日志），返回可打印的日志行 */
+export function updateRelationshipAfterTurn(
+  state: ConversationState,
+  userInput: string,
+  replyText: string,
+  complexity: ReturnType<typeof classifyComplexity>,
+): string[] {
+  const messages: string[] = [];
+  const now = new Date();
+  const before = state.relationshipState.closeness;
+  const beforeMilestones = state.relationshipState.milestones.length;
+
+  const evaluation = evaluateRelationshipEvent(state.relationshipState, {
+    currentCloseness: state.relationshipState.closeness,
+    userText: userInput,
+    replyText,
+    complexity,
+    guilt: state.guiltState.guilt,
+    now,
+  });
+
+  if (evaluation) {
+    state.relationshipState = applyRelationshipEvent(
+      state.relationshipState,
+      evaluation.delta,
+      evaluation.reason,
+      now,
+    );
+    const after = state.relationshipState.closeness;
+    state.persona.relationship.closeness = after;
+    messages.push(
+      `[关系] ${evaluation.reason}：亲密度 ${before.toFixed(2)} → ${after.toFixed(2)}（${closenessLabel(after)}）`,
+    );
+    if (state.relationshipState.milestones.length > beforeMilestones) {
+      const milestone = state.relationshipState.milestones[state.relationshipState.milestones.length - 1];
+      messages.push(`[关系] 里程碑：${milestone.title}`);
+    }
+  } else {
+    state.relationshipState = touchInteraction(state.relationshipState, now);
+  }
+  return messages;
+}
+
 // ── 单轮处理 ──────────────────────────────────
+
 
 
 export async function processMessage(
@@ -507,6 +642,8 @@ export async function processMessage(
   if (gate.type === "delay") {
     logs.push(`[消息门] 延迟 ${Math.round(gate.resumeAfterMs / 1000)}s: ${gate.reason}`);
     if (!opts.skipUserPersist) addMessage(session, "user", userInput);
+    state.relationshipState = touchInteraction(state.relationshipState, now);
+    persistRuntimeState(state);
     return { reply: "", logs, deferred: { delayMs: gate.resumeAfterMs } };
   }
   if (gate.type === "silence") {
@@ -516,6 +653,8 @@ export async function processMessage(
     }
     if (!opts.skipUserPersist) addMessage(session, "user", userInput);
     state.consecutiveSilences += 1;
+    state.relationshipState = touchInteraction(state.relationshipState, now);
+    persistRuntimeState(state);
     return { reply: "", logs, silenced: true };
   }
 
@@ -812,6 +951,8 @@ export async function processMessage(
   }
 
   state.consecutiveSilences = 0;
+  logs.push(...updateRelationshipAfterTurn(state, userInput, rawReply, complexity));
+  persistRuntimeState(state);
   return { reply, logs, qqFace: rendered.qqFace, imageUrl, imageCaption };
 }
 
@@ -911,12 +1052,16 @@ export async function* processMessageStream(
 
   if (gate.type === "delay") {
     if (!opts.skipUserPersist) addMessage(session, "user", userInput);
+    state.relationshipState = touchInteraction(state.relationshipState, now);
+    persistRuntimeState(state);
     yield { text: "", deferred: { delayMs: gate.resumeAfterMs } };
     return;
   }
   if (gate.type === "silence") {
     if (!opts.skipUserPersist) addMessage(session, "user", userInput);
     state.consecutiveSilences += 1;
+    state.relationshipState = touchInteraction(state.relationshipState, now);
+    persistRuntimeState(state);
     return;
   }
 
@@ -1061,6 +1206,10 @@ export async function* processMessageStream(
       });
       triggerMonologue(state, userInput, persisted);
       state.consecutiveSilences = 0;
+      for (const line of updateRelationshipAfterTurn(state, userInput, persisted, complexity)) {
+        console.log(line);
+      }
+      persistRuntimeState(state);
     }
   }
 }
@@ -1091,6 +1240,7 @@ export async function processProactive(
     return null;
   }
   state.lastHeartbeatAt = now.getTime();
+  persistRuntimeState(state);
 
   // 主动消息治理：单日上限 + 两次主动消息最小间隔（避免刷屏/打扰）
   const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
@@ -1306,6 +1456,7 @@ export async function processProactive(
   state.consecutiveSilences = 0;
   state.lastProactiveSentAt = now.getTime();
   state.proactiveCountToday += 1;
+  persistRuntimeState(state);
 
   logs.push(`[主动] 已发送: "${reply.slice(0, 50)}..."`);
   return { reply, logs, qqFace: rendered.qqFace };
@@ -1346,6 +1497,9 @@ export function getStateSummary(state: ConversationState): string[] {
   const hours = Math.round((Date.now() - session.startedAt) / 3600000 * 10) / 10;
   const active = causalChains.filter(c => c.phase === "active");
 
+  const rel = state.relationshipState;
+  const lastMilestone = rel.milestones.length > 0 ? rel.milestones[rel.milestones.length - 1] : null;
+
   return [
     `消息: ${session.messages.length} (你:${userMsgs} 她:${botMsgs}) 时长:${hours}h`,
     `T2 记忆: ${episodes.length} 条`,
@@ -1353,7 +1507,11 @@ export function getStateSummary(state: ConversationState): string[] {
     `负债: g=${guiltState.guilt.toFixed(2)} r=${guiltState.resentment.toFixed(2)}`,
     `基线漂移: 实际=${driftState.actualBaseline.toFixed(2)} 感知=${driftState.perceivedBaseline.toFixed(2)} 压力=${driftState.pressure.toFixed(2)}`,
     `因果链: ${causalChains.length}条 (活跃:${active.length}) ${active.map(c => c.title).join(", ")}`,
-    `亲密度: ${persona.relationship.closeness}/10`,
+    `亲密度: ${rel.closeness.toFixed(2)}/10（${closenessLabel(rel.closeness)}）连续互动 ${rel.interactionStreak} 天${
+      lastMilestone ? `；最近里程碑：${lastMilestone.title}` : ""
+    }`,
+    `关系事件: ${rel.events.length} 条 | 内心阶段: ${state.narrativeArc.stage}`,
+    `她眼中的你: ${state.herViewOfYou ?? "（还没有形成明确看法）"}`,
   ];
 }
 

@@ -6,8 +6,21 @@ import "dotenv/config";
 import { loadPersona } from "./persona/loader.js";
 import { loadConfig, setLogLevel } from "./data/store.js";
 import { getVectorDb, applyGlobalDecay, archiveDecayedEpisodes, closeVectorDb } from "./data/vector.js";
+import {
+  loadPersonaState,
+  type PersistedHerView,
+  type PersistedPersonaState,
+} from "./data/state-store.js";
+import {
+  getJournalEntries,
+  formatJournal,
+  formatRelationshipTimeline,
+  formatHerView,
+  formatEvolutionSummary,
+} from "./evolution/journal-view.js";
 import { mockWeather, perceiveWeather } from "./world/weather.js";
 import { adjustEmotion } from "./persona/emotion.js";
+import { closenessLabel } from "./persona/relationship.js";
 import {
   initConversation,
   processMessage,
@@ -72,7 +85,7 @@ async function main() {
   const persona = await loadPersona(config.persona);
 
   console.log(`[启动] ${persona.name} (${persona.identity.lifeStory.career})`);
-  console.log(`[启动] 依恋: ${persona.emotions.attachmentStyle} | 亲密度: ${persona.relationship.closeness}/10`);
+  console.log(`[启动] 依恋: ${persona.emotions.attachmentStyle}`);
   if (config.tags.length > 0) console.log(`[启动] 标签: ${config.tags.join(", ")}`);
 
   // 记忆衰减
@@ -83,12 +96,34 @@ async function main() {
     console.log(`[记忆] 衰减: ${decayed} | 归档: ${archived}`);
   }
 
-  // 初始化会话状态（含天气感知）
+  // 初始化会话状态（含天气感知 + 持久化的关系/情绪状态）
   const state = await initConversation(persona, config);
+  console.log(
+    `[启动] 关系: ${state.relationshipState.closeness.toFixed(2)}/10（${closenessLabel(state.relationshipState.closeness)}）` +
+      ` | 连续互动 ${state.relationshipState.interactionStreak} 天`,
+  );
   const wp = state.weatherPerception;
   console.log(`[天气] ${wp.raw.city}: ${wp.raw.description} ${wp.raw.temp}°C`);
   console.log(`[天气] ${wp.personalInterpretation}`);
   if (wp.socialInterpretation) console.log(`[天气] ${wp.socialInterpretation}`);
+
+  /** 读取最近一次落盘的人格状态（重启/多进程后也能看到最新演化）；失败不影响对话 */
+  function readPersistedState(): PersistedPersonaState | null {
+    try {
+      return loadPersonaState(state.persona.name, state.persona.relationship.closeness);
+    } catch (err: unknown) {
+      console.log(`[状态] 读取失败：${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+  }
+
+  /** 命令可选条数参数（默认 20，限制 1-50） */
+  function parseEntryLimit(input: string, fallback: number): number {
+    const raw = input.trim().split(/\s+/)[1];
+    const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(1, Math.min(50, parsed));
+  }
 
   // 检查 API
   if (!process.env.DEEPSEEK_API_KEY || process.env.DEEPSEEK_API_KEY === "sk-your-key-here") {
@@ -108,6 +143,7 @@ async function main() {
   console.log("══════════════════════════════════════");
   console.log(`  和 ${persona.name} 聊天`);
   console.log("  /quit 退出  /stats 统计  /mood +0.1 调节情绪  /weather 天气");
+  console.log("  /journal 她的日记  /timeline 关系时间线  /herview 她眼中的你  /evolution 她的变化");
   console.log("══════════════════════════════════════\n");
 
   // ── 聊天主循环 ──────────────────────────
@@ -118,8 +154,10 @@ async function main() {
     });
 
     if (!input) continue;
+    const cmd = input.trim();
+    if (!cmd) continue;
 
-    if (input === "/quit") {
+    if (cmd === "/quit") {
       console.log(`\n${persona.name}: 拜拜～`);
       console.log(`[会话] 已保存 ${state.session.messages.length} 条消息`);
       closeVectorDb();
@@ -127,7 +165,7 @@ async function main() {
       continue;
     }
 
-    if (input === "/stats") {
+    if (cmd === "/stats") {
       const summary = getStateSummary(state);
       console.log(`\n--- ${persona.name} 状态 ---`);
       for (const line of summary) console.log(`  ${line}`);
@@ -135,8 +173,8 @@ async function main() {
       continue;
     }
 
-    if (input.startsWith("/mood")) {
-      const delta = parseFloat(input.split(" ")[1]) || 0;
+    if (cmd.startsWith("/mood")) {
+      const delta = parseFloat(cmd.split(" ")[1]) || 0;
       if (delta !== 0) {
         Object.assign(state.emotionState, adjustEmotion(state.emotionState, delta, "用户手动调节"));
       }
@@ -144,13 +182,68 @@ async function main() {
       continue;
     }
 
-    if (input === "/weather") {
+    if (cmd === "/weather") {
       const w = mockWeather(config.location);
       const wp = perceiveWeather(w, state.stance.weather, state.emotionState.baseline, null);
       console.log(`\n[天气] ${w.city}: ${w.description} ${w.temp}°C 湿度${w.humidity}%`);
       console.log(`[觉察] ${wp.awarenessMoment}`);
       console.log(`[心情] ${wp.personalInterpretation}`);
       if (wp.socialInterpretation) console.log(`[社交] ${wp.socialInterpretation}`);
+      console.log();
+      continue;
+    }
+
+    // ── M1-3 演化可见化命令 ──────────────
+    if (cmd === "/journal" || cmd.startsWith("/journal ")) {
+      try {
+        const entries = getJournalEntries(parseEntryLimit(cmd, 20));
+        for (const line of formatJournal(entries)) console.log(line);
+      } catch (err: unknown) {
+        console.log(`[日记] 读取失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+      console.log();
+      continue;
+    }
+
+    if (cmd === "/timeline") {
+      const persisted = readPersistedState();
+      const relationship = persisted?.relationship ?? state.relationshipState;
+      for (const line of formatRelationshipTimeline(relationship)) console.log(line);
+      console.log();
+      continue;
+    }
+
+    if (cmd === "/herview") {
+      const persisted = readPersistedState();
+      const fallbackView: PersistedHerView = {
+        current: state.herViewOfYou ?? persona.relationship.herViewOfYou ?? null,
+        previous: state.previousViewOfYou,
+        lastUpdateCloseness: state.lastViewUpdateCloseness,
+        lastUpdateAt: state.lastViewUpdateAt,
+      };
+      const view: PersistedHerView = persisted
+        ? {
+            current: persisted.herView.current ?? fallbackView.current,
+            previous: persisted.herView.previous ?? fallbackView.previous,
+            lastUpdateCloseness: persisted.herView.lastUpdateCloseness,
+            lastUpdateAt: persisted.herView.lastUpdateAt,
+          }
+        : fallbackView;
+      for (const line of formatHerView(view)) console.log(line);
+      console.log();
+      continue;
+    }
+
+    if (cmd === "/evolution") {
+      const persisted = readPersistedState();
+      for (const line of formatEvolutionSummary({
+        drift: persisted?.drift ?? state.driftState,
+        narrativeArc: persisted?.narrativeArc ?? state.narrativeArc,
+        relationship: persisted?.relationship ?? state.relationshipState,
+        emotion: persisted?.emotion ?? state.emotionState,
+      })) {
+        console.log(line);
+      }
       console.log();
       continue;
     }
