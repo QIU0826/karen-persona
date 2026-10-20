@@ -116,7 +116,8 @@ function initTables(database: Database.Database): void {
       embedding TEXT,
       embedding_model TEXT,
       semantic_embedding TEXT,
-      semantic_model TEXT
+      semantic_model TEXT,
+      t3_compressed INTEGER DEFAULT 0
     )
   `);
 }
@@ -157,6 +158,9 @@ function migrate(database: Database.Database): void {
   migrateAddColumn(database, "t2_episodes", "embedding_model", "TEXT");
   migrateAddColumn(database, "t2_episodes", "semantic_embedding", "TEXT");
   migrateAddColumn(database, "t2_episodes", "semantic_model", "TEXT");
+
+  // ── v3：T3 压缩标记（防止已压缩片段被反复计入压缩阈值）──
+  migrateAddColumn(database, "t2_episodes", "t3_compressed", "INTEGER DEFAULT 0");
 
   // 历史 embedding 全部来自 n-gram（generateSemanticEmbedding 在接通前从未被调用）。
   // 只回填 NULL，不覆盖已有标记；幂等。

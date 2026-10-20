@@ -85,6 +85,23 @@ interface RawEpisode {
 }
 
 /**
+ * 统计某个 persona 尚未被 T3 压缩的普通片段数（不含 t3_summary / internal_monologue）。
+ * 关键：**必须排除 t3_compressed=1**——压缩后旧片段只是降 strength、不删除，
+ * 若仍计入阈值会导致同一批片段被反复压缩、每轮触发一次 LLM 调用。
+ */
+export function countUncompressedEpisodes(pid: string = getCurrentPersona()): number {
+  const d = getVectorDb();
+  const row = d.prepare(
+    `SELECT COUNT(*) as cnt FROM t2_episodes
+     WHERE persona_id = ?
+       AND source IN ('chat', 'event', 'causal_chain', 'user_trace')
+       AND strength > 0.1
+       AND COALESCE(t3_compressed, 0) = 0`
+  ).get(pid) as { cnt: number };
+  return row?.cnt ?? 0;
+}
+
+/**
  * 检查是否需要压缩，如果需要则执行。
  * 在每次 T2 写入后调用。
  */
@@ -93,13 +110,7 @@ export function maybeCompressToT3(): void {
 
   const pid = getCurrentPersona();
 
-  // 统计未压缩的普通片段（不含 t3_summary 和 internal_monologue）
-  const countRow = d.prepare(
-    `SELECT COUNT(*) as cnt FROM t2_episodes
-     WHERE persona_id = ?
-       AND source IN ('chat', 'event', 'causal_chain', 'user_trace')
-       AND strength > 0.1`
-  ).get(pid) as { cnt: number };
+  const countRow = { cnt: countUncompressedEpisodes(pid) };
 
   const lastSummaryAtMs = getLastSummaryAtMs(pid);
   const shouldCompress = shouldCompressT3({
@@ -116,6 +127,7 @@ export function maybeCompressToT3(): void {
        WHERE persona_id = ?
          AND source IN ('chat', 'event', 'causal_chain', 'user_trace')
          AND strength > 0.1
+         AND COALESCE(t3_compressed, 0) = 0
        ORDER BY created_at ASC
        LIMIT ${COMPRESSION_BATCH_SIZE}`,
     ).all(pid) as Array<{ id: number; created_at: string; preview: string }>;
@@ -147,6 +159,7 @@ async function runT3Compression(pid: string, uncompressedCount: number): Promise
      WHERE persona_id = ?
        AND source IN ('chat', 'event', 'causal_chain', 'user_trace')
        AND strength > 0.1
+       AND COALESCE(t3_compressed, 0) = 0
      ORDER BY created_at ASC
      LIMIT ${batchLimit}`
   ).all(pid) as RawEpisode[];
@@ -167,10 +180,12 @@ async function runT3Compression(pid: string, uncompressedCount: number): Promise
   const arr = JSON.stringify(Array.from(emb));
   d.prepare("UPDATE t2_episodes SET embedding = ? WHERE id = ?").run(arr, episodeId);
 
-  // 标记原片段已被"消化"（降低强度，但不删除）
+  // 标记原片段已被"消化"：降低强度但保留细节，并置压缩标记（否则下次会被再次计入阈值，
+  // 导致同一批片段被反复压缩、每轮都触发 LLM 调用）
   const ids = episodes.map((e) => e.id);
   d.prepare(
-    `UPDATE t2_episodes SET strength = strength * 0.3 WHERE id IN (${ids.map(() => "?").join(",")})`
+    `UPDATE t2_episodes SET strength = strength * 0.3, t3_compressed = 1
+     WHERE id IN (${ids.map(() => "?").join(",")})`
   ).run(...ids);
 
   console.log(`[T3] 压缩完成: ${episodes.length} 条 → 1 条摘要 (id=${episodeId})`);

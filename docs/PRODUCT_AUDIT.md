@@ -38,7 +38,7 @@
 - 跨平台 QQ 桥接方案 ✅ 文档化（`docs/QQ_BRIDGE_CROSS_PLATFORM.md` + `deploy/napcat-macos`/`napcat-windows` + `scripts/mock-onebot.mjs`；mock 全链路实测通过；macOS 原生 NapCat 未实机扫码验证）
 - 真机联调（2026-10-19 深夜）：NapCat 原生 macOS → Karen → DeepSeek 全链路跑通；图片识别/缓存/流式正常；已修复 BUG-1（关系误判）、BUG-2（延迟队列持久化）、IMP-1（图片描述过短），并新增免打扰配置；问题清单见 docs/M1_BACKLOG.md。
 - M1-7 记忆检索 P0 完成：n-gram + FTS5 BM25 RRF 混合、sqlite-vec 启用、语义 embedding 双列（需 Qwen Key 实跑）、真实库 schema v2 幂等迁移验证。测试数更新为 27 文件 / 386 用例。
-- 记忆评测 + 反重复 + 检索修复（2026-10-20）：新增可复现记忆金标集（20 条中文 case，离线 recall@k / facts 注入 / anti-forget，报告 `docs/MEMORY_EVAL_REPORT.md`）；修复 `searchEpisodesByFts` 的 FTS5 隐式 AND 问题（自然问句 FTS 命中 0/20 → 20/20，T2 recall@8 40%→85%）；新增跨轮反重复（`src/persona/anti-repetition.ts`，默认只注入开头词，真实 A/B 见 `docs/MEMORY_AI_TONE_AUDIT.md` §4.1）；补上流式主路径遗漏的用户事实注入；Web 控制台新增「用户事实」「记忆命中回放」只读面板。测试数更新为 48 文件 / 552 用例。
+- 记忆评测 + 反重复 + 检索修复（2026-10-20）：新增可复现记忆金标集（20 条中文 case，离线 recall@k / facts 注入 / anti-forget，报告 `docs/MEMORY_EVAL_REPORT.md`）；修复 `searchEpisodesByFts` 的 FTS5 隐式 AND 问题（自然问句 FTS 命中 0/20 → 20/20，T2 recall@8 40%→85%）；新增跨轮反重复（`src/persona/anti-repetition.ts`，默认只注入开头词，真实 A/B 见 `docs/MEMORY_AI_TONE_AUDIT.md` §4.1）；补上流式主路径遗漏的用户事实注入；Web 控制台新增「用户事实」「记忆命中回放」只读面板。测试数更新为 48 文件 / 553 用例。
 - T1 状态弧 + T3 压缩调参（2026-10-20）：T1 快照压成「最近几轮的状态」注入三条回复路径（数值趋势、不引用正文）；T3 阈值 80→40 + 时间兜底 + dry-run，真实数据跑通一次（40 条 → 1 条摘要，线上 t3_summary 0→1）。
 - 步骤 3 可观测最小闭环完成（结构化脱敏日志 + `/health` + `/cost` + PM2 dist）；测试数更新为 30 文件 / 419 用例。
 - 步骤 4 表情/贴纸完成（入站 face/mface + 本地 11 个 Twemoji 出站贴纸；仅私聊）；测试数更新为 31 文件 / 429 用例。
