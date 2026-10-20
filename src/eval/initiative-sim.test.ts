@@ -10,7 +10,7 @@ import {
 describe("意图式主动离线模拟（v0.8.13）", () => {
   it("四种关系热度都跑得出来，且产品红线全过", () => {
     const results = DEFAULT_PROFILES.map(simulateDay);
-    expect(results.map((r) => r.profile)).toEqual(["热络", "正常", "冷淡", "生疏"]);
+    expect(results.map((r) => r.profile)).toEqual(["热络", "正常", "冷淡", "生疏", "全新"]);
     expect(checkRedlines(results)).toEqual([]);
   });
 

@@ -34,6 +34,8 @@ export interface DayProfile {
   hisInitiatives: number;
   closeness: number;
   items: SimItem[];
+  /** 是否发过主动消息（默认 true；全新关系传 false） */
+  hasSentHistory?: boolean;
 }
 
 export interface SentRecord {
@@ -66,6 +68,8 @@ export const DEFAULT_PROFILES: DayProfile[] = [
   { day: "正常", repliesToInitiative: 5, hisInitiatives: 2, closeness: 5, items: DEFAULT_DAY_ITEMS },
   { day: "冷淡", repliesToInitiative: 1, hisInitiatives: 0, closeness: 4, items: DEFAULT_DAY_ITEMS },
   { day: "生疏", repliesToInitiative: 3, hisInitiatives: 1, closeness: 2.5, items: DEFAULT_DAY_ITEMS },
+  // v0.8.14：全新关系（她还没主动过）——应试探 1 条，而不是死锁 0 条
+  { day: "全新", repliesToInitiative: 0, hisInitiatives: 0, closeness: 1.5, items: DEFAULT_DAY_ITEMS, hasSentHistory: false },
 ];
 
 export const SIM_BEAT_INTERVAL_MINUTES = 15;
@@ -86,6 +90,7 @@ export function simulateDay(profile: DayProfile): DaySimResult {
     repliesToInitiative: profile.repliesToInitiative,
     hisInitiatives: profile.hisInitiatives,
     closeness: profile.closeness,
+    hasSentHistory: profile.hasSentHistory ?? true,
   });
   let plan = makePlan(profile.day, profile.items);
   const sent: SentRecord[] = [];
@@ -159,6 +164,10 @@ export function checkRedlines(results: DaySimResult[]): RedlineFailure[] {
   const cold = byProfile.get("冷淡");
   if (cold && cold.sent.length > 0) {
     failures.push({ profile: "冷淡", message: "回复率 <20% 仍在主动（该收敛）" });
+  }
+  const fresh = byProfile.get("全新");
+  if (fresh && fresh.sent.length === 0) {
+    failures.push({ profile: "全新", message: "全新关系一条都不发（会死锁：不发→没回复→更不敢发）" });
   }
   const distant = byProfile.get("生疏");
   if (distant && distant.sent.some((s) => s.kind === "missing_you")) {

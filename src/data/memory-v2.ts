@@ -597,6 +597,21 @@ export function markInitiativeReplied(db: Database, ownerId: string, now = Date.
   }
 }
 
+/**
+ * 她一共发过多少条主动消息（v0.8.14）。
+ * 用途：区分「他从没回过」和「她从来没主动过」——后者不该被判成"他不回"。
+ */
+export function initiativeSentCount(db: Database, ownerId: string): number {
+  try {
+    const row = db
+      .prepare("SELECT COUNT(*) AS c FROM initiative_stats WHERE owner_id = ?")
+      .get(ownerId) as { c?: number } | undefined;
+    return Number(row?.c ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
 /** 最近 N 次主动里他回了几次（频率校准用）。 */
 export function recentInitiativeReplyCount(db: Database, ownerId: string, limit = 10): number {
   try {

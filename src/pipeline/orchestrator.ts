@@ -36,6 +36,7 @@ import { buildInitiativeReplyHint } from "../impulse/initiative-reply.js";
 import {
   getInitiativePlan,
   markInitiativeReplied,
+  initiativeSentCount,
   recentInitiativeReplyCount,
   recordInitiativeSent,
   saveInitiativePlan,
@@ -1193,10 +1194,13 @@ function currentDailyCap(state: ConversationState): number {
   try {
     const db = getVectorDb();
     const replies = recentInitiativeReplyCount(db, state.owner, 10);
+    const sentCount = initiativeSentCount(db, state.owner);
     const { cap } = calibratedDailyCap({
       repliesToInitiative: replies,
       hisInitiatives: state.relationshipState.interactionStreak > 0 ? 4 : 1,
       closeness: state.relationshipState.closeness,
+      // v0.8.14：从没主动过 ≠ 他不回，否则会死锁（不发→没回复→更不敢发）
+      hasSentHistory: sentCount > 0,
     });
     return cap;
   } catch {
@@ -2555,6 +2559,7 @@ export async function processProactive(
 
   // 1e. v0.8：今天的「主动计划」里到点的由头（时间窗/上限/校准都由纯函数判定）
   let planItem: { topic: string; kind: string } | null = null;
+  let planCandidate: ImpulseCandidate | null = null;
   try {
     const plan = loadTodayPlan(state);
     if (plan) {
@@ -2574,12 +2579,13 @@ export async function processProactive(
       });
       if (decision.action === "send") {
         planItem = { topic: decision.item.topic, kind: decision.item.kind };
-        candidates.push({
+        planCandidate = {
           source: "主动计划",
           description: `你想跟他说这件事：${decision.item.topic}`,
           intensity: 0.35 + decision.item.urgency * 0.4,
           priority: 10, // 明确想说的由头优先于随机生活流
-        });
+        };
+        candidates.push(planCandidate);
         logs.push(`[主动计划] 到点由头：${decision.item.topic}`);
       } else if (decision.reason !== "no_plan") {
         logs.push(`[主动计划] 本轮不发：${decision.reason}`);
@@ -2624,20 +2630,37 @@ export async function processProactive(
   recordProactiveDecision(state.owner, decision);
   logs.push(`[主动] ${formatProactiveDecision(decision)}｜${decision.detail}`);
 
-  if (decision.action === "skip") {
+  // v0.8.14：到点的今日由头已经过自己的闸门（时间窗/日上限/间隔/免打扰/回复),
+  // 不再被 v0.4 链路的随机概率否掉——否则"想说的事"有一半概率永远说不出来。
+  if (decision.action === "skip" && !planCandidate) {
     return { sent: false, logs, decision };
+  }
+  if (decision.action === "skip" && planCandidate) {
+    logs.push(`[主动] 计划由头优先：忽略链路判定（${decision.detail}）`);
   }
 
   // 统一成"触发候选"形状，下游（日志/门控/生成/渲染）继续复用
-  const picked: ImpulseCandidate =
-    decision.channel === "life_share" && lifeTop
-      ? lifeTop
-      : {
-          source: CHANNEL_LABEL[decision.channel],
-          description: decision.detail,
-          intensity: CHANNEL_INTENSITY[decision.channel],
-          priority: 0,
-        };
+  // v0.8.14 修复：到点的「今日由头」优先于 v0.4 四条链路。
+  // 之前只在 channel==="life_share" 时才采用 lifeTop，导致计划判定"该发"、
+  // 日志也写了"到点由头"，最后却发了一条不相干的生活流（真机冒烟抓到）。
+  let picked: ImpulseCandidate;
+  if (planCandidate) {
+    picked = planCandidate;
+  } else {
+    // 兜底：走到这里说明不是计划由头，必须是正常链路判定
+    if (decision.action !== "send") return { sent: false, logs, decision };
+    picked =
+      decision.channel === "life_share" && lifeTop
+        ? lifeTop
+        : {
+            source: CHANNEL_LABEL[decision.channel],
+            description: decision.detail,
+            intensity: CHANNEL_INTENSITY[decision.channel],
+            priority: 0,
+          };
+  }
+  // 计划驱动的消息在统计上仍归入「生活流分享」（它就是她在分享/提起自己的事）
+  const usedChannel = decision.action === "send" ? decision.channel : "life_share";
 
   logs.push(`[主动] 触发源=${picked.source} 强度=${picked.intensity.toFixed(2)}`);
 
@@ -2694,10 +2717,10 @@ export async function processProactive(
 
   // 标记状态
   state.lastSharedWeather = cond;
-  if (decision.channel === "silence_revive") silenceState.restartSent = true;
+  if (usedChannel === "silence_revive") silenceState.restartSent = true;
   // 记录本轮冷场已用过的链路（对方回话后自动失效：时间戳会比较）
-  if (decision.channel === "follow_up") window.followUpAt = now.getTime();
-  if (decision.channel === "open_topic") window.openTopicAt = now.getTime();
+  if (usedChannel === "follow_up") window.followUpAt = now.getTime();
+  if (usedChannel === "open_topic") window.openTopicAt = now.getTime();
 
   // ── 5. 生成消息 ──────────────────────────────
 
@@ -2708,7 +2731,7 @@ export async function processProactive(
     emotion: emotionState.vector,
     hour,
     mode:
-      decision.channel === "silence_revive"
+      usedChannel === "silence_revive"
         ? "guilty"
         : emotionState.vector > 0.3
           ? "close"
@@ -2734,7 +2757,7 @@ export async function processProactive(
   const proactiveInject = [
     ``,
     `## 此刻的冲动`,
-    buildChannelNote(decision.channel, picked.description),
+    buildChannelNote(usedChannel, picked.description),
     `自然地发一条消息。不要用"最近咋样"这种泛泛的开场——你是因为具体的事情才想到他的。`,
   ].join("\n");
 
@@ -2806,7 +2829,7 @@ export async function processProactive(
   persistRuntimeState(state);
 
   logs.push(`[主动] 已发送: ${previewText(reply)}`);
-  return { sent: true, reply, logs, qqFace: rendered.qqFace, channel: decision.channel };
+  return { sent: true, reply, logs, qqFace: rendered.qqFace, channel: usedChannel };
 }
 
 // ── 统计信息 ──────────────────────────────────

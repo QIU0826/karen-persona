@@ -163,3 +163,31 @@ describe("calibratedDailyCap", () => {
     expect(extreme.cap).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe("calibratedDailyCap：冷启动不死锁（v0.8.14 真机冒烟抓到）", () => {
+  it("从没主动过（hasSentHistory=false）→ 先试探 1 条，而不是 0", () => {
+    const result = calibratedDailyCap({
+      repliesToInitiative: 0,
+      hisInitiatives: 0,
+      closeness: 2,
+      hasSentHistory: false,
+    });
+    expect(result.cap).toBe(1);
+    expect(result.reason).toContain("试探");
+  });
+
+  it("有主动历史但基本不回 → 仍然收敛到 0（不放松原有的边界）", () => {
+    const result = calibratedDailyCap({
+      repliesToInitiative: 0,
+      hisInitiatives: 0,
+      closeness: 3,
+      hasSentHistory: true,
+    });
+    expect(result.cap).toBe(0);
+  });
+
+  it("不传 hasSentHistory 时保持旧行为（老调用方不破坏）", () => {
+    const result = calibratedDailyCap({ repliesToInitiative: 0, hisInitiatives: 0, closeness: 2 });
+    expect(result.cap).toBe(0);
+  });
+});

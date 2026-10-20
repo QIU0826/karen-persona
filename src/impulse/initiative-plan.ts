@@ -196,10 +196,20 @@ export function calibratedDailyCap(input: {
   /** 最近 10 条他消息里主动找她几次（0–10） */
   hisInitiatives: number;
   closeness: number;
+  /**
+   * 她是否发过主动消息（v0.8.14）。
+   * 没发过时"回复率 0"不代表"他不回"——不能用它判成 0 条，
+   * 否则会死锁：不发 → 没回复 → 更不敢发。
+   */
+  hasSentHistory?: boolean;
 }): { cap: number; reason: string } {
   const closeness = clamp(input.closeness, 0, 10);
   const responseRate = clamp(input.repliesToInitiative / 10, 0, 1);
   const hisRate = clamp(input.hisInitiatives / 10, 0, 1);
+  // 从没主动过：先试探 1 条（否则永远没数据，永远判成"他不回"）
+  if (input.hasSentHistory === false) {
+    return { cap: 1, reason: "还没主动过，先试探一条" };
+  }
   if (responseRate < 0.2 && closeness < 6) return { cap: 0, reason: "他基本不回，先别找" };
   if (responseRate < 0.35) return { cap: 1, reason: "回得少，少找一点" };
   if (hisRate > 0.4 || responseRate > 0.7) return { cap: 3, reason: "聊得热络，可以多找" };
