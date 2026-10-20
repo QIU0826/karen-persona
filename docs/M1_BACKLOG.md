@@ -90,6 +90,12 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 桥接 E2E 场景扩展）
+
+- **新增 3 个场景**：治理命令（`/about` 披露+数据去向、`/age` 已确认）、危机兜底（强制回复 + 12356 求助资源）、多用户隔离 + 合规拦截（第二个 QQ 独立披露/年龄门；未确认 18+ 时群聊 @ 不回复负向断言；确认后私聊正常；数据库断言两个 owner 的 `user_consent` 与两份 `persona_id` 记忆）。
+- **方式**：同一文件内追加 3 个 `it`，共享真实 bridge 子进程与 fake NapCat/DeepSeek；单次全跑约 7s（CI 可接受）。
+- **测试**：59 文件 / 629 用例，tsc 0、lint 0、覆盖率阈值通过。
+
 ### ✅ 已完成（2026-10-20 mock-OneBot 桥接端到端测试）
 
 - **新增 E2E**：`src/eval/bridge-e2e.test.ts` + `npm run test:e2e`（随 `npm test` 也跑）。测试进程扮演 NapCat（OneBot WS 客户端），用临时 config/数据目录启动真实 bridge 子进程；fake DeepSeek HTTP 服务提供非流式/SSE/视觉/事实抽取响应。

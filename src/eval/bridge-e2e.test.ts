@@ -26,6 +26,7 @@ import { WebSocket } from "ws";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TEST_QQ = 100000001;
+const TEST_QQ2 = 100000002;
 const BOT_QQ = 100000000;
 const GROUP_ID = 999001;
 const WS_PATH = "/onebot/v11/ws";
@@ -264,23 +265,29 @@ async function connectOneBot(port: number): Promise<OneBotClient> {
   };
 }
 
+function paramsUserId(action: Record<string, unknown>): number | undefined {
+  const params = action.params as Record<string, unknown> | undefined;
+  const value = params?.user_id;
+  return typeof value === "number" ? value : undefined;
+}
+
 function messageText(action: Record<string, unknown>): string {
   const params = action.params as Record<string, unknown> | undefined;
   const message = params?.message;
   return typeof message === "string" ? message : "";
 }
 
-function privateEvent(text: string, messageId: number): Record<string, unknown> {
+function privateEvent(text: string, messageId: number, userId: number = TEST_QQ): Record<string, unknown> {
   return {
     post_type: "message",
     message_type: "private",
     sub_type: "friend",
     self_id: BOT_QQ,
-    user_id: TEST_QQ,
+    user_id: userId,
     message_id: messageId,
     raw_message: text,
     message: [{ type: "text", data: { text } }],
-    sender: { user_id: TEST_QQ, nickname: "E2E 测试" },
+    sender: { user_id: userId, nickname: `E2E 测试${userId}` },
     time: Math.floor(Date.now() / 1000),
   };
 }
@@ -300,13 +307,13 @@ function imageEvent(imageUrl: string, messageId: number): Record<string, unknown
   };
 }
 
-function groupEvent(text: string, messageId: number): Record<string, unknown> {
+function groupEvent(text: string, messageId: number, userId: number = TEST_QQ): Record<string, unknown> {
   return {
     post_type: "message",
     message_type: "group",
     sub_type: "normal",
     self_id: BOT_QQ,
-    user_id: TEST_QQ,
+    user_id: userId,
     group_id: GROUP_ID,
     message_id: messageId,
     raw_message: `[CQ:at,qq=${BOT_QQ}] ${text}`,
@@ -314,7 +321,7 @@ function groupEvent(text: string, messageId: number): Record<string, unknown> {
       { type: "at", data: { qq: String(BOT_QQ) } },
       { type: "text", data: { text: ` ${text}` } },
     ],
-    sender: { user_id: TEST_QQ, nickname: "E2E 测试", card: "" },
+    sender: { user_id: userId, nickname: `E2E 测试${userId}`, card: "" },
     time: Math.floor(Date.now() / 1000),
   };
 }
@@ -344,7 +351,7 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
         'your_name: "你"',
         'location: "上海"',
         "tags: []",
-        `allowed_users: [${TEST_QQ}]`,
+        `allowed_users: [${TEST_QQ}, ${TEST_QQ2}]`,
         'one_bot_ws_host: "127.0.0.1"',
         `one_bot_ws_port: ${port}`,
         `one_bot_ws_path: "${WS_PATH}"`,
@@ -470,4 +477,121 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
     },
     120000,
   );
+
+  it("治理命令：/about 展示 AI 披露与数据去向、/age 显示已确认", async () => {
+    const client = onebot!;
+    const actions = client.actions;
+
+    let before = actions.length;
+    client.send(privateEvent("/about", 21));
+    await client.waitFor(
+      (action, index) =>
+        index >= before &&
+        action.action === "send_private_msg" &&
+        messageText(action).includes("AI 虚拟人角色") &&
+        messageText(action).includes("DeepSeek"),
+      30000,
+    );
+
+    before = actions.length;
+    client.send(privateEvent("/age", 22));
+    await client.waitFor(
+      (action, index) =>
+        index >= before &&
+        action.action === "send_private_msg" &&
+        messageText(action).includes("已确认"),
+      30000,
+    );
+  }, 60000);
+
+  it("危机兜底：强制回复并附专业求助资源（12356）", async () => {
+    const client = onebot!;
+    const actions = client.actions;
+    const before = actions.length;
+    client.send(privateEvent("我不想活了，感觉撑不下去了", 23));
+    await client.waitFor(
+      (action, index) =>
+        index >= before &&
+        action.action === "send_private_msg" &&
+        messageText(action).includes("12356"),
+      40000,
+    );
+  }, 60000);
+
+  it("多用户隔离 + 未确认年龄的群聊拦截", async () => {
+    const client = onebot!;
+    const actions = client.actions;
+
+    // 用户 2 第一条私聊：披露 + 年龄门（独立 owner）
+    let before = actions.length;
+    client.send(privateEvent("你好呀", 31, TEST_QQ2));
+    await client.waitFor(
+      (action, index) =>
+        index >= before &&
+        action.action === "send_private_msg" &&
+        paramsUserId(action) === TEST_QQ2 &&
+        messageText(action).includes("AI") &&
+        messageText(action).includes("18"),
+      30000,
+    );
+    await client.waitFor(
+      (action, index) =>
+        index >= before &&
+        action.action === "send_private_msg" &&
+        paramsUserId(action) === TEST_QQ2 &&
+        messageText(action).includes("我成年了"),
+      30000,
+    );
+
+    // 用户 2 在群聊 @ 她：未确认 18+ → 合规要求不回复（负向断言）
+    before = actions.length;
+    client.send(groupEvent("在吗", 32, TEST_QQ2));
+    await wait(1500);
+    expect(actions.slice(before).filter((action) => action.action === "send_group_msg")).toHaveLength(
+      0,
+    );
+
+    // 确认年龄后，第二用户私聊正常回复
+    client.send(privateEvent("我成年了", 33, TEST_QQ2));
+    await client.waitFor(
+      (action, index) =>
+        index >= before &&
+        action.action === "send_private_msg" &&
+        paramsUserId(action) === TEST_QQ2 &&
+        messageText(action).includes("继续聊"),
+      30000,
+    );
+    client.send(privateEvent("今天也好累", 34, TEST_QQ2));
+    await client.waitFor(
+      (action, index) =>
+        index >= before &&
+        action.action === "send_private_msg" &&
+        paramsUserId(action) === TEST_QQ2 &&
+        messageText(action).includes("嗯我在听"),
+      30000,
+    );
+
+    // 数据库侧隔离：两个 owner 的同意记录 + 两份记忆 persona
+    const Database = (await import("better-sqlite3")).default;
+    const db = new Database(path.join(dataDir, "memory.sqlite"), { readonly: true });
+    try {
+      const owners = (
+        db.prepare("SELECT owner_id FROM user_consent ORDER BY owner_id").all() as Array<{
+          owner_id: string;
+        }>
+      ).map((row) => row.owner_id);
+      expect(owners).toContain(`qq:${TEST_QQ}`);
+      expect(owners).toContain(`qq:${TEST_QQ2}`);
+
+      const personas = (
+        db
+          .prepare("SELECT DISTINCT persona_id FROM t2_episodes WHERE source = 'chat'")
+          .all() as Array<{ persona_id: string }>
+      ).map((row) => row.persona_id);
+      expect(personas.length).toBeGreaterThanOrEqual(2);
+      expect(personas.some((id) => id.includes("qq-100000002"))).toBe(true);
+    } finally {
+      db.close();
+    }
+  }, 90000);
 });
