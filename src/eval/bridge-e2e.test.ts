@@ -23,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import type BetterSqlite3 from "better-sqlite3";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const TEST_QQ = 100000001;
@@ -326,6 +327,34 @@ function groupEvent(text: string, messageId: number, userId: number = TEST_QQ): 
   };
 }
 
+/**
+ * 只读打开临时数据库并执行查询；bridge 正在运行时偶发 SQLITE_BUSY，
+ * 重试几次（测试稳定性；不影响断言内容）。
+ */
+async function withReadonlyDb<T>(dbPath: string, fn: (db: BetterSqlite3.Database) => T): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    let db: BetterSqlite3.Database | null = null;
+    try {
+      const Database = (await import("better-sqlite3")).default;
+      db = new Database(dbPath, { readonly: true });
+      return fn(db);
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/busy|locked/i.test(message)) throw error;
+      await wait(150);
+    } finally {
+      try {
+        db?.close();
+      } catch {
+        // ignore
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
   let fake: FakeOpenAi;
   let workDir: string;
@@ -572,26 +601,25 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
     );
 
     // 数据库侧隔离：两个 owner 的同意记录 + 两份记忆 persona
-    const Database = (await import("better-sqlite3")).default;
-    const db = new Database(path.join(dataDir, "memory.sqlite"), { readonly: true });
-    try {
-      const owners = (
+    const dbPath = path.join(dataDir, "memory.sqlite");
+    const owners = await withReadonlyDb(dbPath, (db) =>
+      (
         db.prepare("SELECT owner_id FROM user_consent ORDER BY owner_id").all() as Array<{
           owner_id: string;
         }>
-      ).map((row) => row.owner_id);
-      expect(owners).toContain(`qq:${TEST_QQ}`);
-      expect(owners).toContain(`qq:${TEST_QQ2}`);
+      ).map((row) => row.owner_id),
+    );
+    expect(owners).toContain(`qq:${TEST_QQ}`);
+    expect(owners).toContain(`qq:${TEST_QQ2}`);
 
-      const personas = (
+    const personas = await withReadonlyDb(dbPath, (db) =>
+      (
         db
           .prepare("SELECT DISTINCT persona_id FROM t2_episodes WHERE source = 'chat'")
           .all() as Array<{ persona_id: string }>
-      ).map((row) => row.persona_id);
-      expect(personas.length).toBeGreaterThanOrEqual(2);
-      expect(personas.some((id) => id.includes("qq-100000002"))).toBe(true);
-    } finally {
-      db.close();
-    }
+      ).map((row) => row.persona_id),
+    );
+    expect(personas.length).toBeGreaterThanOrEqual(2);
+    expect(personas.some((id) => id.includes("qq-100000002"))).toBe(true);
   }, 90000);
 });
