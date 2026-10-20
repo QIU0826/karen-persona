@@ -2,7 +2,16 @@
  * 视觉识别（DeepSeek Flash）测试。
  * 全部 mock：不联网、不读真实 Key；验证 base64 下载、URL 回退、无 Key、异常降级。
  */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+/**
+ * 视觉描述现在会记录旁路成本（ai/aux-usage.ts → llm_usage）。
+ * 测试必须用临时数据目录，否则会往仓库真实 data/memory.sqlite 写假 usage。
+ */
+let dataDir: string;
 
 const { createMock, openAiCtor } = vi.hoisted(() => {
   const createMock = vi.fn();
@@ -45,6 +54,8 @@ function completion(content: string | null) {
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "karen-vision-"));
+  process.env.KAREN_DATA_DIR = dataDir;
   vi.clearAllMocks();
   process.env.DEEPSEEK_API_KEY = "sk-test-key";
   delete process.env.DEEPSEEK_BASE_URL;
@@ -53,11 +64,23 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllGlobals();
   delete process.env.DEEPSEEK_API_KEY;
   delete process.env.DEEPSEEK_BASE_URL;
   delete process.env.DEEPSEEK_VISION_MODEL;
+  delete process.env.KAREN_DATA_DIR;
+  try {
+    const vector = await import("../data/vector.js");
+    vector.closeVectorDb();
+  } catch {
+    // ignore
+  }
+  try {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  } catch {
+    // ignore
+  }
 });
 
 describe("describeImage：DeepSeek Flash 视觉", () => {
