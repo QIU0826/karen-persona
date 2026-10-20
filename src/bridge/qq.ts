@@ -94,7 +94,12 @@ import { startWebServer, type WebServerHandle } from "../web/server.js";
 import { isSpeechAvailable, synthesizeSpeech } from "../ai/tts.js";
 import { decideVoice, type VoiceSettings } from "../impulse/voice.js";
 import { detectMediaRequest } from "../impulse/media-request.js";
-import { collectSticker, downloadStickerBytes } from "../data/sticker-library.js";
+import {
+  collectSticker,
+  downloadStickerBytes,
+  markStickerUsed,
+  pickCollectedSticker,
+} from "../data/sticker-library.js";
 import { isWithinTurnDuplicate } from "../persona/anti-repetition.js";
 import {
   DEFAULT_TYPO_RECALL_SETTINGS,
@@ -195,6 +200,16 @@ const messageDedup = new MessageIdDedup(DEDUP_CAPACITY);
 const userDeferredTimers = new Map<number, { timer: ReturnType<typeof setTimeout>; pendingId: number }>();
 /** 上次发贴纸的时间（每用户冷却） */
 const userLastStickerAt = new Map<number, number>();
+
+/** 最近发过的「收集来的」表情包（避免连续重复同一张） */
+const userRecentCollectedStickers = new Map<number, number[]>();
+
+/** 情绪 → 表情包标签（与 sticker_library.emotion 对齐） */
+function stickerEmotionTag(vector: number): string {
+  if (vector > 0.35) return "happy";
+  if (vector < -0.35) return "sad";
+  return "neutral";
+}
 /** 群聊贴纸冷却：key = `${groupId}:${userId}`（同一个人在私聊/群里互不影响） */
 const groupLastStickerAt = new Map<string, number>();
 
@@ -1377,6 +1392,41 @@ function maybeSendSticker(
 
   const conflictAt = state.relationshipState.lastConflictAt;
   const conflictActive = conflictAt !== null && now - conflictAt < 24 * 60 * 60 * 1000;
+
+  const emotionTag = stickerEmotionTag(state.emotionState.vector);
+
+  // v0.6：优先用"从聊天里收集来的"表情包（开关 KAREN_STICKER_USE=on），没有再回退内置
+  if (process.env.KAREN_STICKER_USE === "on" && !conflictActive) {
+    const owner =
+      target.kind === "private" ? ownerForQq(target.userId) : ownerForQq(target.userId);
+    const collected = pickCollectedSticker({
+      ownerId: owner,
+      emotion: emotionTag,
+      excludeIds: userRecentCollectedStickers.get(userIdForSticker(target)) ?? [],
+    });
+    if (collected && Math.random() <= (inboundSticker ? STICKER_REPLY_TO_STICKER_PROBABILITY : STICKER_PROBABILITY)) {
+      try {
+        const base64 = fs.readFileSync(collected.file).toString("base64");
+        const cqCollected = `[CQ:image,file=base64://${base64}]`;
+        if (target.kind === "private") {
+          userLastStickerAt.set(target.userId, now);
+          userRecentCollectedStickers.set(
+            target.userId,
+            [...(userRecentCollectedStickers.get(target.userId) ?? []), collected.id].slice(-5),
+          );
+          sendPrivateMsg(target.userId, asCqCode(cqCollected));
+        } else {
+          groupLastStickerAt.set(groupKey, now);
+          sendGroupMsg(target.groupId, asCqCode(cqCollected));
+        }
+        markStickerUsed(collected.id, now);
+        log.info("sticker.collected_sent", { id: collected.id, kind: target.kind });
+        return true;
+      } catch {
+        // 读文件失败 → 回退内置贴纸
+      }
+    }
+  }
 
   const sticker = pickSticker({
     emotion: state.emotionState.vector,

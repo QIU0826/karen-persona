@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.6.0 — 2026-10-20
+
+按 [docs/MEMORY_V2_PLAN.md](docs/MEMORY_V2_PLAN.md) 的「拟人化交互」阶段：**节奏模拟器 + 消息意图族 + 表情包持续收集**，并补上 v0.5 遗留的「她主动了解你」。
+
+### Added
+
+- **她主动了解你**（`src/persona/get-to-know.ts`）：认识初期（亲密度 <5）会顺口问工作/城市/宠物/名字/计划，优先问还不了解的；问过的主题落库（`getting_to_know`），同一问题不问第二次；两次提问间隔 ≥4 轮。**解决 v0.5 发现的「事实层永远为空」根因**——用户从不主动自述，她得先问。
+- **打字节奏模拟器**（`src/bridge/pacing.ts`）：替掉「字数 × 固定 ms」。输出 看到消息→开始打字 的延迟、每字耗时、条间间隔、偶发犹豫；受**人设打字速度**（从 `speaking.typingHabit` 关键词推断）、**情绪**、**深夜**、**忙碌**影响。默认人设白天约 285ms/字、深夜约 385ms/字；忙时不是打字慢，而是很久才开始回。
+- **消息意图族**（`src/impulse/message-intent.ts`）：`typo_recall` 打错字 / `regret_recall` 说重了 / `rewrite` 重发更短的 / `hesitate` 犹豫（不撤回，表现为回得慢+话短）。共享护栏：仅私聊、危机轮禁用、冷却期不演、一轮一次、延迟 0.5–5s；记忆只落正确原文。
+- **表情包持续收集**（`src/data/sticker-library.ts`）：入站图片自动下载 → sha256 去重 → 落盘 `KAREN_DATA_DIR/stickers-collected/` → 入库；库容 500（超出淘汰最久未用）、单文件 ≤2MB、可一键 purge。出站可按情绪优先挑收集来的（`KAREN_STICKER_USE=on`），没有则回退内置 11 张。
+
+### Changed
+
+- 桥接发送：`sendPrivateBubbleWithTypoRecall` → 意图感知版本，支持四类动作；消息 ID 拿不到退化为发原文，撤回失败也发跟进版本。
+- 采集默认关闭（`KAREN_STICKER_COLLECT=on` 才开），出站使用默认关闭（`KAREN_STICKER_USE=on` 才开）——先观察一周再开，避免突然换风格。
+
+### Testing
+
+- 90 个测试文件 / 1055 个用例通过；`tsc --noEmit` 0 错误；`npm run lint` 0 违规。
+- 新增测试：pacing（13）、message-intent（14）、get-to-know（9）、sticker-library（9）。
+
 ## v0.5.0 — 2026-10-20
 
 按批准的 [docs/MEMORY_V2_PLAN.md](docs/MEMORY_V2_PLAN.md) 落地记忆重构第一阶段：**真向量检索 + 锚点记忆 + 日记忆**。
