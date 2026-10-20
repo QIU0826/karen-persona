@@ -105,6 +105,17 @@ describe("buildRealRunReport", () => {
     expect(report.flags).toContain("有 1 条空回复");
     expect(report.flags).toContain("有 1 条重复回复");
     expect(report.flags.some((flag) => flag.includes("18+"))).toBe(true);
+    // 未确认披露但已确认 18+：单独标记
+    const confirmedAge = buildRealRunReport(
+      snapshot({
+        consent: {
+          ownerId: "qq:1",
+          ageConfirmedAt: 1_000,
+          disclosureAckedAt: null,
+        },
+      }),
+    );
+    expect(confirmedAge.flags.some((flag) => flag.includes("AI 披露未确认"))).toBe(true);
     // 仅一个事实，不触发「多轮无事实」提示；延迟正常，不触发 >5s
     expect(report.flags.some((flag) => flag.includes("事实"))).toBe(false);
   });
@@ -229,6 +240,46 @@ describe("qq-longrun-watch CLI", () => {
         "utf-8",
       );
       expect(md).toContain("真实 QQ 长跑观察报告");
+    },
+    30_000,
+  );
+});
+
+describe("qq-longrun-watch CLI 单次报告", () => {
+  it(
+    "--once --since 0 直接生成历史报告并退出",
+    async () => {
+      const dataDir = path.join(dir, "data-once");
+      const child = spawn(
+        process.execPath,
+        [TSX_CLI, WATCH_CLI, "--once", "--since", "0", "--out", path.join(dataDir, "hist")],
+        {
+          cwd: REPO_ROOT,
+          env: { ...process.env, KAREN_DATA_DIR: dataDir },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let output = "";
+      child.stdout.on("data", (chunk: Buffer) => {
+        output += chunk.toString();
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        output += chunk.toString();
+      });
+      const code = await new Promise<number | null>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          reject(new Error(`单次报告超时\n${output}`));
+        }, 20_000);
+        child.on("exit", (exitCode) => {
+          clearTimeout(timer);
+          resolve(exitCode);
+        });
+      });
+      expect(code).toBe(0);
+      expect(output).toContain("单次报告");
+      expect(fs.existsSync(path.join(dataDir, "hist.json"))).toBe(true);
+      expect(fs.existsSync(path.join(dataDir, "hist.md"))).toBe(true);
     },
     30_000,
   );

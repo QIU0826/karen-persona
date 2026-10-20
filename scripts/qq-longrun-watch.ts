@@ -6,6 +6,8 @@
  *   npx tsx scripts/qq-longrun-watch.ts --duration 3600
  *   npx tsx scripts/qq-longrun-watch.ts --duration 600 --interval 5
  *   npm run qq:watch -- --duration 1800
+ *   npx tsx scripts/qq-longrun-watch.ts --once --since 0        # 复盘全部历史
+ *   npx tsx scripts/qq-longrun-watch.ts --once --since 2026-10-20T05:51:00Z
  *
  * 行为：
  * - 从启动时刻开始观察（只看新消息/新调用）；
@@ -29,12 +31,29 @@ interface Args {
   durationSec: number;
   intervalSec: number;
   outBase: string | null;
+  /** 单次生成报告后退出（配合 --since 复盘一段历史） */
+  once: boolean;
+  /** 窗口起点（epoch ms、ISO 时间或 0 = 全部历史） */
+  sinceMs: number | null;
+}
+
+function parseSince(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const value = raw.trim();
+  if (value === "0") return 0;
+  if (/^\d+$/.test(value)) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function parseArgs(argv: string[]): Args {
   const durationIndex = argv.indexOf("--duration");
   const intervalIndex = argv.indexOf("--interval");
   const outIndex = argv.indexOf("--out");
+  const sinceIndex = argv.indexOf("--since");
   const parsePositive = (raw: string | undefined, fallback: number): number => {
     const value = Number(raw);
     return Number.isFinite(value) && value > 0 ? value : fallback;
@@ -43,11 +62,14 @@ function parseArgs(argv: string[]): Args {
     durationSec: durationIndex >= 0 ? parsePositive(argv[durationIndex + 1], 3600) : 3600,
     intervalSec: intervalIndex >= 0 ? parsePositive(argv[intervalIndex + 1], 10) : 10,
     outBase: outIndex >= 0 && argv[outIndex + 1] ? argv[outIndex + 1] : null,
+    once: argv.includes("--once"),
+    sinceMs: parseSince(sinceIndex >= 0 ? argv[sinceIndex + 1] : undefined),
   };
 }
 
 const args = parseArgs(process.argv.slice(2));
-const startedAt = Date.now();
+// --once 只生成报告：默认回看最近 1 小时；--since 明确指定窗口起点
+const startedAt = args.sinceMs ?? (args.once ? Date.now() - 60 * 60 * 1000 : Date.now());
 const dir = dataDir();
 fs.mkdirSync(dir, { recursive: true });
 const stamp = new Date(startedAt).toISOString().replace(/[:.]/g, "-");
@@ -132,8 +154,12 @@ process.on("SIGTERM", () => finish("SIGTERM"));
 
 console.log("真实 QQ 长跑观察（只读）");
 console.log(`  数据目录：${dir}`);
-console.log(`  观察时长：${args.durationSec}s · 轮询 ${args.intervalSec}s`);
-console.log(`  现在去 QQ 给她发消息；新回合会实时打印在这里。`);
+if (args.once) {
+  console.log(`  单次报告模式：窗口起点 ${new Date(startedAt).toISOString()}`);
+} else {
+  console.log(`  观察时长：${args.durationSec}s · 轮询 ${args.intervalSec}s`);
+  console.log(`  现在去 QQ 给她发消息；新回合会实时打印在这里。`);
+}
 console.log(`  报告输出：${jsonPath}`);
 const initial = collectRealRunSnapshot({ sinceMs: startedAt });
 const initialReport = buildRealRunReport(initial, { sinceMs: startedAt });
@@ -147,4 +173,8 @@ console.log(
 lastTurnCount = initialReport.turnCount;
 lastCalls = initialReport.cost.calls;
 lastFacts = initialReport.memory.facts;
-setTimeout(poll, args.intervalSec * 1000);
+if (args.once) {
+  finish("单次报告");
+} else {
+  setTimeout(poll, args.intervalSec * 1000);
+}

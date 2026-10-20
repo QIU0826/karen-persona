@@ -7,6 +7,7 @@ docker-compose.yml
 data/*.sqlite
 data/*.sqlite-*
 data/*.json
+data/*.md
 data/qq/
 *.log
 .DS_Store

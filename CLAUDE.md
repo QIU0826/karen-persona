@@ -40,7 +40,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
 | 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入已接线（双列，需 Qwen Key 实跑）；TTS/即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | ✅/🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF，FTS5 用 OR+BM25 IDF）→ DeepSeek 候选重排**（默认开启，非真向量；异常/超时降级）、sqlite-vec 启用、双列 embedding、schema v2/v3 幂等迁移、用户事实层、T1 状态弧、T3 压缩（40 条/隔天兜底 + `t3_compressed` 防重复）；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；**多用户隔离已实现**（owner=人设+用户+平台） |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 67 个测试文件 / 678 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入（typecheck/lint/test/覆盖率）；**新增 mock-OneBot 桥接端到端测试**（真实 bridge 子进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊/命令/危机/多用户隔离，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）、可复现记忆金标集（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B（`src/eval/repetition-eval.ts`）；真实 QQ/NapCat 端到端仍需真机；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 67 个测试文件 / 679 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入（typecheck/lint/test/覆盖率）；**新增 mock-OneBot 桥接端到端测试**（真实 bridge 子进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊/命令/危机/多用户隔离，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）、可复现记忆金标集（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B（`src/eval/repetition-eval.ts`）；真实 QQ/NapCat 端到端仍需真机；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -64,7 +64,7 @@ npm run setup      # 交互式配置向导
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + ubuntu/macOS/Windows 三平台矩阵 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 已收紧为 `>=22.12`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm run lint` 0 违规；`npm test` 67 文件 / 678 用例通过（审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm run lint` 0 违规；`npm test` 67 文件 / 679 用例通过（审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -99,7 +99,7 @@ npm run setup      # 交互式配置向导
 - **群聊贴纸/发图（2026-10-20）**：新增 `src/bridge/group-reply.ts` 出站计划（纯函数+单测）：群聊回复 = 文字气泡 → QQ 表情 →（可选）照片；群聊也接本地贴纸（收到表情更愿意回，按「群+人」5 分钟冷却）；生活照默认不发群，`group_photo_enabled: true` 才开（config.yaml 或 `GROUP_PHOTO=true`）；`processMessage` 新增 `skipPhoto` 开关，群聊默认跳过发图决策。测试 51 文件 / 582 用例。
 - **年龄门 18+ 确认（2026-10-20）**：新增 `src/data/consent.ts`（SQLite `user_consent`，按 owner 隔离）+ `src/persona/age-gate.ts`（确认/未成年识别、动作裁决、文案）；QQ 私聊首次对话发「披露 + 18+ 确认请求」，未确认前不进入角色对话（每 5 分钟最多提醒一次），回复「我成年了」后记录并放行；明确表示未成年的用户拒绝服务；群聊里未确认用户不回复；新增 `/age` 命令查看状态；`age_gate_enabled` 默认 true（CLI 开发者模式不强制）。测试 53 文件 / 596 用例。
 - **成本统计覆盖旁路 LLM（2026-10-20）**：新增 `src/ai/aux-usage.ts` 统一记账；事实抽取/内心独白（含深夜独白）/T3 摘要/herView/进化日志/叙事重构/视觉描述/配图搜索词全部写入 `llm_usage`（带 `kind`）；`/cost` 与 Web 控制台新增「按用途」拆分（对话/事实抽取/独白/长期摘要/图片识别…）。真实验证：一次事实抽取调用写入 kind=fact_extraction、prompt 234 / completion 63、¥0.000486。测试 54 文件 / 600 用例。
-- **M2-D 真实 QQ 长跑工具 + 首轮真机修复（2026-10-20）**：新增 `src/eval/qq-realrun.ts`（只读快照/回合延迟/重复空回复/成本/事实/同意 → 报告）+ `scripts/qq-longrun-watch.ts` + `npm run qq:watch`，结束写 `data/realrun-*.md`（含对话原文，600 权限）。首轮真机（3 轮）暴露并修复：①老用户 session 非空导致 AI 披露被跳过 → 改为按 `user_consent.disclosure_acked_at` 补发（`shouldSendDisclosure`），披露/`/about` 文案改用当前人设名；②消息门未把当前消息计入「5 分钟连续跟进」，18s 后的追问被随机延迟 31 分钟 → `buildGateContext` 修正并补回归测试。测试 67 文件 / 678 用例。
+- **M2-D 真实 QQ 长跑工具 + 首轮真机修复（2026-10-20）**：新增 `src/eval/qq-realrun.ts`（只读快照/回合延迟/重复空回复/成本/事实/同意 → 报告）+ `scripts/qq-longrun-watch.ts` + `npm run qq:watch`，结束写 `data/realrun-*.md`（含对话原文，600 权限）；支持 `--once --since <时间>` 随时复盘历史并标记「AI 披露未确认/空回复/重复/无成本记录」。首轮真机（3 轮）暴露并修复：①老用户 session 非空导致 AI 披露被跳过 → 改为按 `user_consent.disclosure_acked_at` 补发（`shouldSendDisclosure`），披露/`/about` 文案改用当前人设名；②消息门未把当前消息计入「5 分钟连续跟进」，18s 后的追问被随机延迟 31 分钟 → `buildGateContext` 修正并补回归测试。测试 67 文件 / 678 用例。
 - **M2-C 单 owner 导出（2026-10-20）**：`user-export.ts` 拆出 `buildUserExportPayload`（只读组装，不落盘）+ Web API `GET /api/export?owner=`（JSON 附件下载，ASCII 安全文件名，默认仅主用户、开启 `web_all_owners` 后可导出其他 owner；非法/越权 400/403）；前端顶栏「导出当前用户」按钮（自动带 token/owner）。测试：导出新文件 3 条场景 + dashboard 断言；全仓 65 文件 / 666 用例。
 - **M2-C 多租户 Web 最小版（2026-10-20）**：新增 `src/web/owner-view.ts`（owner↔storageKey/persona 映射、扫描会话/facts/consent 汇总已知 owner）+ Web API `/api/owners`；`?owner=` 支持只读切换会话/时间线/记忆/总览（默认 `web_all_owners: false` 只展示主用户，开启后允许切换；`/api/facts?owner=` 保持历史只读行为）；前端顶栏 owner 下拉（仅在 >1 用户且开启时显示）。配置 `web_all_owners`（config.yaml 或 `WEB_ALL_OWNERS`），桥接传入 primaryOwner/allOwners。新增测试 7 条（owner 映射/汇总 + 多用户 API 作用域 200/403 + 页面选择器）。测试 65 文件 / 665 用例。
 - **M2-B 人设包 v2（2026-10-20）**：新增 `src/persona/pack.ts`（manifest/素材/记忆种子校验 + 安装/覆盖备份/列表）+ `src/persona/pack-cli.ts` + npm 脚本 `persona:pack:validate/install/list`。包格式：manifest.json + persona.json + 可选 assets/与 memories/seed.jsonl（3–20 条，`--with-seeds` 才写 T2）；覆盖安装备份到 `personas/.backups/`；校验只做结构与引擎兼容（版本/schema/id/素材大小与类型），不判断内容质量；暂不支持 zip。规范 [docs/PERSONA_PACK.md](docs/PERSONA_PACK.md)。测试 9 条（含子进程 CLI）。测试 63 文件 / 658 用例。
@@ -128,7 +128,7 @@ npm run setup      # 交互式配置向导
 - 发图 7 张本地兜底（Unsplash Key 未配置）；群聊发图需 `group_photo_enabled: true`（默认关）；夜间发图由免打扰门控
 - Web 控制台只读、仅本机；默认只展示主用户，`web_all_owners: true` 可只读切换其他 owner（会话/时间线/记忆按 owner 隔离）；单 owner JSON 导出已可用（`/api/export`），删除/暂停等写操作仍无；token 在 URL query 可见（后续可改 fragment）；多人设搜索仍受 getCurrentPersona 单例约束
 - 语音 ASR、多实例商用托管待做
-- 测试覆盖率有基线但仍偏低（行 53.9%，`npm run test:coverage` 阈值守护）；lint 是 tsc 未使用代码检查（零依赖），不是完整 ESLint 规则集
+- 测试覆盖率有基线但仍偏低（行 54.1%，`npm run test:coverage` 阈值守护）；lint 是 tsc 未使用代码检查（零依赖），不是完整 ESLint 规则集
 - QQ 桥接跨平台验证不完整（Windows 曾验，macOS 已实机验证；CI 现已三平台跑单测，但真实 QQ 端到端仍只在 macOS 跑过）；平台/封号风险是结构性风险
 - 依赖：vitest 5 暂缓（rolldown 平台包解析慢）；`node-cron`/`wechaty` 已从依赖移除
 - 合规为最小版：AI 披露已做（可用 `ai_disclosure: false` 关闭，公开发布应保持开启）；**年龄门已升级为一次性确认**（QQ 用户回复「我成年了」才进入对话，`/age` 查看，`age_gate_enabled` 可关；仍是自我声明、无身份证校验）；危机检测是关键词兜底（非临床评估，可能漏判/误判）

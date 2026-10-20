@@ -331,6 +331,9 @@ export function buildRealRunReport(
   if (turns.length > 0 && !snapshot.consent?.ageConfirmedAt) {
     flags.push("有对话但用户未完成 18+ 确认（检查年龄门是否异常放行）");
   }
+  if (turns.length > 0 && snapshot.consent?.ageConfirmedAt && !snapshot.consent?.disclosureAckedAt) {
+    flags.push("AI 披露未确认（老数据未补发或披露发送失败，下一条消息应补发）");
+  }
   if (turns.length > 0 && !snapshot.usage.some((row) => row.created_at >= sinceMs)) {
     flags.push("有对话但没有成本记录（usage 未落库）");
   }
