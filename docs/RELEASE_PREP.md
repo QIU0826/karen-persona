@@ -14,7 +14,7 @@ ln -s "$PWD/node_modules" "$TMP/node_modules"
 cd "$TMP"
 node node_modules/tsx/dist/cli.mjs src/doctor.ts     # 无 config/.env 时给出可执行修复指引
 node node_modules/typescript/bin/tsc --noEmit        # 0 错误
-node node_modules/vitest/vitest.mjs run              # 68 文件 / 682 用例全绿
+node node_modules/vitest/vitest.mjs run              # 68 文件 / 683 用例全绿
 ```
 
 结果（2026-10-20）：typecheck 0 错误；679 用例全绿（含 mock-OneBot bridge E2E、setup E2E、人设包、多用户 Web、真实长跑报告）；`doctor` 在缺 `config.yaml` / `.env` 时输出 ✅/❌ 清单和修复命令，不崩溃。
@@ -39,7 +39,7 @@ node node_modules/vitest/vitest.mjs run              # 68 文件 / 682 用例全
 ### 1.4 真机与测试
 
 - 真实 QQ 长跑：首轮 2 个完整回合，平均延迟 2876ms，成本 ¥0.005650，空/重复 0；暴露的「老用户无 AI 披露」「快速追问被误延迟 31 分钟」已修复（见 [QQ_REAL_RUN.md](QQ_REAL_RUN.md)）。**样本仍少**。
-- 测试：68 文件 / 682 用例；`tsc` 0、lint 0；覆盖率行 54.2%（CI 阈值守护，Linux）。
+- 测试：68 文件 / 683 用例；`tsc` 0、lint 0；覆盖率行 54.2%（CI 阈值守护，Linux）。
 - CI：ubuntu / macOS / Windows 三平台矩阵；Linux 额外跑覆盖率。
 
 ## 2. 发布决策与待办

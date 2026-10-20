@@ -14,6 +14,7 @@ import {
   buildRelationshipPart,
   buildWorldPart,
   assemblePrompt,
+  buildPrompt,
   type ChainRule,
   type BehavioralScript,
   type InnerState,
@@ -21,7 +22,7 @@ import {
   type ActiveRule,
   type ActiveScript,
 } from "./prompt-builder.js";
-import type { Persona } from "./loader.js";
+import { loadPersona, type Persona } from "./loader.js";
 import type { AppConfig } from "../data/store.js";
 
 // ── 测试装置 ───────────────────────────────────
@@ -412,5 +413,31 @@ describe("buildWorldPart", () => {
   it("包含城市和社交圈", () => {
     const result = buildWorldPart(makePersona(), makeConfig());
     expect(result).toContain("上海");
+  });
+});
+
+describe("反编造往事", () => {
+  it("prompt 明确禁止编造「怎么认识 / 第一次见面」的具体场景", async () => {
+    const persona = await loadPersona("xiaoya");
+    const prompt = buildPrompt({
+      persona,
+      config: { location: "上海" } as unknown as AppConfig,
+      rules: persona.chainRules ?? [],
+      scripts: persona.behavioralScripts ?? [],
+      state: {
+        exposure: 0.3,
+        guilt: 0,
+        emotion: 0,
+        hour: 14,
+        mode: "neutral",
+        closeness: 3,
+      },
+      impulseIntensity: 0.2,
+      corrections: [],
+      tags: [],
+      userText: "你还记得我们是怎么认识的吗？",
+    });
+    expect(prompt).toContain("我们怎么认识的");
+    expect(prompt).toContain("不要编造具体场景");
   });
 });
