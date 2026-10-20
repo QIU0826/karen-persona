@@ -383,6 +383,7 @@ a { color: var(--accent2); }
 .brand-sub { color: var(--muted); font-weight: 400; font-size: 12px; }
 .topbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .persona { color: var(--accent); font-weight: 600; }
+.owner-select { background: var(--bg2); color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; font: inherit; font-size: 12px; max-width: 220px; }
 .wrap { max-width: 980px; margin: 0 auto; padding: 16px 16px 48px; }
 .tabs { display: flex; gap: 8px; overflow-x: auto; padding: 14px 0 10px; position: sticky; top: 53px; background: linear-gradient(var(--bg) 70%, transparent); z-index: 5; }
 .tab {
@@ -513,6 +514,41 @@ const CLIENT_JS = `
   var FACT_ORDER = ["profile", "work", "pet", "relationship", "plan", "preference", "other"];
   var COST_KIND_LABELS = { chat: "对话", chatStream: "对话（流式）", fact_extraction: "事实抽取", monologue: "内心独白", t3_summary: "长期摘要", her_view: "她眼中的你", journal: "进化日志", narrative: "叙事重构", vision: "图片识别", photo_query: "配图搜索词", memory_eval: "记忆评测", other: "其他" };
   var view = { paused: false, memorySearchActive: false, herName: BOOT.persona_name || "她" };
+  var currentOwner = "";
+
+  function withOwner(path) {
+    if (!currentOwner) return path;
+    return path + (path.indexOf("?") >= 0 ? "&" : "?") + "owner=" + encodeURIComponent(currentOwner);
+  }
+
+  function ownerLabel(info) {
+    var suffix = info.is_primary ? "（主用户）" : "";
+    return (info.persona_name ? info.persona_name + " · " : "") + info.owner + suffix;
+  }
+
+  function renderOwners(data) {
+    var select = $("owner-select");
+    if (!select) return;
+    if (!data || !data.enabled || !data.owners || data.owners.length < 2) {
+      select.style.display = "none";
+      currentOwner = "";
+      return;
+    }
+    var primary = data.primary_owner || "";
+    var keep = currentOwner || primary;
+    var html = "";
+    var found = false;
+    for (var i = 0; i < data.owners.length; i++) {
+      var item = data.owners[i];
+      if (item.owner === keep) found = true;
+      html += '<option value="' + esc(item.owner) + '">' + esc(ownerLabel(item)) + "</option>";
+    }
+    select.innerHTML = html;
+    if (!found) keep = primary || data.owners[0].owner;
+    currentOwner = keep;
+    select.value = keep;
+    select.style.display = "";
+  }
 
   function $(id) { return document.getElementById(id); }
   function esc(value) {
@@ -716,7 +752,7 @@ const CLIENT_JS = `
       return;
     }
     if (statusEl) statusEl.textContent = "回放中…";
-    fetchJson("/api/memory-probe?q=" + encodeURIComponent(query) + "&limit=8")
+    fetchJson(withOwner("/api/memory-probe?q=" + encodeURIComponent(query) + "&limit=8"))
       .then(renderProbe)
       .catch(function () {
         if (statusEl) statusEl.textContent = "回放失败，请稍后重试。";
@@ -841,18 +877,29 @@ const CLIENT_JS = `
   }
 
   function refresh() {
-    var paths = ["/api/overview", "/api/session?limit=30", "/api/memory?limit=30", "/api/timeline", "/api/health", "/api/cost", "/api/facts"];
+    var paths = [
+      "/api/owners",
+      withOwner("/api/overview"),
+      withOwner("/api/session?limit=30"),
+      withOwner("/api/memory?limit=30"),
+      withOwner("/api/timeline"),
+      "/api/health",
+      "/api/cost",
+      withOwner("/api/facts")
+    ];
     return Promise.allSettled(paths.map(fetchJson)).then(function (results) {
       var okCount = results.filter(function (result) { return result.status === "fulfilled"; }).length;
       setConn(okCount > 0);
       function value(index) { return results[index].status === "fulfilled" ? results[index].value : null; }
-      var overview = value(0);
-      var session = value(1);
-      var memory = value(2);
-      var timeline = value(3);
-      var health = value(4);
-      var cost = value(5);
-      var facts = value(6);
+      var owners = value(0);
+      var overview = value(1);
+      var session = value(2);
+      var memory = value(3);
+      var timeline = value(4);
+      var health = value(5);
+      var cost = value(6);
+      var facts = value(7);
+      renderOwners(owners);
       if (overview) {
         view.herName = (overview.persona && overview.persona.name) || view.herName;
         var personaEl = $("persona-name");
@@ -885,14 +932,14 @@ const CLIENT_JS = `
     var statusEl = $("memory-status");
     if (!query) {
       view.memorySearchActive = false;
-      fetchJson("/api/memory?limit=30").then(renderMemoryList).catch(function () {
+      fetchJson(withOwner("/api/memory?limit=30")).then(renderMemoryList).catch(function () {
         if (statusEl) statusEl.textContent = "读取记忆失败，请稍后重试。";
       });
       return;
     }
     view.memorySearchActive = true;
     if (statusEl) statusEl.textContent = "搜索中…";
-    fetchJson("/api/memory?query=" + encodeURIComponent(query) + "&limit=10")
+    fetchJson(withOwner("/api/memory?query=" + encodeURIComponent(query) + "&limit=10"))
       .then(renderMemoryList)
       .catch(function () {
         if (statusEl) statusEl.textContent = "搜索失败，请稍后重试。";
@@ -910,6 +957,14 @@ const CLIENT_JS = `
     if (form) form.addEventListener("submit", onMemorySearch);
     var probeForm = $("probe-form");
     if (probeForm) probeForm.addEventListener("submit", onProbe);
+    var ownerSelect = $("owner-select");
+    if (ownerSelect) {
+      ownerSelect.addEventListener("change", function () {
+        currentOwner = ownerSelect.value;
+        view.memorySearchActive = false;
+        refresh();
+      });
+    }
     var toggle = $("refresh-toggle");
     if (toggle) {
       toggle.addEventListener("click", function () {
@@ -960,6 +1015,7 @@ export function renderDashboard(data: DashboardData): string {
     `<header class="topbar">` +
     `<div class="brand"><span class="brand-dot"></span><span class="brand-name">Karen</span><span class="brand-sub">本地控制台 · 只读</span></div>` +
     `<div class="topbar-right">` +
+    `<select class="owner-select" id="owner-select" aria-label="切换用户" style="display:none"></select>` +
     `<span class="persona" id="persona-name">${escapeHtml(herName)}</span>` +
     `<span class="muted small" id="updated">更新于 ${escapeHtml(time(overview.generated_at))}</span>` +
     `<span class="chip online" id="conn">在线</span>` +

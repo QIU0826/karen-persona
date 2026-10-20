@@ -391,3 +391,13 @@ describe("成本按用途展示", () => {
     expect(html).toContain("事实抽取");
   });
 });
+
+describe("多用户只读切换", () => {
+  it("页面含 owner 选择器与 /api/owners 拉取逻辑", () => {
+    const html = renderFixture();
+    expect(html).toContain('id="owner-select"');
+    expect(html).toContain("/api/owners");
+    expect(html).toContain("renderOwners");
+    expect(html).toContain("owner=");
+  });
+});

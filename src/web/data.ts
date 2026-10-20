@@ -37,6 +37,8 @@ export interface WebPersonaContext {
 export interface WebPersonaOverride {
   id?: string;
   name?: string;
+  /** 会话/状态文件后缀（多用户视图用；"" = 历史主用户文件） */
+  storageKey?: string;
 }
 
 /** 默认限制：最近 30 条；上限防止一次拉爆页面。 */
@@ -535,7 +537,7 @@ export function getSessionData(
   const safeLimit = normalizeLimit(limit, DEFAULT_VIEW_LIMIT);
   let session: ConversationSession | null = null;
   try {
-    session = loadSession(persona.name);
+    session = loadSession(persona.name, override.storageKey ?? "");
   } catch {
     session = null;
   }
@@ -657,7 +659,7 @@ export function getTimeline(
 
   let state: PersistedPersonaState | null = null;
   try {
-    state = loadPersonaState(persona.name, fallbackCloseness);
+    state = loadPersonaState(persona.name, fallbackCloseness, override.storageKey ?? "");
   } catch {
     state = null;
   }
@@ -890,9 +892,14 @@ export function getOverview(
   options: OverviewOptions = {},
 ): OverviewData {
   const persona = resolvePersonaContext(override);
-  const session = getSessionData(1, { id: persona.id, name: persona.name });
-  const memory = getRecentMemories(1, { id: persona.id, name: persona.name });
-  const timeline = getTimeline({ id: persona.id, name: persona.name }, options.initialCloseness ?? 3);
+  const scopedOverride: WebPersonaOverride = {
+    id: persona.id,
+    name: persona.name,
+    storageKey: override.storageKey ?? "",
+  };
+  const session = getSessionData(1, scopedOverride);
+  const memory = getRecentMemories(1, scopedOverride);
+  const timeline = getTimeline(scopedOverride, options.initialCloseness ?? 3);
   const health = getHealthData(options.health ?? {});
   const cost = getCostData(7);
   return composeOverview(persona, { session, memory, timeline, health, cost });

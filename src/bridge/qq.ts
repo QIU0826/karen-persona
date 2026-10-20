@@ -654,6 +654,10 @@ async function main() {
     personaId: config.persona,
     personaName: defaultPersona.name,
     initialCloseness: defaultPersona.relationship.closeness,
+    // 多用户只读视图：默认只展示主用户；web_all_owners=true 才允许切换
+    primaryOwner:
+      config.allowed_users.length > 0 ? ownerForQq(config.allowed_users[0]) : "cli:local",
+    allOwners: config.web_all_owners === true,
     getWsConnections: () => getConnectionStatus().count,
     getPendingReplies: () => countPendingReplies(),
   });

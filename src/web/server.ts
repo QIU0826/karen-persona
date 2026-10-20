@@ -54,6 +54,13 @@ import {
   type WebPersonaContext,
   type WebPersonaOverride,
 } from "./data.js";
+import {
+  isOwnerAllowed,
+  listKnownOwners,
+  normalizeOwnerParam,
+  storageKeyForOwner,
+  storagePersonaForOwner,
+} from "./owner-view.js";
 
 const log = createLogger("web");
 
@@ -84,6 +91,10 @@ export interface WebServerOptions {
   getWsConnections?: () => number;
   /** pending 回复数（默认从 pending_replies 表统计）。 */
   getPendingReplies?: () => number;
+  /** 主用户 owner（白名单第一个 QQ 对应的 owner；默认 `qq:<DEFAULT_PRIMARY_QQ>`）。 */
+  primaryOwner?: string;
+  /** 是否允许控制台查看/切换其他 owner（默认 false，只展示主用户）。 */
+  allOwners?: boolean;
   /** 服务启动时间（uptime 基准），默认 startWebServer 调用时刻。 */
   startedAt?: number;
 }
@@ -182,24 +193,54 @@ function personaOverride(options: WebServerOptions): WebPersonaOverride {
   return { id: options.personaId, name: options.personaName };
 }
 
+function primaryOwnerOf(options: WebServerOptions): string {
+  const raw = options.primaryOwner?.trim();
+  return raw && raw !== "" ? raw : DEFAULT_FACTS_OWNER;
+}
+
+/** 某 owner 的数据查询 scope（会话/状态文件后缀 + T2 persona_id）。 */
+function ownerOverrideFor(options: WebServerOptions, owner: string): WebPersonaOverride {
+  const primary = primaryOwnerOf(options);
+  return {
+    id: storagePersonaForOwner(options.personaId ?? "unknown", owner, primary),
+    name: options.personaName,
+    storageKey: storageKeyForOwner(owner, primary),
+  };
+}
+
+type OwnerRequest =
+  | { ok: true; owner: string; override: WebPersonaOverride }
+  | { ok: false; status: number; error: string };
+
+/**
+ * 解析 ?owner=（默认主用户）：
+ * - 格式非法 → 400；
+ * - 未开启 web_all_owners 且请求别人 → 403（默认只展示主用户）。
+ */
+function resolveOwnerRequest(
+  url: URL,
+  options: WebServerOptions,
+  override: WebPersonaOverride,
+): OwnerRequest {
+  const primary = primaryOwnerOf(options);
+  const raw = url.searchParams.get("owner");
+  if (raw === null || raw.trim() === "") {
+    return { ok: true, owner: primary, override };
+  }
+  const owner = normalizeOwnerParam(raw);
+  if (owner === null) return { ok: false, status: 400, error: "invalid_owner" };
+  if (!isOwnerAllowed(owner, primary, options.allOwners === true)) {
+    return { ok: false, status: 403, error: "owner_scope_disabled" };
+  }
+  return { ok: true, owner, override: ownerOverrideFor(options, owner) };
+}
+
 function healthOptions(options: WebServerOptions): HealthDataSourceOptions {
   return {
     startedAt: options.startedAt,
     getWsConnections: options.getWsConnections,
     getPendingReplies: options.getPendingReplies,
   };
-}
-
-/**
- * 校验 /api/facts 的 owner 参数（形如 `qq:2889386774` / `cli:local`）。
- * 空值回退主用户；超长/格式非法返回 null → 路由层 400。
- * SQL 全部参数化，这里只做输入面收缩，不拼 SQL。
- */
-function normalizeFactsOwner(value: string | null): string | null {
-  const raw = (value ?? "").trim();
-  if (!raw) return DEFAULT_FACTS_OWNER;
-  if (raw.length > 80) return null;
-  return /^[a-zA-Z][a-zA-Z0-9_]{0,15}:[a-zA-Z0-9._@-]{1,64}$/.test(raw) ? raw : null;
 }
 
 function buildDashboardData(
@@ -209,7 +250,7 @@ function buildDashboardData(
   const override = personaOverride(options);
   const session = getSessionData(30, override);
   const memory = getRecentMemories(30, override);
-  const facts = getUserFactsData(DEFAULT_FACTS_OWNER);
+  const facts = getUserFactsData(primaryOwnerOf(options));
   // 首屏用示例 query 跑一次同步检索；页面内 JS 之后按输入框内容局部回放
   const probe = getMemoryHitProbe(MEMORY_PROBE_SAMPLE_QUERY, MEMORY_PROBE_DEFAULT_LIMIT, override);
   const timeline = getTimeline(override, options.initialCloseness ?? 3);
@@ -270,8 +311,27 @@ async function handleRequest(
       return;
     }
 
+    if (pathname === "/api/owners") {
+      const primary = primaryOwnerOf(options);
+      const all = listKnownOwners(options.personaId ?? "unknown", primary);
+      const owners = options.allOwners === true ? all : all.filter((item) => item.is_primary);
+      sendJson(res, 200, {
+        ok: true,
+        generated_at: new Date().toISOString(),
+        enabled: options.allOwners === true,
+        primary_owner: primary,
+        owners,
+      });
+      return;
+    }
+
     if (pathname === "/api/overview") {
-      sendJson(res, 200, getOverview(override, {
+      const scoped = resolveOwnerRequest(url, options, override);
+      if (!scoped.ok) {
+        sendJson(res, scoped.status, { ok: false, error: scoped.error });
+        return;
+      }
+      sendJson(res, 200, getOverview(scoped.override, {
         initialCloseness: options.initialCloseness ?? 3,
         health: healthOptions(options),
       }));
@@ -279,26 +339,37 @@ async function handleRequest(
     }
 
     if (pathname === "/api/session") {
+      const scoped = resolveOwnerRequest(url, options, override);
+      if (!scoped.ok) {
+        sendJson(res, scoped.status, { ok: false, error: scoped.error });
+        return;
+      }
       const limit = normalizeLimit(url.searchParams.get("limit"), 30);
-      sendJson(res, 200, getSessionData(limit, override));
+      sendJson(res, 200, getSessionData(limit, scoped.override));
       return;
     }
 
     if (pathname === "/api/memory") {
+      const scoped = resolveOwnerRequest(url, options, override);
+      if (!scoped.ok) {
+        sendJson(res, scoped.status, { ok: false, error: scoped.error });
+        return;
+      }
       const query = (url.searchParams.get("query") ?? "").trim();
       if (query) {
         const limit = normalizeLimit(url.searchParams.get("limit"), 10, 20);
-        sendJson(res, 200, await searchMemories(query, limit, override));
+        sendJson(res, 200, await searchMemories(query, limit, scoped.override));
       } else {
         const limit = normalizeLimit(url.searchParams.get("limit"), 30);
-        sendJson(res, 200, getRecentMemories(limit, override));
+        sendJson(res, 200, getRecentMemories(limit, scoped.override));
       }
       return;
     }
 
-    // 用户事实（只读 user_facts；owner 默认主用户，其他好友可用 ?owner= 查看）
+    // 用户事实（只读 user_facts；保持历史行为：?owner= 可显式查询任意格式合法的 owner）
     if (pathname === "/api/facts") {
-      const owner = normalizeFactsOwner(url.searchParams.get("owner"));
+      const raw = url.searchParams.get("owner");
+      const owner = raw && raw.trim() !== "" ? normalizeOwnerParam(raw) : primaryOwnerOf(options);
       if (owner === null) {
         sendJson(res, 400, { ok: false, error: "invalid_owner" });
         return;
@@ -309,6 +380,11 @@ async function handleRequest(
 
     // 记忆命中回放（同步混合检索；q 必填 1-200 字）
     if (pathname === "/api/memory-probe") {
+      const scoped = resolveOwnerRequest(url, options, override);
+      if (!scoped.ok) {
+        sendJson(res, scoped.status, { ok: false, error: scoped.error });
+        return;
+      }
       const query = (url.searchParams.get("q") ?? "").trim();
       if (query.length < 1 || query.length > MEMORY_PROBE_MAX_QUERY_LENGTH) {
         sendJson(res, 400, { ok: false, error: "invalid_query" });
@@ -319,12 +395,17 @@ async function handleRequest(
         MEMORY_PROBE_DEFAULT_LIMIT,
         MEMORY_PROBE_MAX_LIMIT,
       );
-      sendJson(res, 200, getMemoryHitProbe(query, limit, override));
+      sendJson(res, 200, getMemoryHitProbe(query, limit, scoped.override));
       return;
     }
 
     if (pathname === "/api/timeline") {
-      sendJson(res, 200, getTimeline(override, options.initialCloseness ?? 3));
+      const scoped = resolveOwnerRequest(url, options, override);
+      if (!scoped.ok) {
+        sendJson(res, scoped.status, { ok: false, error: scoped.error });
+        return;
+      }
+      sendJson(res, 200, getTimeline(scoped.override, options.initialCloseness ?? 3));
       return;
     }
 

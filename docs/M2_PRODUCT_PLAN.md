@@ -148,6 +148,17 @@ my-persona/
 - 数据：复用现有 owner 隔离（`owner.ts`），不新增表；
 - 合规：`delete` 真正删除该 owner 的会话/状态/T2/T1/facts/consent/pending 队列，并写审计日志（脱敏）。
 
+### 4.4 交付记录（2026-10-20，最小只读版）
+
+- `src/web/owner-view.ts`：owner↔storageKey/persona 映射、扫描会话文件 + facts/consent 汇总已知 owner；
+- `/api/owners`：返回 owner 列表（默认只回主用户；`web_all_owners: true` 才全量）；
+- `?owner=` 作用域：`/api/overview|session|timeline|memory|memory-probe` 支持只读切换；未开启时跨 owner 返回 403，非法 owner 400；`/api/facts?owner=` 保持历史只读行为；
+- 前端：顶栏 owner 下拉（>1 用户且开启才显示），切换后所有面板按 owner 重查；
+- 配置：`web_all_owners`（config.yaml / `WEB_ALL_OWNERS`，默认 false）；桥接注入 primaryOwner。
+- 测试：owner 映射/汇总 4 条、多用户 API（200/400/403/页面选择器）2 条、dashboard 渲染 1 条。
+
+**未做**：写操作（删除/导出/暂停）、admin token 区分、跨人设映射（`user_personas` 不同好友不同人设的 Web 展示）。
+
 ### 4.2 验收 / 成本 / 风险
 
 - [ ] 两个 QQ 用户的数据在控制台可切换、互不串；删除用户 A 不影响 B；

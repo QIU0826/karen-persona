@@ -90,6 +90,15 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 M2-C 多租户 Web 最小只读版）
+
+- **数据层**：`src/web/owner-view.ts` —— owner↔storageKey/persona 映射、会话文件扫描 + facts/consent 汇总已知 owner（主用户排第一）。
+- **API**：`/api/owners`；`?owner=` 支持 `/api/overview|session|timeline|memory|memory-probe` 只读切换；默认 `web_all_owners: false` 只展示主用户（跨 owner 403），非法 owner 400；`/api/facts?owner=` 保持历史只读行为。
+- **前端**：顶栏 owner 下拉（>1 用户且开启才显示），切换后各面板按 owner 重查。
+- **配置**：`web_all_owners`（config.yaml / `WEB_ALL_OWNERS`，默认 false）；桥接传入 primaryOwner/allOwners。
+- **测试**：+7 条（映射/汇总、API 200/400/403、页面选择器）；全仓 65 文件 / 665 用例，tsc 0、lint 0、覆盖率阈值通过（行 53.3%）。
+- **未做**：删除/导出/暂停写操作、admin token、不同好友不同人设的 Web 展示。
+
 ### ✅ 已完成（2026-10-20 M2-B 人设包 v2）
 
 - **包格式**：`manifest.json` + `persona.json` + 可选 `assets/`、`memories/seed.jsonl`（3–20 条）。

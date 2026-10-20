@@ -46,6 +46,8 @@ export interface AppConfig {
    * `X-Web-Token` 头，否则 401；不设置时仅本机可访问（启动会告警）。
    */
   web_token?: string;
+  /** Web 控制台是否允许查看/切换所有 owner（默认 false，只展示主用户）。 */
+  web_all_owners?: boolean;
   /**
    * 是否对首次对话的用户做 AI 披露（默认 true）。
    * 商用/公开发布必须保持 true（合规要求）；仅个人自用可关。
@@ -401,6 +403,10 @@ export function loadConfig(): AppConfig {
   const webPort = webPortPicked
     ? parseIntegerOption(webPortPicked.value, webPortPicked.source, 0, 65535)
     : DEFAULT_WEB_PORT;
+  const webAllOwnersPicked = pickOption(raw, "web_all_owners", "WEB_ALL_OWNERS");
+  const webAllOwners = webAllOwnersPicked
+    ? parseBooleanOption(webAllOwnersPicked.value, webAllOwnersPicked.source)
+    : false;
   const webTokenPicked = pickOption(raw, "web_token", "WEB_TOKEN");
   const webToken = webTokenPicked
     ? parseToken(webTokenPicked.value, webTokenPicked.source)
@@ -460,6 +466,7 @@ export function loadConfig(): AppConfig {
     health_port: healthPort,
     web_port: webPort,
     web_token: webToken,
+    web_all_owners: webAllOwners,
     photo_share_min_closeness: photoShareMinCloseness,
     photo_share_probability: photoShareProbability,
     photo_share_cooldown_minutes: photoShareCooldownMinutes,
