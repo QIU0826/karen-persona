@@ -5,8 +5,14 @@
     "type": "direct",
     "statement": "我叫林哲，双木林，哲学的哲。",
     "probe": "你还记得我叫什么名字吗？",
-    "expect": ["林哲"],
-    "fact": { "key": "name", "value": "林哲", "category": "profile" }
+    "expect": [
+      "林哲"
+    ],
+    "fact": {
+      "key": "name",
+      "value": "林哲",
+      "category": "profile"
+    }
   },
   {
     "id": "name-indirect",
@@ -14,8 +20,14 @@
     "type": "indirect",
     "statement": "我叫林哲，双木林，哲学的哲。",
     "probe": "今天开会被新来的实习生叫错名字，尴尬死了。",
-    "expect": ["林哲"],
-    "fact": { "key": "name", "value": "林哲", "category": "profile" }
+    "expect": [
+      "林哲"
+    ],
+    "fact": {
+      "key": "name",
+      "value": "林哲",
+      "category": "profile"
+    }
   },
   {
     "id": "name-nickname",
@@ -23,8 +35,15 @@
     "type": "direct",
     "statement": "身边朋友都叫我阿哲，你也这么叫就行。",
     "probe": "你平时都怎么称呼我？",
-    "expect": ["阿哲", "林哲"],
-    "fact": { "key": "nickname", "value": "阿哲", "category": "profile" }
+    "expect": [
+      "阿哲",
+      "林哲"
+    ],
+    "fact": {
+      "key": "nickname",
+      "value": "阿哲",
+      "category": "profile"
+    }
   },
   {
     "id": "city-live",
@@ -32,8 +51,14 @@
     "type": "direct",
     "statement": "我住在杭州，去年刚搬过来的。",
     "probe": "我现在在哪个城市来着？",
-    "expect": ["杭州"],
-    "fact": { "key": "city", "value": "杭州", "category": "profile" }
+    "expect": [
+      "杭州"
+    ],
+    "fact": {
+      "key": "city",
+      "value": "杭州",
+      "category": "profile"
+    }
   },
   {
     "id": "city-hometown",
@@ -41,8 +66,14 @@
     "type": "indirect",
     "statement": "我老家是成都的，火锅从小吃到大。",
     "probe": "过年又要回去了，你猜我妈会做什么菜？",
-    "expect": ["成都"],
-    "fact": { "key": "hometown", "value": "成都", "category": "profile" }
+    "expect": [
+      "成都"
+    ],
+    "fact": {
+      "key": "hometown",
+      "value": "成都",
+      "category": "profile"
+    }
   },
   {
     "id": "city-weather",
@@ -50,8 +81,14 @@
     "type": "indirect",
     "statement": "杭州这鬼天气，天天下雨。",
     "probe": "这边又下雨了，衣服晾不干。",
-    "expect": ["杭州"],
-    "fact": { "key": "city", "value": "杭州", "category": "profile" }
+    "expect": [
+      "杭州"
+    ],
+    "fact": {
+      "key": "city",
+      "value": "杭州",
+      "category": "profile"
+    }
   },
   {
     "id": "work-company",
@@ -59,8 +96,14 @@
     "type": "direct",
     "statement": "我在星野科技上班，做后端开发，主要写 Node.js。",
     "probe": "我在哪家公司上班来着？",
-    "expect": ["星野科技"],
-    "fact": { "key": "company", "value": "星野科技", "category": "work" }
+    "expect": [
+      "星野科技"
+    ],
+    "fact": {
+      "key": "company",
+      "value": "星野科技",
+      "category": "work"
+    }
   },
   {
     "id": "work-role",
@@ -68,8 +111,15 @@
     "type": "direct",
     "statement": "最近在星野科技天天加班，后端就我一个人。",
     "probe": "我这个岗位具体是干嘛的？",
-    "expect": ["后端", "开发"],
-    "fact": { "key": "job", "value": "后端开发", "category": "work" }
+    "expect": [
+      "后端",
+      "开发"
+    ],
+    "fact": {
+      "key": "job",
+      "value": "后端开发",
+      "category": "work"
+    }
   },
   {
     "id": "work-indirect",
@@ -77,8 +127,15 @@
     "type": "indirect",
     "statement": "我在星野科技上班，做后端开发，主要写 Node.js。",
     "probe": "明天又要开需求评审，头大。",
-    "expect": ["星野", "后端"],
-    "fact": { "key": "company", "value": "星野科技", "category": "work" }
+    "expect": [
+      "星野",
+      "后端"
+    ],
+    "fact": {
+      "key": "company",
+      "value": "星野科技",
+      "category": "work"
+    }
   },
   {
     "id": "pet-cat",
@@ -86,8 +143,14 @@
     "type": "direct",
     "statement": "我家养了只橘猫叫团子，特别能吃。",
     "probe": "我家猫叫什么名字？",
-    "expect": ["团子"],
-    "fact": { "key": "cat", "value": "团子（橘猫）", "category": "pet" }
+    "expect": [
+      "团子"
+    ],
+    "fact": {
+      "key": "cat",
+      "value": "团子（橘猫）",
+      "category": "pet"
+    }
   },
   {
     "id": "pet-cat-indirect",
@@ -95,8 +158,14 @@
     "type": "indirect",
     "statement": "团子今天又把杯子推下桌了，气死我。",
     "probe": "它今天又把绿萝啃了，你说是不是欠揍？",
-    "expect": ["团子"],
-    "fact": { "key": "cat", "value": "团子（橘猫）", "category": "pet" }
+    "expect": [
+      "团子"
+    ],
+    "fact": {
+      "key": "cat",
+      "value": "团子（橘猫）",
+      "category": "pet"
+    }
   },
   {
     "id": "pet-dog",
@@ -104,8 +173,15 @@
     "type": "indirect",
     "statement": "我还养了条柴犬，叫豆豆，每天早晚各遛一次。",
     "probe": "早上遛狗差点迟到。",
-    "expect": ["豆豆", "柴犬"],
-    "fact": { "key": "dog", "value": "豆豆（柴犬）", "category": "pet" }
+    "expect": [
+      "豆豆",
+      "柴犬"
+    ],
+    "fact": {
+      "key": "dog",
+      "value": "豆豆（柴犬）",
+      "category": "pet"
+    }
   },
   {
     "id": "project-name",
@@ -113,8 +189,14 @@
     "type": "direct",
     "statement": "我最近在做一个小程序，叫晚风信箱，给陌生人写信的。",
     "probe": "我做的那个项目叫什么来着？",
-    "expect": ["晚风信箱"],
-    "fact": { "key": "project", "value": "晚风信箱", "category": "work" }
+    "expect": [
+      "晚风信箱"
+    ],
+    "fact": {
+      "key": "project",
+      "value": "晚风信箱",
+      "category": "work"
+    }
   },
   {
     "id": "project-progress",
@@ -122,8 +204,14 @@
     "type": "indirect",
     "statement": "晚风信箱这个项目这周终于把登录和写信流程跑通了。",
     "probe": "项目进度怎么样了？我昨天又改到凌晨。",
-    "expect": ["晚风信箱"],
-    "fact": { "key": "project", "value": "晚风信箱", "category": "work" }
+    "expect": [
+      "晚风信箱"
+    ],
+    "fact": {
+      "key": "project",
+      "value": "晚风信箱",
+      "category": "work"
+    }
   },
   {
     "id": "project-stack",
@@ -131,8 +219,15 @@
     "type": "direct",
     "statement": "晚风信箱是用微信小程序做的，后端还是 Node.js。",
     "probe": "我那个东西是用什么技术栈做的？",
-    "expect": ["小程序", "Node"],
-    "fact": { "key": "project_stack", "value": "微信小程序 + Node.js", "category": "work" }
+    "expect": [
+      "小程序",
+      "Node"
+    ],
+    "fact": {
+      "key": "project_stack",
+      "value": "微信小程序 + Node.js",
+      "category": "work"
+    }
   },
   {
     "id": "pref-coffee",
@@ -140,8 +235,14 @@
     "type": "indirect",
     "statement": "我喝咖啡只喝美式，不加糖不加奶。",
     "probe": "老规矩，帮我点杯咖啡。",
-    "expect": ["美式"],
-    "fact": { "key": "coffee", "value": "只喝美式，不加糖不加奶", "category": "preference" }
+    "expect": [
+      "美式"
+    ],
+    "fact": {
+      "key": "coffee",
+      "value": "只喝美式，不加糖不加奶",
+      "category": "preference"
+    }
   },
   {
     "id": "pref-food",
@@ -149,8 +250,14 @@
     "type": "indirect",
     "statement": "我特别讨厌香菜，闻到都难受。",
     "probe": "晚上点外卖记得帮我备注忌口。",
-    "expect": ["香菜"],
-    "fact": { "key": "food_avoid", "value": "不吃香菜", "category": "preference" }
+    "expect": [
+      "香菜"
+    ],
+    "fact": {
+      "key": "food_avoid",
+      "value": "不吃香菜",
+      "category": "preference"
+    }
   },
   {
     "id": "pref-music",
@@ -158,8 +265,14 @@
     "type": "indirect",
     "statement": "我最近一直在听周杰伦，单曲循环那种。",
     "probe": "放首歌吧，你知道我爱听谁的。",
-    "expect": ["周杰伦"],
-    "fact": { "key": "music", "value": "周杰伦", "category": "preference" }
+    "expect": [
+      "周杰伦"
+    ],
+    "fact": {
+      "key": "music",
+      "value": "周杰伦",
+      "category": "preference"
+    }
   },
   {
     "id": "plan-travel",
@@ -167,8 +280,14 @@
     "type": "indirect",
     "statement": "十一我准备去云南玩，路线还没定。",
     "probe": "下个月就要出发了，攻略还没做。",
-    "expect": ["云南"],
-    "fact": { "key": "travel", "value": "十一去云南旅行", "category": "plan" }
+    "expect": [
+      "云南"
+    ],
+    "fact": {
+      "key": "travel",
+      "value": "十一去云南旅行",
+      "category": "plan"
+    }
   },
   {
     "id": "plan-marathon",
@@ -176,7 +295,329 @@
     "type": "indirect",
     "statement": "我报了下个月的半程马拉松，最近在练跑。",
     "probe": "训练计划还剩几周？我有点跑不动了。",
-    "expect": ["马拉松", "半马"],
-    "fact": { "key": "marathon", "value": "下个月跑半程马拉松", "category": "plan" }
+    "expect": [
+      "半程马拉松",
+      "马拉松",
+      "半马"
+    ],
+    "fact": {
+      "key": "marathon",
+      "value": "下个月跑半程马拉松",
+      "category": "plan"
+    }
+  },
+  {
+    "id": "name-confirm",
+    "category": "姓名",
+    "type": "indirect",
+    "statement": "同事都叫我阿哲，其实我本名林哲。",
+    "probe": "你平时怎么称呼我比较合适？",
+    "expect": [
+      "林哲",
+      "阿哲"
+    ],
+    "fact": {
+      "key": "name",
+      "value": "林哲",
+      "category": "profile"
+    }
+  },
+  {
+    "id": "name-mishear",
+    "category": "姓名",
+    "type": "indirect",
+    "statement": "上次你把我的名字听成林哲了，其实没写错，就是林哲。",
+    "probe": "我叫什么来着，你之前好像确认过",
+    "expect": [
+      "林哲"
+    ],
+    "fact": {
+      "key": "name",
+      "value": "林哲",
+      "category": "profile"
+    }
+  },
+  {
+    "id": "city-commute",
+    "category": "城市",
+    "type": "indirect",
+    "statement": "每天从西湖区坐地铁到滨江上班，通勤一小时。",
+    "probe": "我每天通勤要多久来着？",
+    "expect": [
+      "杭州",
+      "西湖",
+      "滨江"
+    ],
+    "fact": {
+      "key": "city",
+      "value": "杭州",
+      "category": "profile"
+    }
+  },
+  {
+    "id": "city-newyear",
+    "category": "城市",
+    "type": "indirect",
+    "statement": "今年过年我从杭州回成都，机票贵得要死。",
+    "probe": "我老家在哪？",
+    "expect": [
+      "成都"
+    ],
+    "fact": {
+      "key": "hometown",
+      "value": "成都",
+      "category": "profile"
+    }
+  },
+  {
+    "id": "work-daily",
+    "category": "工作",
+    "type": "indirect",
+    "statement": "这几天在公司天天开评审会，后端这块就我一个人扛。",
+    "probe": "我是做什么的来着？",
+    "expect": [
+      "后端"
+    ],
+    "fact": {
+      "key": "job",
+      "value": "后端开发",
+      "category": "work"
+    }
+  },
+  {
+    "id": "work-startup",
+    "category": "工作",
+    "type": "indirect",
+    "statement": "我们公司才三十来号人，做的是小团队产品。",
+    "probe": "我公司在哪家来着，规模大吗？",
+    "expect": [
+      "星野科技"
+    ],
+    "fact": {
+      "key": "company",
+      "value": "星野科技",
+      "category": "work"
+    }
+  },
+  {
+    "id": "pet-cat-habit",
+    "category": "宠物",
+    "type": "indirect",
+    "statement": "我家那只橘猫每天早上六点踩我脸叫我起床。",
+    "probe": "我养了什么宠物？",
+    "expect": [
+      "团子",
+      "橘猫"
+    ],
+    "fact": {
+      "key": "cat",
+      "value": "团子（橘猫）",
+      "category": "pet"
+    }
+  },
+  {
+    "id": "pet-dog-walk",
+    "category": "宠物",
+    "type": "indirect",
+    "statement": "晚上要遛柴犬，所以九点前基本回不了消息。",
+    "probe": "我为什么晚上总不在？",
+    "expect": [
+      "豆豆",
+      "柴犬"
+    ],
+    "fact": {
+      "key": "dog",
+      "value": "豆豆（柴犬）",
+      "category": "pet"
+    }
+  },
+  {
+    "id": "project-name-again",
+    "category": "项目",
+    "type": "direct",
+    "statement": "我的项目叫晚风信箱，是个给陌生人写匿名信的站。",
+    "probe": "我那个项目叫什么名字？",
+    "expect": [
+      "晚风信箱"
+    ],
+    "fact": {
+      "key": "project",
+      "value": "晚风信箱",
+      "category": "work"
+    }
+  },
+  {
+    "id": "project-deadline",
+    "category": "项目",
+    "type": "indirect",
+    "statement": "晚风信箱定在月底上线，这周还在补测试。",
+    "probe": "我项目什么时候上线来着？",
+    "expect": [
+      "晚风信箱",
+      "月底"
+    ],
+    "fact": {
+      "key": "project",
+      "value": "晚风信箱",
+      "category": "work"
+    }
+  },
+  {
+    "id": "project-tech",
+    "category": "项目",
+    "type": "direct",
+    "statement": "这个项目前端是微信小程序，后端用 Node.js。",
+    "probe": "我那项目用什么技术栈？",
+    "expect": [
+      "微信小程序",
+      "Node.js"
+    ],
+    "fact": {
+      "key": "project_stack",
+      "value": "微信小程序 + Node.js",
+      "category": "work"
+    }
+  },
+  {
+    "id": "pref-coffee-habit",
+    "category": "偏好",
+    "type": "indirect",
+    "statement": "我喝咖啡只喝美式，加糖加奶我都受不了。",
+    "probe": "帮我点杯咖啡的话，我一般喝什么？",
+    "expect": [
+      "美式"
+    ],
+    "fact": {
+      "key": "coffee",
+      "value": "只喝美式，不加糖不加奶",
+      "category": "preference"
+    }
+  },
+  {
+    "id": "pref-cilantro",
+    "category": "偏好",
+    "type": "indirect",
+    "statement": "点外卖记得备注不要香菜，我吃不了那个味。",
+    "probe": "我点外卖有什么忌口？",
+    "expect": [
+      "香菜"
+    ],
+    "fact": {
+      "key": "food_avoid",
+      "value": "不吃香菜",
+      "category": "preference"
+    }
+  },
+  {
+    "id": "pref-jay",
+    "category": "偏好",
+    "type": "indirect",
+    "statement": "耳机里循环的还是周杰伦那几张老专辑。",
+    "probe": "我喜欢听谁的歌？",
+    "expect": [
+      "周杰伦"
+    ],
+    "fact": {
+      "key": "music",
+      "value": "周杰伦",
+      "category": "preference"
+    }
+  },
+  {
+    "id": "plan-yunnan",
+    "category": "计划",
+    "type": "indirect",
+    "statement": "十一打算去云南，机票已经订了，行程还没排。",
+    "probe": "我国庆有什么安排？",
+    "expect": [
+      "云南"
+    ],
+    "fact": {
+      "key": "travel",
+      "value": "十一去云南旅行",
+      "category": "plan"
+    }
+  },
+  {
+    "id": "plan-marathon-train",
+    "category": "计划",
+    "type": "indirect",
+    "statement": "下个月跑半程马拉松，这阵子每周跑三次。",
+    "probe": "我最近在练什么？",
+    "expect": [
+      "半程马拉松",
+      "马拉松",
+      "半马"
+    ],
+    "fact": {
+      "key": "marathon",
+      "value": "下个月跑半程马拉松",
+      "category": "plan"
+    }
+  },
+  {
+    "id": "mix-city-work",
+    "category": "工作",
+    "type": "indirect",
+    "statement": "在杭州这边做后端，公司在滨江，加班不算多。",
+    "probe": "我的工作和城市你记得吗",
+    "expect": [
+      "杭州",
+      "后端"
+    ],
+    "fact": {
+      "key": "city",
+      "value": "杭州",
+      "category": "profile"
+    }
+  },
+  {
+    "id": "mix-pet-plan",
+    "category": "宠物",
+    "type": "indirect",
+    "statement": "十月带团子去体检，顺便订了云南的机票。",
+    "probe": "我这个月要为哪些事忙？",
+    "expect": [
+      "团子",
+      "云南"
+    ],
+    "fact": {
+      "key": "cat",
+      "value": "团子（橘猫）",
+      "category": "pet"
+    }
+  },
+  {
+    "id": "mix-pref-plan",
+    "category": "偏好",
+    "type": "indirect",
+    "statement": "去云南前先把美式咖啡戒一戒，不然跑半马难受。",
+    "probe": "我为了跑马在改什么习惯？",
+    "expect": [
+      "美式",
+      "半程马拉松"
+    ],
+    "fact": {
+      "key": "coffee",
+      "value": "只喝美式，不加糖不加奶",
+      "category": "preference"
+    }
+  },
+  {
+    "id": "mix-name-hometown",
+    "category": "姓名",
+    "type": "indirect",
+    "statement": "我叫林哲，成都人，现在在杭州上班。",
+    "probe": "自我介绍里我要说的话你都记得哪些？",
+    "expect": [
+      "林哲",
+      "阿哲",
+      "成都"
+    ],
+    "fact": {
+      "key": "name",
+      "value": "林哲",
+      "category": "profile"
+    }
   }
 ]

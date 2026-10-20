@@ -50,8 +50,8 @@ export const EVAL_PERSONA = "memory-eval";
 export const ANTI_FORGET_PERSONA = "memory-eval-anti-forget";
 /** 评测统一 owner（与生产 CLI 用户一致；写入/读取必须一致）。 */
 export const EVAL_OWNER = OWNER_CLI;
-/** live 最多调用条数（成本控制硬上限）。 */
-export const MAX_LIVE_SAMPLES = 20;
+/** live 默认调用条数（成本控制）。金标扩到 40 条后，可用 --limit=40 全跑（约 ¥0.02）。 */
+export const MAX_LIVE_SAMPLES = 40;
 /** T2 最大召回深度（recall@8 的上限）。 */
 export const RECALL_DEPTH = 8;
 
@@ -737,7 +737,7 @@ export async function evaluateLive(options: EvaluateLiveOptions = {}): Promise<L
 
   const cases = options.cases ?? loadGoldCases();
   validateGoldCases(cases);
-  const limit = Math.max(1, Math.min(options.limit ?? MAX_LIVE_SAMPLES, MAX_LIVE_SAMPLES, cases.length));
+  const limit = Math.max(1, Math.min(options.limit ?? 20, MAX_LIVE_SAMPLES, cases.length));
   const sample = selectLiveSample(cases, limit);
 
   const dataDir = options.dataDir ?? createTempDataDir();

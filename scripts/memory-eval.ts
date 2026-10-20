@@ -6,7 +6,7 @@
  *   ... scripts/memory-eval.ts --offline
  *   ... scripts/memory-eval.ts --live        # 真实调 DeepSeek（消耗 token，≤20 条）
  *   ... scripts/memory-eval.ts --json        # 只输出 JSON（便于 CI/对比）
- *   ... scripts/memory-eval.ts --limit=10    # live 采样上限（硬上限 20）
+ *   ... scripts/memory-eval.ts --limit=10    # live 采样上限（默认 20，硬上限 40）
  *   ... scripts/memory-eval.ts --keep-data   # 保留临时数据目录（调试）
  *
  * 安全：live 的 Key 只由 dotenv 从仓库 .env 读取，绝不打印；所有数据写入
