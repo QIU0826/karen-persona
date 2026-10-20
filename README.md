@@ -10,7 +10,7 @@
 >
 > **v0.2.1 已发布**（2026-10-20）：GitHub `main` 分支 + tag `v0.2.1`，CI 三平台全绿（v0.2.0 tag 保留但 Windows 安装失败，已由 v0.2.1 修复）。
 >
-> 仓库实测状态（2026-10-20）：`npm run typecheck` 0 错误；`npm test` **69 个测试文件 / 687 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 54.5%）。**干净 checkout + 真实 `npm ci` 已复验**：122 个依赖约 40s 安装、typecheck 0 错误、687 用例全绿、doctor 在缺 config/.env 时给出可执行的修复指引。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**。
+> 仓库实测状态（2026-10-20）：`npm run typecheck` 0 错误；`npm test` **69 个测试文件 / 687 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 54.5%）。**干净 checkout + 真实 `npm ci` 已复验**：122 个依赖约 40s 安装、typecheck 0 错误、687 用例全绿、doctor 在缺 config/.env 时给出可执行的修复指引。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**；另用「本地模拟用户 + 真实 DeepSeek」跑过 30 轮长跑（记忆 6/6、复读对 0、错误 0、平均延迟 2047ms、成本 ¥0.147），见 [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md)。
 
 ---
 
