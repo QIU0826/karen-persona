@@ -11,7 +11,7 @@
 | 问题 | 根因 | 本轮处理 |
 |---|---|---|
 | 5 轮前说过的「项目」记不住 | T2 检索把「她上一轮说不知道」的记忆排到最前（**自我强化遗忘**）；没有结构化用户事实兜底 | 新增**结构化用户事实层**（后台 LLM 抽取 + SQLite + 每轮注入），实测项目可答对 |
-| 记忆"存了但不用" | 只靠 T2 向量/关键词检索，无事实层、无画像块；语义 embedding 未启用（无 Qwen Key） | 事实层已加；语义检索需 Key（见待办） |
+| 记忆"存了但不用" | 只靠 T2 向量/关键词检索，无事实层、无画像块；语义 embedding 未启用（无 Qwen Key） | 事实层已加；检索层加 **DeepSeek 候选重排**（默认开启，20 条金标 recall@1 55%→95%，见 §3.1）；真语义向量仍需 Qwen Key/本地模型 |
 | 早上 10 点发"今天的晚霞" | 发图逻辑曾按小时硬过滤 | 已改为「拍摄时间 vs 分享时间」模型（昨天/以前/今天） |
 | 消息以「，」结尾、碎片化 | burst/流式把逗号当分段点，且保留尾部标点 | 已修：只按句末分段，剥掉尾部软标点 |
 | "确实呢""啊这"套话、被问就反问"考我" | 模型默认的助手式应答惯性 | prompt 增加反套话/反反问规则 |
@@ -32,7 +32,7 @@
 | 思考模式 | 默认关闭（`thinking:{type:"disabled"}`），否则 reasoning 会吃 max_tokens |
 | 图片识别 | DeepSeek Flash 多模态，`detail:high`，截图逐字转述 ≤200 字 |
 | 记忆存储 | SQLite（better-sqlite3 13，WAL）+ JSON 文件 |
-| 检索 | **n-gram + FTS5 BM25（OR 语义）→ RRF 混合**；sqlite-vec 已建表（ngram 向量）；**语义 embedding 代码就绪但未启用（需 Qwen Key）** |
+| 检索 | **n-gram + FTS5 BM25（OR 语义）→ RRF 混合 → DeepSeek 候选重排**（默认开启，非真向量；真 embedding 代码就绪但需 Qwen Key） |
 | 会话 | JSON 文件（滚动 200 条） |
 | 人格状态 | JSON 文件（原子写） |
 | 用户事实 | SQLite `user_facts`（本轮新增） |
@@ -66,7 +66,7 @@
 4. 叙事弧线/风格参考/热点/中断提示/冲突提示/危机提示
 5. **用户事实块**（≤20 条）
 6. **反重复提示**（最近 2–3 条回复的**开头词**；不只给整句，避免模型照抄自己）
-7. RAG 记忆（T2 top 8）
+7. RAG 记忆（T2 top 12 经 DeepSeek 重排 → 注入 top 8）
 8. 最近消息历史（最近 15 条）+ 更早消息摘要
 
 > 本轮删掉了 `shortTermContext`（把最近 8 条再注入一遍），此前它和「最近 15 条历史」重复，既浪费 token 又强化重复表达。
@@ -105,6 +105,22 @@
 > 说明：事实层不是取代 T2，而是给「稳定事实」一个确定可靠的通道；T2 继续负责「发生过什么/情绪记忆」。
 
 ---
+
+### 3.1 检索重排（2026-10-20 补充）
+
+真语义 embedding 需要外部 Key/模型，先用 DeepSeek Flash 对检索候选做一次相关性重排来补精度
+（详细报告：[docs/SEMANTIC_BOOST_EVAL.md](SEMANTIC_BOOST_EVAL.md)，实现 `src/data/retrieval-boost.ts`）：
+
+| 方案（同一 20 条金标） | recall@1 | recall@3 | recall@8 | 每轮额外成本/延迟 |
+| --- | ---: | ---: | ---: | --- |
+| 基线（n-gram + FTS5 OR → RRF） | 55% | 80% | 85% | — |
+| 仅查询改写 | 50% | 80% | 90% | ~794ms |
+| **仅候选重排（生产默认）** | **95%** | **95%** | **95%** | ~664ms，~¥0.00025/轮 |
+| 改写 + 重排 | 90% | 90% | 90% | ~1.5s |
+
+结论：只加一次重排收益最大；改写反而降精度（不采用）。任何异常/超时（默认 2.5s）/关闭开关
+（`KAREN_SEMANTIC_BOOST=off`）都会降级回原顺序，不影响回复。**这不是真语义**，真向量仍可作为下一步。
+
 
 ## 4. 「AI 味」到底来自哪
 
@@ -156,6 +172,8 @@
 | `src/persona/anti-repetition.ts`（新） | 跨轮反重复：抽取最近回复开头/短句 → 生成提示块；`detectRepetition` 检测 exact/prefix/similar/opener 并供日志与评测复用 |
 | `src/pipeline/orchestrator.ts`（补） | reply/stream/proactive 三条路径都注入反重复块；**流式路径补注入用户事实块**（此前 QQ 私聊主路径漏注入）；回复后记 `[重复]` 日志 |
 | `src/data/vector.ts` | FTS5 查询从隐式 AND 改 `OR` + BM25 IDF 排序（去重、截断 48 token），修复自然问句 0 命中 |
+| `src/data/retrieval-boost.ts`（新） | 检索增强：对 top12 候选做一次 DeepSeek 相关性重排（默认开启；失败/超时/关闭开关降级原顺序） |
+| `src/eval/semantic-boost-eval.ts`（新） | 检索增强评测：基线/改写/重排/改写+重排 四组对照（真实 DeepSeek） |
 | `src/eval/repetition-eval.ts`（新） | 跨轮重复 A/B 脚本（baseline/openers/full；3 轮 × 6 句；真实 DeepSeek） |
 | `src/data/t1-injection.ts`（新） | T1 快照 → 「最近几轮的状态」状态弧（亲密度/情绪/负债趋势；不引用对话正文） |
 | `src/evolution/t3-summarizer.ts` | T3 压缩阈值 80 → 40 条；新增「≥20 条且距上次摘要 ≥1 天」时间兜底；`KAREN_T3_DRY_RUN=1` 干跑；批量按实际条数 |
@@ -163,7 +181,7 @@
 | `src/impulse/renderer.ts` | burst 分条去尾部软标点；压缩连续空行 |
 | `src/impulse/photo-library.ts`（上一轮） | 照片时间关系模型（今天/昨天/以前 + 亲密度门槛） |
 
-验证：`tsc` 0 错误；**48 文件 / 553 用例全绿**（2026-10-20 记忆评测 + 反重复 + Web 面板 + T1/T3 后）。
+验证：`tsc` 0 错误；**49 文件 / 560 用例全绿**（2026-10-20 记忆评测 + 反重复 + Web 面板 + T1/T3 + 检索重排后）。
 记忆评测：`docs/MEMORY_EVAL_REPORT.md`（20 条金标集；修复 FTS 后 T2 recall@8 85%、facts 100%）。
 
 ---
@@ -172,8 +190,10 @@
 
 ### P0（直接影响"像人/记得住"）
 
-1. **语义检索未启用**：没有 Qwen Key，只有 n-gram + BM25；同义表达（"项目" vs "包装案"）会漏。
-   - 行动：配置 `QWEN_VL_API_KEY` → 自动走语义 + BM25 混合；或上本地 embedding（M2）。
+1. ~~**语义检索未启用**~~ **部分完成（2026-10-20）**：已接 DeepSeek 候选重排（非真向量，
+   默认开启；20 条金标 recall@1 55%→95%）。**真语义向量仍未启用**：配置 `QWEN_VL_API_KEY`
+   即自动走语义混合；或上本地 embedding（bge-small-zh/BGE-M3，见 TECH_RADAR_AI §2.4），
+   对跨语言/长记忆/同义改写上限更高。
 2. ~~**跨轮回复去重**~~ **已完成（2026-10-20）**：`anti-repetition.ts` + 三条管线注入；
    默认 `openers` 模式（A/B 见 §4.1）。剩余：语义级重复（换汤不换药的句式）未覆盖，见 P2。
 3. ~~**T1 未使用**~~ **已完成（2026-10-20）**：`src/data/t1-injection.ts` 把最近 8 条
@@ -226,6 +246,9 @@ npm run typecheck && npm test
 
 # 跨轮重复 A/B（真实模型，三组对照，会产生少量费用）
 .runtime/node22/bin/node node_modules/tsx/dist/cli.mjs src/eval/repetition-eval.ts --live --runs 3
+
+# 检索增强评测（真实模型，四组对照）
+.runtime/node22/bin/node node_modules/tsx/dist/cli.mjs src/eval/semantic-boost-eval.ts --live
 
 # 线上诊断
 curl -s 127.0.0.1:18081/health

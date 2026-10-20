@@ -5,11 +5,8 @@ import { addMessage, buildChatMessages, loadSession, type ConversationSession } 
 import { decideGate, getBusyLevel, type GateAction, type GateContext } from "../impulse/message-gate.js";
 import { insertT1Snapshot, insertEpisode, setCurrentPersona, applyGlobalDecay, archiveDecayedEpisodes, closeVectorDb, backfillEpisodeVectors } from "../data/vector.js";
 import { generateEmbedding } from "../data/embedding.js";
-import {
-  retrieveRelevantMemoriesAsync,
-  buildRagContext,
-  storeConversationEpisode,
-} from "../data/retriever.js";
+import { buildRagContext, storeConversationEpisode } from "../data/retriever.js";
+import { retrieveWithLlmBoost } from "../data/retrieval-boost.js";
 import {
   createEmotionState,
   adjustEmotion,
@@ -831,8 +828,8 @@ export async function processMessage(
     logs.push(`[纠正] 应用已有纠正记录`);
   }
 
-  // H. T2 记忆检索（M1-7：有 Qwen Key 走语义混合检索，无 Key/异常自动降级 n-gram+FTS）
-  const memories = await retrieveRelevantMemoriesAsync(userInput, 8);
+  // H. T2 记忆检索（M1-7 混合检索 → DeepSeek 重排；重排失败/超时自动降级原顺序）
+  const memories = await retrieveWithLlmBoost(userInput, 8, { onLog: (line) => logs.push(line) });
   const ragContext = buildRagContext(memories);
 
   // I. 社交分寸
@@ -1391,7 +1388,9 @@ export async function* processMessageStream(
     if (trendingContext) state.lastTrendingInject = streamNowTs;
   }
 
-  const memories = await retrieveRelevantMemoriesAsync(userInput, 8);
+  const memories = await retrieveWithLlmBoost(userInput, 8, {
+    onLog: (line) => console.log(`  ${line}`),
+  });
   const ragContext = buildRagContext(memories);
   // 结构化事实（与非流式对齐）：此前流式主路径漏注入，QQ 私聊里「记得对方说过的事」会失效
   const factsContext = getUserFactsContext(state.owner);
