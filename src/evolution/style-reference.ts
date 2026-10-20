@@ -35,6 +35,11 @@ export interface StyleRefParams {
   mode: string;
   /** 当前用户输入（用于语义匹配） */
   userInput: string;
+  /**
+   * 当前人设/用户的存储 id（多用户隔离必须项：主用户为 personaId，
+   * 其他用户为 `personaId@ownerSlug`）。不传则不做检索，避免跨用户泄漏。
+   */
+  personaId: string;
 }
 
 // ── 检索 ──────────────────────────────────────
@@ -45,18 +50,21 @@ export interface StyleRefParams {
  * 返回 1-2 条最佳匹配。
  */
 export function retrieveStyleReference(params: StyleRefParams): StyleReference[] {
+  // 多用户隔离：没有 personaId 宁可不检索，也绝不跨用户拿片段
+  if (!params.personaId) return [];
   const d = getVectorDb();
 
-  // 查最近的有嵌入的记忆（含独白和对话），强度 > 0.2
+  // 查当前人设/用户最近的有嵌入的记忆（含独白和对话），强度 > 0.2
   const rows = d.prepare(
     `SELECT id, content, source, strength, emotional_weight, created_at, embedding
      FROM t2_episodes
-     WHERE source IN ('internal_monologue', 'chat')
+     WHERE persona_id = ?
+       AND source IN ('internal_monologue', 'chat')
        AND strength > 0.2
        AND embedding IS NOT NULL
      ORDER BY created_at DESC
      LIMIT 100`
-  ).all() as Array<{
+  ).all(params.personaId) as Array<{
     id: number; content: string; source: string; strength: number;
     emotional_weight: number; created_at: string; embedding: string;
   }>;

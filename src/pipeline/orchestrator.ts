@@ -922,6 +922,7 @@ export async function processMessage(
     guilt: guiltState.guilt,
     mode: innerMode,
     userInput,
+    personaId: state.storagePersona,
   });
   const styleContext = buildStyleContext(styleRefs);
   if (styleContext) {
@@ -1379,6 +1380,7 @@ export async function* processMessageStream(
     guilt: guiltState.guilt,
     mode: innerMode,
     userInput,
+    personaId: state.storagePersona,
   });
   const styleContext = buildStyleContext(styleRefs);
 

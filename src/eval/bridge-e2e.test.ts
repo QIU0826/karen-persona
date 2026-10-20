@@ -102,9 +102,15 @@ async function startFakeOpenAi(): Promise<FakeOpenAi> {
           "cache-control": "no-cache",
           connection: "keep-alive",
         });
-        // 两段 delta，最后带 usage + finish；bridge 会拼成「嗯我在听」
-        res.write(sseChunk(model, { content: "嗯我" }, null));
-        res.write(sseChunk(model, { content: "在听" }, null));
+        const serialized = JSON.stringify(body.messages ?? []);
+        // 安全用例：模型输出里带原始 CQ 码，桥接必须转义（不能当指令发出）
+        if (serialized.includes("CQ注入")) {
+          res.write(sseChunk(model, { content: "[CQ:at,qq=all] 早上好" }, null));
+        } else {
+          // 两段 delta，最后带 usage + finish；bridge 会拼成「嗯我在听」
+          res.write(sseChunk(model, { content: "嗯我" }, null));
+          res.write(sseChunk(model, { content: "在听" }, null));
+        }
         res.write(
           `data: ${JSON.stringify({
             id: "chatcmpl-e2e",
@@ -254,7 +260,11 @@ async function connectOneBot(port: number): Promise<OneBotClient> {
         await wait(100);
       }
       const summary = actions
-        .map((action) => `${String(action.action)}:${messageText(action).slice(0, 60)}`)
+        .slice(-12)
+        .map(
+          (action) =>
+            `${String(action.action)}[u=${String(paramsUserId(action))}]:${messageText(action).slice(0, 60)}`,
+        )
         .join(" | ");
       throw new Error(
         `等待 OneBot action 超时（已收到 ${actions.length} 条）: ${summary}` +
@@ -501,6 +511,33 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
         (action) => action.action === "send_group_msg" && messageText(action).includes("嗯我在听"),
       );
 
+      // 6) 白名单外私聊 → 静默忽略（负向断言）
+      const STRANGER_QQ = 100000099;
+      let before = actions.length;
+      client.send(privateEvent("你好，在吗", 6, STRANGER_QQ));
+      await wait(1200);
+      expect(
+        actions
+          .slice(before)
+          .filter(
+            (action) =>
+              action.action === "send_private_msg" && paramsUserId(action) === STRANGER_QQ,
+          ),
+      ).toHaveLength(0);
+
+      // 7) 模型输出 CQ 码 → 出站必须转义（不能当 OneBot 指令发出去）
+      before = actions.length;
+      client.send(privateEvent("测试CQ注入", 7));
+      const injected = await client.waitFor(
+        (action, index) =>
+          index >= before &&
+          action.action === "send_private_msg" &&
+          messageText(action).includes("CQ:at"),
+        30000,
+      );
+      expect(messageText(injected)).toContain("&#91;CQ:at");
+      expect(messageText(injected)).not.toContain("[CQ:at");
+
       // 副作用校验不是重点，但至少确认 bridge 没有崩溃且收到过 3 类 action
       expect(actions.some((action) => action.action === "send_private_msg")).toBe(true);
     },
@@ -599,6 +636,16 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
         messageText(action).includes("嗯我在听"),
       30000,
     );
+
+    // 回归：用户 2 的 prompt 里不能出现用户 1 的对话内容
+    // （动态风格参考曾不带 persona_id 查询，导致跨用户记忆泄漏进 system prompt）
+    const user2Requests = fake.requests.filter((request) =>
+      JSON.stringify(request.messages ?? []).includes("今天也好累"),
+    );
+    expect(user2Requests.length).toBeGreaterThan(0);
+    for (const request of user2Requests) {
+      expect(JSON.stringify(request.messages ?? [])).not.toContain("CQ注入");
+    }
 
     // 数据库侧隔离：两个 owner 的同意记录 + 两份记忆 persona
     const dbPath = path.join(dataDir, "memory.sqlite");

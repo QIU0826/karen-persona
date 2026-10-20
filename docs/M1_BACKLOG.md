@@ -90,6 +90,14 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 多用户 prompt 隔离修复 + E2E 安全场景）
+
+- **严重隐私 bug（E2E 发现）**：`src/evolution/style-reference.ts` 的 `retrieveStyleReference` 查 `t2_episodes` 时没有 `persona_id` 过滤，第二个用户的 system prompt 里混入了第一个用户的历史对话片段（「动态风格参考」）。
+  - 修复：查询强制 `WHERE persona_id = ?`，`personaId` 必填（缺省返回空，宁可不检索也不跨用户）；orchestrator 两处调用传 `state.storagePersona`。
+  - 回归：单测两个 persona 的片段互不出现；E2E 断言用户 2 的 prompt 不含用户 1 标记内容。
+- **E2E 新增安全场景**：白名单外私聊静默忽略（负向断言）；模型输出 CQ 码时出站必须转义（`&#91;CQ:...&#93;`，不能当 OneBot 指令发出）。
+- **测试**：59 文件 / 631 用例，tsc 0、lint 0、覆盖率阈值通过（行 52.2%）。
+
 ### ✅ 已完成（2026-10-20 桥接 E2E 场景扩展）
 
 - **新增 3 个场景**：治理命令（`/about` 披露+数据去向、`/age` 已确认）、危机兜底（强制回复 + 12356 求助资源）、多用户隔离 + 合规拦截（第二个 QQ 独立披露/年龄门；未确认 18+ 时群聊 @ 不回复负向断言；确认后私聊正常；数据库断言两个 owner 的 `user_consent` 与两份 `persona_id` 记忆）。
