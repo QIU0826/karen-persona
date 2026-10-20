@@ -21,6 +21,8 @@ beforeEach(() => {
   process.env.KAREN_DATA_DIR = dir;
   delete process.env.KAREN_IMAGE_GEN;
   delete process.env.KAREN_COMFY_URL;
+  delete process.env.KAREN_IMAGE_BACKEND;
+  delete process.env.KAREN_IMAGE_URL;
   vi.resetModules();
 });
 
@@ -103,6 +105,7 @@ describe("generateImage：失败一律返回 ok:false（调用方回退图库）
 
   it("提交失败返回 submit_状态码", async () => {
     process.env.KAREN_IMAGE_GEN = "on";
+    process.env.KAREN_IMAGE_BACKEND = "comfyui";
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ ok: false, status: 500 }) as unknown as Response),
@@ -112,6 +115,7 @@ describe("generateImage：失败一律返回 ok:false（调用方回退图库）
 
   it("拿不到 prompt_id 立即失败", async () => {
     process.env.KAREN_IMAGE_GEN = "on";
+    process.env.KAREN_IMAGE_BACKEND = "comfyui";
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }) as unknown as Response),
@@ -119,7 +123,30 @@ describe("generateImage：失败一律返回 ok:false（调用方回退图库）
     expect(await generateImage({ prompt: "x" })).toMatchObject({ ok: false, reason: "no_prompt_id" });
   });
 
-  it("成功链路：提交 → 轮询 → 下载图片", async () => {
+  it("默认后端是 diffusers 服务：直接一次 POST 拿回 PNG", async () => {
+    process.env.KAREN_IMAGE_GEN = "on";
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(String(url)).toContain("/generate");
+      return { ok: true, status: 200, arrayBuffer: async () => png } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await generateImage({ prompt: "x", seed: 7 }, { timeoutMs: 5_000 });
+    expect(result.ok).toBe(true);
+    expect(result.bytes?.length).toBe(png.length);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("服务返回 503（模型没加载好）时回退", async () => {
+    process.env.KAREN_IMAGE_GEN = "on";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 503 }) as unknown as Response),
+    );
+    expect(await generateImage({ prompt: "x" })).toMatchObject({ ok: false, reason: "service_503" });
+  });
+
+  it("成功链路（comfyui 后端）：提交 → 轮询 → 下载图片", async () => {
     process.env.KAREN_IMAGE_GEN = "on";
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
     vi.stubGlobal(
@@ -145,6 +172,7 @@ describe("generateImage：失败一律返回 ok:false（调用方回退图库）
 
   it("超大图被拒（避免把 4MB+ 塞进 QQ）", async () => {
     process.env.KAREN_IMAGE_GEN = "on";
+    process.env.KAREN_IMAGE_BACKEND = "comfyui";
     const huge = Buffer.alloc(MAX_GENERATED_BYTES + 1);
     vi.stubGlobal(
       "fetch",

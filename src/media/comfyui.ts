@@ -29,6 +29,59 @@ export function comfyBaseUrl(): string {
   return (raw && raw.length > 0 ? raw : "http://127.0.0.1:8188").replace(/\/+$/, "");
 }
 
+/**
+ * 生图后端：`service`（默认，services/image 的 diffusers 服务）或 `comfyui`。
+ *
+ * 为什么默认 service：ComfyUI 要从 GitHub 克隆源码，本机实测只有 ~17KB/s，不可行；
+ * 而 PyPI（2MB/s）与 diffusers 都很快，所以自己起一个极简 HTTP 服务更实际。
+ */
+export function imageBackend(): "service" | "comfyui" {
+  return (process.env.KAREN_IMAGE_BACKEND ?? "service").toLowerCase() === "comfyui"
+    ? "comfyui"
+    : "service";
+}
+
+/** diffusers 生图服务地址（services/image，默认 127.0.0.1:18084） */
+export function imageServiceUrl(): string {
+  const raw = process.env.KAREN_IMAGE_URL?.trim();
+  return (raw && raw.length > 0 ? raw : "http://127.0.0.1:18084").replace(/\/+$/, "");
+}
+
+/**
+ * 调 diffusers 服务生成一张图（同步返回 PNG 字节）。
+ * 任何失败都返回 ok:false，调用方回退图库。
+ */
+async function generateViaService(
+  options: ComfyWorkflowOptions,
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+): Promise<GenerateResult> {
+  const startedAt = Date.now();
+  try {
+    const res = await fetchImpl(`${imageServiceUrl()}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: options.prompt,
+        negative_prompt: options.negativePrompt ?? NEGATIVE_PROMPT,
+        seed: options.seed ?? Math.floor(Math.random() * 1_000_000),
+        width: options.width ?? 832,
+        height: options.height ?? 1216,
+        steps: options.steps ?? 1,
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return { ok: false, reason: `service_${res.status}` };
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length === 0) return { ok: false, reason: "empty" };
+    if (bytes.length > MAX_GENERATED_BYTES) return { ok: false, reason: "too_large" };
+    return { ok: true, bytes, elapsedMs: Date.now() - startedAt };
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "unknown";
+    return { ok: false, reason: `service_error_${name}` };
+  }
+}
+
 export interface ScenePromptInput {
   /** 场景标签（sunset/cafe/rain/cat…，来自 detectPhotoSceneTags） */
   tags?: string[];
@@ -183,6 +236,9 @@ export async function generateImage(
   if (!isImageGenEnabled()) return { ok: false, reason: "disabled" };
   const fetchImpl = deps.fetchImpl ?? fetch;
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  if (imageBackend() === "service") {
+    return generateViaService(options, fetchImpl, timeoutMs);
+  }
   const startedAt = Date.now();
   const base = comfyBaseUrl();
 

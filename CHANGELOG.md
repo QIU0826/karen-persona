@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.7.0 — 2026-10-20
+
+本机生图链路（代码完成、默认关闭）：让照片不再总是那 15 张图库。
+
+### Added
+
+- `src/media/comfyui.ts`（18 条单测）：生图客户端 + 提示词构造。
+  - `buildScenePrompt`：场景标签（晚霞/咖啡/雨/猫/城市…）→ 具体画面 + 时段光线 + 情绪色调 +
+    "手机随手拍"质感；刻意不放 `masterpiece/best quality` 这类 AI 味词；负面词压制文字水印/多余手指/3D 感。
+  - 两种后端：**`service`（默认，diffusers HTTP 服务）** 与 `comfyui`（兼容保留）；
+    `generateImage` 25s 超时、单张 ≤4MB，任何失败返回 `ok:false`，**调用方静默回退图库**。
+- `src/media/generated-store.ts`：生成图落 `KAREN_DATA_DIR/generated/YYYY-MM-DD/`，
+  **30 天自动清理**（只删日期目录）、可一键 purge、可统计占用。
+- `services/image/server.py`：diffusers + PyTorch MPS 的极简生图服务（`/health`、`/generate`），
+  懒加载 SDXL-Turbo（单步），模型缓存指向 `KAREN_MODELS_DIR/hf`。
+- `scripts/media-setup.ts` + `npm run media:status|install|pull-model|start|purge`：
+  程序/模型/生成物三处分离、占用可查、清理有确认。
+- 照片链路接入：约 **20%** 照片由生图（点名要图不赌概率），失败回退图库；`source` 增加 `generated`。
+- 文档 [docs/IMAGE_GEN.md](docs/IMAGE_GEN.md)：为什么改 diffusers、目录约定、开关、行为、
+  **模型下载受阻的完整说明与手动补模型步骤**。
+
+### Changed
+
+- 放弃 ComfyUI 源码路线：实测本机到 GitHub 只有 **~17KB/s**（clone 不可行）；改走 PyPI（2MB/s）+
+  HuggingFace 的 diffusers 服务。`KAREN_IMAGE_BACKEND=comfyui` 仍可切回。
+
+### 未完成 / 阻塞（如实）
+
+- **模型未下载成功**：`stabilityai/sdxl-turbo`（6.9GB）与 `segmind/tiny-sd`（约 1GB）多次尝试均因
+  HF 连接间歇性中断（SSL EOF / IncompleteSnapshot）失败。因此 `KAREN_IMAGE_GEN` 默认 **off**，
+  照片继续走图库；补模型步骤见 docs/IMAGE_GEN.md §5。
+- 未接角色一致性（IP-Adapter/参考图），生成图目前只适合"场景/氛围照"，不放正脸。
+- 单张耗时未在真机验证（模型未就绪），代码上限 25s。
+
+### Testing
+
+- 93 个测试文件 / 1112 个用例通过；`tsc --noEmit` 0 错误；`npm run lint` 0 违规。
+- 新增：media（18，含默认 service 后端、503 回退、超大图拒绝、30 天清理、purge）、
+  relationship-dims（18，五维关系状态机）、initiative-plan（21，意图式主动性的纯净版）。
+
+### 顺带落地（v0.8 的两个纯逻辑模块，尚未接入主流程）
+
+- **五维关系**（`src/persona/relationship-dims.ts`）：亲密/信任/张力/互惠/依赖 + 关系阶段机
+  （陌生→熟悉→亲近→很依赖→别扭→修复）；事件→维度增量、张力随时间回落、越界夹紧；
+  `describeDims`/`behaviorNote` 给出可读描述与行为提示。
+- **意图式主动性**（`src/impulse/initiative-plan.ts`）：每日 2–3 个「由头」（她生活里的事/没聊完的话题/
+  心情/有点想他）→ 到点挑选（时效窗/上限/间隔/免打扰/他刚回过）→ **按他的回复率校准每天条数**。
+  目前只有纯逻辑，下一步接进 processProactive 与日记忆调度。
+
 ## v0.6.0 — 2026-10-20
 
 按 [docs/MEMORY_V2_PLAN.md](docs/MEMORY_V2_PLAN.md) 的「拟人化交互」阶段：**节奏模拟器 + 消息意图族 + 表情包持续收集**，并补上 v0.5 遗留的「她主动了解你」。
