@@ -1,6 +1,6 @@
 {
   "name": "karen-persona",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "QQ AI 虚拟人设聊天系统 - 让通讯录里住进一个有自己生活、情绪和记忆的人",
   "main": "dist/index.js",
   "scripts": {
@@ -32,6 +32,7 @@
     "better-sqlite3": "^13.0.3",
     "dotenv": "^16.4.0",
     "openai": "^4.70.0",
+    "silk-wasm": "^3.7.1",
     "sqlite-vec": "^0.1.9",
     "ws": "^8.18.0",
     "yaml": "^2.6.0"

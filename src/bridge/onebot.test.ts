@@ -387,6 +387,16 @@ describe("isAllowedCqCode", () => {
     expect(isAllowedCqCode("[CQ:image,file=base64://short]")).toBe(false);
   });
 
+  it("放行内部合成的语音 SILK base64", () => {
+    const silk = "B".repeat(120);
+    expect(isAllowedCqCode(`[CQ:record,file=base64://${silk}]`)).toBe(true);
+    // 只允许 base64，不接受外链/本地路径/过短内容/额外参数
+    expect(isAllowedCqCode("[CQ:record,file=http://evil.com/a.silk]")).toBe(false);
+    expect(isAllowedCqCode("[CQ:record,file=/etc/passwd]")).toBe(false);
+    expect(isAllowedCqCode("[CQ:record,file=base64://short]")).toBe(false);
+    expect(isAllowedCqCode(`[CQ:record,file=base64://${silk},magic=false]`)).toBe(false);
+  });
+
   it("拒绝其它 CQ 码", () => {
     expect(isAllowedCqCode("[CQ:at,qq=all]")).toBe(false);
     expect(isAllowedCqCode("[CQ:image,file=a.jpg]")).toBe(false);

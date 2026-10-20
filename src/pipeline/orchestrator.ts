@@ -46,6 +46,7 @@ import { deriveStance } from "../world/stance.js";
 import { perceiveTime, buildMomentTag } from "../world/time-awareness.js";
 import { renderExpression } from "../impulse/renderer.js";
 import { trySharePhoto } from "../impulse/unsplash-trigger.js";
+import { buildMediaRequestNote, detectMediaRequest } from "../impulse/media-request.js";
 import { resolveOwnerScope, OWNER_CLI } from "../data/owner.js";
 import { extractUserFactsAsync, getUserFactsContext } from "../data/user-facts.js";
 import { getT1ArcContext } from "../data/t1-injection.js";
@@ -975,6 +976,8 @@ export async function processMessage(
   // 跨轮反重复：最近几条她自己的话（prompt 注入与回复后检测共用同一份）
   const recentReplies = extractRecentReplies(session.messages);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
+  // 用户点名要照片/表情包/语音：让她的语气和程序实际会发的动作对齐
+  const mediaRequest = detectMediaRequest(userInput);
   const fullSystem =
     systemPrompt +
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
@@ -983,6 +986,7 @@ export async function processMessage(
     t1ArcContext +
     factsContext +
     avoidRepeatNote +
+    buildMediaRequestNote(mediaRequest) +
     `\n${momentTag}`;
   const messages = buildChatMessages(session, fullSystem);
 
@@ -1114,7 +1118,9 @@ export async function processMessage(
   let imageCaption: string | undefined;
   try {
     // 群聊默认 skipPhoto：多人群里不发她的生活照（隐私保守，group_photo_enabled 才开）
-    const photo = opts.skipPhoto ? null : await trySharePhoto(state, rawReply);
+    const photo = opts.skipPhoto
+      ? null
+      : await trySharePhoto(state, rawReply, { requested: mediaRequest.photo });
     if (photo) {
       imageUrl = photo.imageUrl;
       imageFile = photo.imageFile;
@@ -1415,6 +1421,7 @@ export async function* processMessageStream(
   // 跨轮反重复（与非流式对齐）
   const recentReplies = extractRecentReplies(session.messages);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
+  const mediaRequest = detectMediaRequest(userInput);
   const fullSystem =
     systemPrompt +
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
@@ -1423,6 +1430,7 @@ export async function* processMessageStream(
     t1ArcContext +
     factsContext +
     avoidRepeatNote +
+    buildMediaRequestNote(mediaRequest) +
     `\n${momentTag}`;
 
   // 构建消息列表
@@ -1456,7 +1464,7 @@ export async function* processMessageStream(
             const safe = stripMemoryDeflection(frag);
             if (safe.changed) deflected = true;
             if (safe.text) {
-              sentReply += safe.text;
+              sentReply += (sentReply ? "\n" : "") + safe.text;
               yieldedAny = true;
               yield { text: safe.text };
             }
@@ -1471,7 +1479,7 @@ export async function* processMessageStream(
         const safe = stripMemoryDeflection(tail);
         if (safe.changed) deflected = true;
         if (safe.text) {
-          sentReply += safe.text;
+          sentReply += (sentReply ? "\n" : "") + safe.text;
           yieldedAny = true;
           yield { text: safe.text };
         }
@@ -1488,7 +1496,7 @@ export async function* processMessageStream(
           const safe = stripMemoryDeflection(frag);
           if (safe.changed) deflected = true;
           if (!safe.text) continue;
-          sentReply += safe.text;
+          sentReply += (sentReply ? "\n" : "") + safe.text;
           yieldedAny = true;
           yield { text: safe.text };
         }
@@ -1525,7 +1533,7 @@ export async function* processMessageStream(
     // 主动发图：流式路径也触发（无 Key 时本地图库兜底；超时/失败静默跳过）
     try {
       const photo = await Promise.race([
-        trySharePhoto(state, fullReply).catch(() => null),
+        trySharePhoto(state, fullReply, { requested: mediaRequest.photo }).catch(() => null),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
       ]);
       if (photo) {

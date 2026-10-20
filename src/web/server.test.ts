@@ -337,7 +337,10 @@ describe("页面与安全头", () => {
     const page = await request(port, "/promo/");
     expect(page.status).toBe(200);
     expect(page.text).toContain("KAREN");
-    expect(page.text).toContain("CONFIG");
+    // 宣传页是零构建静态站、改版频繁：只断言稳定的产品信息，不依赖模板内部实现（如旧版 CONFIG 常量）
+    expect(page.text).toContain("不是聊天机器人");
+    expect(page.text).toContain("github.com/QIU0826/karen-persona");
+    expect(page.text).toMatch(/v0\.\d+\.\d+/);
 
     const svg = await request(port, "/promo/assets/character.svg");
     expect(svg.status).toBe(200);

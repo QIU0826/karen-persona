@@ -53,6 +53,8 @@ const FORMULAIC_PATTERNS: Array<{ label: string; regex: RegExp }> = [
   { label: "哈哈…", regex: /哈哈/ },
   { label: "早点…", regex: /早点/ },
   { label: "别太…", regex: /别太/ },
+  // 15 轮真实验证里她一轮对话用了 4 次「笑死」，属于口头禅式复读，提醒换说法
+  { label: "笑死…", regex: /笑死/ },
 ];
 
 /**

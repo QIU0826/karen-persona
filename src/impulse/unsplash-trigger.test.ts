@@ -67,6 +67,22 @@ describe("trySharePhoto 本地兜底", () => {
     expect(await trySharePhoto(state as never, "在吗")).toBeNull();
   });
 
+  it("用户点名要照片时跳过概率判定（概率 0 也会发）", async () => {
+    const state = makeState({
+      config: { photo_share_min_closeness: 3, photo_share_probability: 0, photo_share_cooldown_minutes: 1 },
+    });
+    const photo = await trySharePhoto(state as never, "店里就剩两桌人", { requested: true });
+    expect(photo).not.toBeNull();
+  });
+
+  it("点名要照片也仍受亲密度约束（不熟就婉拒）", async () => {
+    const base = makeState();
+    const state = makeState({
+      persona: { ...(base.persona as object), relationship: { closeness: 1 } },
+    });
+    expect(await trySharePhoto(state as never, "拍张照片看看", { requested: true })).toBeNull();
+  });
+
   it("冷却期内不重复发", async () => {
     const state = makeState({
       config: { photo_share_min_closeness: 3, photo_share_probability: 1, photo_share_cooldown_minutes: 10 },

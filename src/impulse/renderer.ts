@@ -17,8 +17,21 @@ function pickCategoryByMood(emotion: number, intensity: number): string {
   return "coy"; // 日常默认害羞/撒娇
 }
 
-/** 安全阈值：单轮最大消息条数，仅防 API 异常暴走，正常对话不触发 */
-const MAX_BURST = 15;
+/**
+ * 单轮最多连发几条。
+ * persona 的硬规则是「碎短句，2-4 条」，发 5 条以上在 QQ 里像刷屏；
+ * 15 轮真实验证确实出现过「一轮 5 条」（照片/语音同轮更显吵），所以把上限收到 4。
+ * 超出时把多出来的内容并进最后一条（不丢内容），而不是直接截断。
+ */
+const MAX_BURST = 4;
+
+/** 超过 max 条时，把多余片段合并进最后一条（用逗号连接，保持可读、不丢内容） */
+function capBurst(parts: string[], max: number = MAX_BURST): string[] {
+  if (parts.length <= max) return parts;
+  const head = parts.slice(0, Math.max(1, max - 1));
+  const tail = parts.slice(Math.max(1, max - 1)).join("，");
+  return [...head, tail];
+}
 
 export type ExpressionMode = "single" | "burst" | "withdraw" | "delayed";
 
@@ -160,9 +173,9 @@ function splitBurst(content: string, fragmentation: number = 1): string[] {
     const parts = content.split(/(?<=[，。！？……！\.])/);
     const burst = parts.map(stripTrailingSoft).filter((p) => p.length > 0);
     if (burst.length <= 1) return [stripTrailingSoft(content) || content];
-    // 碎片化高 → 保留更多小块
-    const count = Math.min(MAX_BURST, Math.ceil(burst.length * fragmentation));
-    return burst.slice(0, count);
+    // 碎片化高 → 保留更多小块（上限内；超出部分并入最后一条）
+    const count = Math.max(1, Math.min(MAX_BURST, Math.ceil(burst.length * fragmentation)));
+    return capBurst(burst, count);
   }
 
   // 多行：碎片化高 → 每行也拆得更细
@@ -176,8 +189,8 @@ function splitBurst(content: string, fragmentation: number = 1): string[] {
         result.push(stripTrailingSoft(line));
       }
     }
-    return result.filter((p) => p.length > 0).slice(0, MAX_BURST);
+    return capBurst(result.filter((p) => p.length > 0));
   }
 
-  return lines.slice(0, MAX_BURST);
+  return capBurst(lines);
 }

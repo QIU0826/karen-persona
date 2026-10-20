@@ -153,6 +153,37 @@ user_personas:
 
 > 控制台只读、仅绑本机；删除/暂停等写操作尚未提供。
 
+## 可选：语音消息 + 打错字撤回（真实感细节）
+
+她偶尔会用一条短语音代替打字，也会偶尔打错字、撤回、再发改对的版本。两件事都是可配置的，默认开启但不频繁。
+
+**语音（目前仅 macOS 真正发声）**
+
+- macOS 用系统自带 `say`（默认中文女声 Tingting）合成 → 24kHz WAV → SILK → QQ 语音条；不需要额外 API Key。
+- 确认系统有中文语音：`say -v '?' | grep zh_CN`（没有可在「系统设置 → 辅助功能 → 朗读内容 → 系统声音」下载 Tingting）。
+- Linux / Windows 目前没有本地 TTS 路径，会自动降级为纯文字，不影响其它功能。
+
+```bash
+# 试听/自检（生成 SILK，可选 --wav 生成 WAV 后 afplay 直接听）
+node node_modules/tsx/dist/cli.mjs scripts/voice-probe.ts --text "你好呀，今天过得怎么样？"
+```
+
+```yaml
+# config.yaml（全部可选）
+voice_enabled: true            # 总开关
+voice_probability: 0.12        # 每轮回复后补一条语音的概率
+voice_min_closeness: 2.5       # 亲密度门槛（不熟时不会给陌生人发语音）
+voice_cooldown_minutes: 8      # 同一用户两条语音的最小间隔
+voice_max_chars: 40            # 单条语音最长字数
+
+typo_recall_enabled: true      # 打错字 → 撤回 → 改对
+typo_recall_probability: 0.04  # 每轮回复的触发概率
+typo_recall_delay_ms: 1500     # 发错字后多久撤回
+typo_recall_cooldown_minutes: 20
+```
+
+> 说明：撤回依赖 NapCat 对 `send_private_msg` 返回 message_id（`delete_msg`）；拿不到 id 或撤回失败时会自动降级，不会卡住回复。危机语境、被新消息打断、延迟补发都不会演「打错字」。
+
 ## 可选：让 Karen 开机自启（PM2）
 
 ```bash

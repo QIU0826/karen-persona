@@ -17,14 +17,15 @@ import { timingSafeEqual } from "node:crypto";
 /** QQ 单条文本消息的保守长度上限（字符数）。可用 ONE_BOT_MAX_MESSAGE_LENGTH 覆盖。 */
 export const QQ_MAX_MESSAGE_LENGTH = 1000;
 
-/** 唯一允许绕过 CQ 转义的受控 CQ 码：QQ 内置表情 */
 /**
- * 允许出站的 CQ 码白名单：
- * - face：QQ 内置表情（qqFace）
- * - image：本地贴纸（base64，仅由 stickers.ts 生成，模型输出永远不会走到这里——
- *   模型文本会先经过 escapeCqText，CQ 码只可能由内部代码构造）
+ * 允许出站的 CQ 码白名单（唯一能绕过 CQ 转义的内容，全部由内部代码构造，
+ * 模型输出永远走不到这里——模型文本会先经过 escapeCqText）：
+ * - face：QQ 内置表情（qqFace，由 renderer 生成）
+ * - image：本地贴纸 / 主动分享的照片（base64，由 stickers.ts / photo-library 生成）
+ * - record：她的语音消息（SILK base64，由 ai/tts.ts 现场合成）
  */
-const ALLOWED_CQ_PATTERN = /^\[CQ:(face,id=\d{1,4}|image,file=base64:\/\/[A-Za-z0-9+/=]{50,})\]$/;
+const ALLOWED_CQ_PATTERN =
+  /^\[CQ:(face,id=\d{1,4}|(?:image|record),file=base64:\/\/[A-Za-z0-9+/=]{50,})\]$/;
 
 const VALID_POST_TYPES = new Set(["message", "notice", "request", "meta_event"]);
 
@@ -478,6 +479,119 @@ export function sendPrivateMsg(userId: number, message: SendableMessage): boolea
 
 export function sendGroupMsg(groupId: number, message: SendableMessage): boolean {
   return sendMessage("send_group_msg", { group_id: groupId }, message);
+}
+
+// ── 受控撤回（delete_msg，v0.3 打错字真实感） ─────
+
+/**
+ * 撤回安全边界：
+ * - 只允许撤回**本进程最近发出**的消息（message_id 必须在 recentlySentMessages 里）；
+ * - 只允许撤回 15s 内的消息（刚发错字才撤回，旧消息不碰）；
+ * - 全局至少间隔 5s（避免异常时疯狂撤回刷屏/触发风控）。
+ */
+const RECALL_MAX_AGE_MS = 15_000;
+const RECALL_MIN_INTERVAL_MS = 5_000;
+/** 本进程最近发出的消息（message_id → 发出时刻） */
+const recentlySentMessages = new Map<number, number>();
+/** 最近一次成功撤回的时间（全局限频） */
+let lastRecallAt = 0;
+
+function rememberSentMessage(messageId: number | null): void {
+  const now = Date.now();
+  if (messageId === null) return;
+  recentlySentMessages.set(messageId, now);
+  // 顺手清理过期记录，避免 Map 无限增长
+  for (const [id, sentAt] of recentlySentMessages) {
+    if (now - sentAt > RECALL_MAX_AGE_MS) recentlySentMessages.delete(id);
+  }
+}
+
+function extractMessageId(data: unknown): number | null {
+  if (!data || typeof data !== "object") return null;
+  const raw = (data as { message_id?: unknown }).message_id;
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : null;
+}
+
+export interface RecallCheck {
+  ok: boolean;
+  reason: "ok" | "invalid_id" | "not_recently_sent" | "too_old" | "rate_limited";
+}
+
+/** 纯函数守卫（便于单测）：是否允许撤回某个 message_id。 */
+export function evaluateRecallAllowed(input: {
+  messageId: number;
+  sentAt: number | undefined;
+  lastRecallAt: number;
+  now: number;
+}): RecallCheck {
+  if (!Number.isInteger(input.messageId) || input.messageId <= 0) {
+    return { ok: false, reason: "invalid_id" };
+  }
+  if (input.sentAt === undefined) return { ok: false, reason: "not_recently_sent" };
+  if (input.now - input.sentAt > RECALL_MAX_AGE_MS) return { ok: false, reason: "too_old" };
+  if (input.lastRecallAt > 0 && input.now - input.lastRecallAt < RECALL_MIN_INTERVAL_MS) {
+    return { ok: false, reason: "rate_limited" };
+  }
+  return { ok: true, reason: "ok" };
+}
+
+/**
+ * 异步发送私聊消息并返回 message_id（撤回需要）。
+ * 失败（无连接/超时/出站 CQ 被拒）返回 null，绝不抛异常——调用方降级为普通发送。
+ */
+export async function sendPrivateMsgAsync(
+  userId: number,
+  message: SendableMessage
+): Promise<number | null> {
+  const encoded = encodeOutbound(message);
+  if (encoded.droppedCq) {
+    console.warn("[安全] 异步出站消息包含未受控的 CQ 码，已丢弃");
+    return null;
+  }
+  if (encoded.parts.length === 0) return null;
+
+  let lastMessageId: number | null = null;
+  try {
+    for (const part of encoded.parts) {
+      const data = await callApiAsync("send_private_msg", {
+        user_id: userId,
+        message: part,
+        auto_escape: false,
+      });
+      const messageId = extractMessageId(data);
+      if (messageId !== null) lastMessageId = messageId;
+    }
+  } catch (err) {
+    console.log(`[API] 异步发送失败: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+
+  rememberSentMessage(lastMessageId);
+  return lastMessageId;
+}
+
+/**
+ * 受控撤回自己刚发出的消息（OneBot `delete_msg`）。
+ * 只允许撤回 `sendPrivateMsgAsync` 刚发出、且满足时间/频率限制的消息；失败返回 false。
+ */
+export async function recallMessage(messageId: number): Promise<boolean> {
+  const now = Date.now();
+  const check = evaluateRecallAllowed({
+    messageId,
+    sentAt: recentlySentMessages.get(messageId),
+    lastRecallAt,
+    now,
+  });
+  if (!check.ok) return false;
+
+  try {
+    await callApiAsync("delete_msg", { message_id: messageId }, 3000);
+    recentlySentMessages.delete(messageId);
+    lastRecallAt = Date.now();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ── 反向 WS 握手鉴权 ────────────────────────────

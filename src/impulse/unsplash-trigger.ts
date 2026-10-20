@@ -154,9 +154,19 @@ function shareLocalPhoto(state: ConversationState): PhotoShareResult | null {
  * - 无 Key：直接本地授权图库兜底
  * 返回 { imageUrl | imageFile, caption, source }，或 null（本轮不触发）。
  */
+export interface PhotoShareOptions {
+  /**
+   * 用户明确要照片（「拍张看看」「发张你那边」）。
+   * 为 true 时跳过概率判定，但仍受「开关/亲密度/冷却」约束——
+   * 不熟的时候她仍会婉拒，符合真人边界。
+   */
+  requested?: boolean;
+}
+
 export async function trySharePhoto(
   state: ConversationState,
   lastReply: string,
+  options: PhotoShareOptions = {},
 ): Promise<PhotoShareResult | null> {
   const ps = state.persona.photoShare;
   if (!ps?.enabled) return null;
@@ -179,7 +189,7 @@ export async function trySharePhoto(
   const closenessBonus = (state.persona.relationship.closeness - minCloseness) * 0.015;
   const probability =
     state.config.photo_share_probability ?? Math.min(0.5, 0.08 + moodBonus + closenessBonus);
-  if (Math.random() > probability) return null;
+  if (!options.requested && Math.random() > probability) return null;
 
   // 提前锁定冷却（防止并发重复触发）
   cooldownMap.set(personaId, Date.now());

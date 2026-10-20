@@ -54,6 +54,8 @@ import {
   getReplyContext,
   sendPrivateMsg,
   sendGroupMsg,
+  sendPrivateMsgAsync,
+  recallMessage,
   tryResolveApiResponse,
   getMsgById,
   extractAtText,
@@ -87,6 +89,14 @@ import fs from "node:fs";
 import { createLogger, configureLogger } from "../obs/logger.js";
 import { startHealthServer, type HealthServerHandle } from "../obs/health-server.js";
 import { startWebServer, type WebServerHandle } from "../web/server.js";
+import { isSpeechAvailable, synthesizeSpeech } from "../ai/tts.js";
+import { decideVoice, type VoiceSettings } from "../impulse/voice.js";
+import { detectMediaRequest } from "../impulse/media-request.js";
+import {
+  DEFAULT_TYPO_RECALL_SETTINGS,
+  planTypoRecall,
+  type TypoRecallSettings,
+} from "../impulse/typo-recall.js";
 
 // ── 常量 ────────────────────────────────────────
 
@@ -105,6 +115,10 @@ const MAX_LOG_VALUE_LENGTH = 120;
 const STICKER_PROBABILITY = 0.22;
 const STICKER_REPLY_TO_STICKER_PROBABILITY = 0.55;
 const STICKER_COOLDOWN_MS = 5 * 60 * 1000;
+
+/** 语音：录音补白（真人按下录音到发出之间还有一点时间） / 单条语音最长发送等待 */
+const VOICE_RECORD_PADDING_MS = 400;
+const VOICE_MAX_SEND_DELAY_MS = 12_000;
 
 /** 结构化日志 scope=qq（脱敏、TTY 可读；只记录长度/摘要，不落消息正文）。 */
 const log = createLogger("qq");
@@ -914,6 +928,12 @@ interface PrivateStreamOutcome {
   sentCount: number;
   deferredDelayMs?: number;
   interrupted: boolean;
+  /** 本轮实际发出的文字正文（按换行拼接，用于「顺手发一条语音」选句） */
+  sentText: string;
+  /** 本轮是否发过危机求助资源（危机语境下不发语音） */
+  safetySent: boolean;
+  /** 本轮是否发过照片（同一轮不再补语音，避免多媒体叠在一起） */
+  photoSent: boolean;
 }
 
 /**
@@ -1010,6 +1030,85 @@ async function sendPhotoToGroup(groupId: number, photo: OutboundPhoto): Promise<
   }
 }
 
+/**
+ * 估算「把这条气泡打出来」需要多久（毫秒）。
+ * 中文手打约 80–120ms/字；再叠加一点读屏/点发送的固定开销，夹在 0.5–3s 之间。
+ * 目的：让她不是「char 级流式刷屏」，而是像人一样一条一条地把话打完。
+ */
+function typingDelayFor(text: string): number {
+  const chars = charCount(text);
+  const perChar = 80 + Math.random() * 40;
+  const delay = 300 + chars * perChar + Math.random() * 250;
+  return Math.min(delay, 3000);
+}
+
+// ── 打错字 → 撤回 → 重发修正（v0.3 真实感）──────
+
+/** 上次给某用户演「打错字撤回」的时间（冷却用；进程内即可，重启最多多演一次） */
+const userLastTypoRecallAt = new Map<number, number>();
+
+/**
+ * 发一条文字气泡；低概率演「先发错字 → 1-2s 后撤回 → 重发正确版」。
+ *
+ * 只影响 transport 层：`sentText` / 会话 / 记忆里始终是正确原文；
+ * 异步发送拿不到 message_id 或撤回失败时静默降级，不阻塞主流程。
+ */
+async function sendPrivateBubbleWithTypoRecall(
+  userId: number,
+  text: string,
+  state: ConversationState,
+  safetySent: boolean,
+): Promise<void> {
+  // 单测/E2E（vitest 子进程 NODE_ENV=test）里关闭随机真实感，保证断言确定性；
+  // 需要覆盖「打错字链路」时可显式设 KAREN_TYPO_RECALL_ALLOW_TEST=1。
+  if (process.env.NODE_ENV === "test" && process.env.KAREN_TYPO_RECALL_ALLOW_TEST !== "1") {
+    sendPrivateMsg(userId, text);
+    return;
+  }
+
+  const config = state.config;
+  const defaults = DEFAULT_TYPO_RECALL_SETTINGS;
+  const settings: TypoRecallSettings = {
+    enabled: config.typo_recall_enabled ?? defaults.enabled,
+    probability: config.typo_recall_probability ?? defaults.probability,
+    delayMs: config.typo_recall_delay_ms ?? defaults.delayMs,
+    cooldownMinutes: config.typo_recall_cooldown_minutes ?? defaults.cooldownMinutes,
+  };
+
+  const plan = planTypoRecall(
+    { text, now: Date.now(), safetySent },
+    settings,
+    { lastRecallAt: userLastTypoRecallAt.get(userId) }
+  );
+  if (!plan.recall || !plan.typoText || !plan.correctedText) {
+    sendPrivateMsg(userId, text);
+    return;
+  }
+
+  const messageId = await sendPrivateMsgAsync(userId, plan.typoText);
+  if (messageId === null) {
+    // 异步发送失败：不制造「发出去但撤回不了」的错字，直接发正确原文
+    sendPrivateMsg(userId, text);
+    return;
+  }
+
+  const correctedText = plan.correctedText;
+  const delayMs = plan.delayMs ?? defaults.delayMs;
+  userLastTypoRecallAt.set(userId, Date.now());
+  log.info("typo_recall.scheduled", { user_id: userId, delay_ms: delayMs });
+  const timer = setTimeout(() => {
+    void (async () => {
+      const recalled = await recallMessage(messageId);
+      // 撤回失败也发修正版（错字 + 更正，总比只留错字好）
+      sendPrivateMsg(userId, correctedText);
+      log.info(recalled ? "typo_recall.done" : "typo_recall.recall_failed", {
+        user_id: userId,
+      });
+    })();
+  }, delayMs);
+  timer.unref();
+}
+
 async function streamPrivateReply(params: {
   state: ConversationState;
   text: string;
@@ -1023,6 +1122,11 @@ async function streamPrivateReply(params: {
   const logPrefix = params.logPrefix ?? "回复";
   const pendingSnapshot = userPending.get(userId) ?? 0;
   let sentCount = 0;
+  let sentText = "";
+  let safetySent = false;
+  let photoSent = false;
+  /** 每轮最多演一次「打错字撤回」，避免多气泡放大触发率 */
+  let typoDecided = false;
 
   const stream = processMessageStream(state, text, options);
   for await (const frag of stream) {
@@ -1030,12 +1134,12 @@ async function streamPrivateReply(params: {
     if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
       state.interrupted = true;
       log.info("reply.interrupted", { user_id: userId, stage: "before_send" });
-      return { sentCount, interrupted: true };
+      return { sentCount, interrupted: true, sentText, safetySent, photoSent };
     }
 
     // 消息门判定「晚点回」
     if (frag.deferred) {
-      return { sentCount, deferredDelayMs: frag.deferred.delayMs, interrupted: false };
+      return { sentCount, deferredDelayMs: frag.deferred.delayMs, interrupted: false, sentText, safetySent, photoSent };
     }
 
     if (frag.qqFace) {
@@ -1044,7 +1148,7 @@ async function streamPrivateReply(params: {
       if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
         state.interrupted = true;
         log.info("reply.interrupted", { user_id: userId, stage: "before_qqface" });
-        return { sentCount, interrupted: true };
+        return { sentCount, interrupted: true, sentText, safetySent, photoSent };
       }
       sendPrivateMsg(userId, asCqCode(frag.qqFace));
       log.info("reply.sent_qqface", { user_id: userId, deferred: logPrefix !== "回复" });
@@ -1055,30 +1159,41 @@ async function streamPrivateReply(params: {
 
     if (frag.image) {
       await sendPhotoToUser(userId, frag.image);
+      photoSent = true;
       continue;
     }
 
     if (frag.safetyMessage) {
       // 合规：危机求助资源（程序生成，独立消息）
       sendPrivateMsg(userId, frag.safetyMessage);
+      safetySent = true;
       log.info("compliance.crisis_resources_sent", { user_id: userId });
       continue;
     }
 
     if (!frag.text) continue;
 
-    // 流式 fragment 之间的自然间隔（模拟打字间隙）
+    // 真人节奏：第一条是「看到消息 → 开始打字」，后续每条按字数模拟打字耗时
+    // （中文手打约 80–120ms/字；过短的气泡也不会秒发，读/点发送有固定开销）
     if (sentCount > 0) {
-      const typingDelay = 200 + Math.random() * 600;
-      await sleep(typingDelay);
+      await sleep(typingDelayFor(frag.text));
       if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
         state.interrupted = true;
         log.info("reply.interrupted", { user_id: userId, stage: "streaming" });
-        return { sentCount, interrupted: true };
+        return { sentCount, interrupted: true, sentText, safetySent, photoSent };
       }
+    } else {
+      await sleep(300 + Math.random() * 500);
     }
 
-    sendPrivateMsg(userId, frag.text);
+    // 每轮只在第一条文字气泡上尝试一次「打错字→撤回→重发」；延迟补发不演
+    if (!typoDecided && logPrefix === "回复") {
+      typoDecided = true;
+      await sendPrivateBubbleWithTypoRecall(userId, frag.text, state, safetySent);
+    } else {
+      sendPrivateMsg(userId, frag.text);
+    }
+    sentText += (sentText ? "\n" : "") + frag.text;
     log.info("reply.sent", {
       user_id: userId,
       chars: charCount(frag.text),
@@ -1087,7 +1202,7 @@ async function streamPrivateReply(params: {
     sentCount++;
   }
 
-  return { sentCount, interrupted: false };
+  return { sentCount, interrupted: false, sentText, safetySent, photoSent };
 }
 
 /** 贴纸发送目标：私聊给某人，或群聊里回应某人（同一套贴纸/情绪逻辑） */
@@ -1105,8 +1220,9 @@ function maybeSendSticker(
   target: StickerTarget,
   state: ConversationState,
   inboundSticker: boolean,
-): void {
-  if (process.env.STICKER_ENABLED === "0") return;
+  opts: { requested?: boolean } = {},
+): boolean {
+  if (process.env.STICKER_ENABLED === "0") return false;
 
   const now = Date.now();
   const groupKey = target.kind === "group" ? `${target.groupId}:${target.userId}` : "";
@@ -1114,7 +1230,8 @@ function maybeSendSticker(
     target.kind === "private"
       ? (userLastStickerAt.get(target.userId) ?? 0)
       : (groupLastStickerAt.get(groupKey) ?? 0);
-  if (now - last < STICKER_COOLDOWN_MS) return;
+  // 用户点名要表情包时不吃冷却（他就是想现在看一个）
+  if (!opts.requested && now - last < STICKER_COOLDOWN_MS) return false;
 
   const conflictAt = state.relationshipState.lastConflictAt;
   const conflictActive = conflictAt !== null && now - conflictAt < 24 * 60 * 60 * 1000;
@@ -1124,13 +1241,13 @@ function maybeSendSticker(
     hour: new Date(now).getHours(),
     conflictActive,
   });
-  if (!sticker) return;
+  if (!sticker) return false;
 
   const probability = inboundSticker ? STICKER_REPLY_TO_STICKER_PROBABILITY : STICKER_PROBABILITY;
-  if (Math.random() > probability) return;
+  if (!opts.requested && Math.random() > probability) return false;
 
   const cq = toStickerCqCode(sticker);
-  if (!cq) return;
+  if (!cq) return false;
 
   if (target.kind === "private") {
     userLastStickerAt.set(target.userId, now);
@@ -1141,7 +1258,7 @@ function maybeSendSticker(
       reply_to_sticker: inboundSticker,
       target: "private",
     });
-    return;
+    return true;
   }
 
   groupLastStickerAt.set(groupKey, now);
@@ -1152,6 +1269,98 @@ function maybeSendSticker(
     sticker: sticker.id,
     reply_to_sticker: inboundSticker,
     target: "group",
+  });
+  return true;
+}
+
+// ── 语音消息 ────────────────────────────────────
+
+/** 上次给某用户发语音的时间（冷却用；进程内即可，重启后最多多发一条） */
+const userLastVoiceAt = new Map<number, number>();
+/** 语音能力懒探测：null=未探测；false=本机不可用（之后不再尝试，静默降级为文字） */
+let speechAvailable: boolean | null = null;
+
+async function isSpeechReady(): Promise<boolean> {
+  if (speechAvailable === null) {
+    try {
+      speechAvailable = await isSpeechAvailable();
+    } catch {
+      speechAvailable = false;
+    }
+    log.info(speechAvailable ? "voice.available" : "voice.unavailable", {
+      platform: process.platform,
+    });
+  }
+  return speechAvailable;
+}
+
+/**
+ * 文字回复后，偶尔「顺手」补一条语音（真人懒得打字时会直接说话）。
+ * - 决策在 impulse/voice.ts（纯函数），合成在 ai/tts.ts（失败静默降级为文字）
+ * - 亲密度/免打扰/冷却/概率/危机语境都会拦截
+ * - 发送前按语音时长等待（像真人先录完再发）；调用方用 void 调用，不阻塞主流程
+ */
+async function maybeSendVoice(
+  userId: number,
+  config: AppConfig,
+  state: ConversationState,
+  outcome: PrivateStreamOutcome,
+  opts: { requested?: boolean; mediaSentThisTurn?: boolean } = {},
+): Promise<void> {
+  if (!config.voice_enabled) return;
+  if (outcome.safetySent || outcome.interrupted) return;
+  // 同一轮已经发过照片/贴纸就不再补语音：真人不会连发三种形态
+  if (outcome.photoSent || opts.mediaSentThisTurn) return;
+  if (!outcome.sentText.trim()) return;
+  if (!(await isSpeechReady())) return;
+
+  const settings: VoiceSettings = {
+    enabled: true,
+    // loadConfig 一定会给出数值；这里兜底防止老配置文件/测试桩漏字段
+    probability: opts.requested ? 1 : (config.voice_probability ?? 0.12),
+    minCloseness: config.voice_min_closeness ?? 2.5,
+    cooldownMinutes: config.voice_cooldown_minutes ?? 8,
+    maxChars: config.voice_max_chars ?? 40,
+    allowedInGroup: config.voice_group_enabled === true,
+  };
+  const decision = decideVoice(
+    {
+      text: outcome.sentText,
+      closeness: state.persona.relationship.closeness,
+      hour: new Date().getHours(),
+      isGroup: false,
+      // 用户点名要语音时，免打扰时段不再拦截（她正在回他，不是主动打扰）
+      quietHours: opts.requested
+        ? undefined
+        : { start: config.quiet_hours_start, end: config.quiet_hours_end },
+    },
+    settings,
+    // 点名要语音时不吃冷却（他明确想听），其余情况按冷却节流
+    {
+      lastSentAt: opts.requested ? undefined : userLastVoiceAt.get(userId),
+      speechAvailable: true,
+    },
+  );
+  if (!decision.speak || !decision.line) return;
+
+  const speech = await synthesizeSpeech(decision.line, { maxChars: settings.maxChars });
+  if (!speech) {
+    log.warn("voice.synth_failed", { user_id: userId });
+    return;
+  }
+
+  // 真人会先录完再发：等待 ≈ 语音时长 + 一点操作时间（上限防止超长等待）
+  const recordDelay = Math.min(
+    speech.durationMs + VOICE_RECORD_PADDING_MS + Math.random() * 400,
+    VOICE_MAX_SEND_DELAY_MS,
+  );
+  await sleep(recordDelay);
+  sendPrivateMsg(userId, asCqCode(`[CQ:record,file=base64://${speech.silkBase64}]`));
+  userLastVoiceAt.set(userId, Date.now());
+  log.info("voice.sent", {
+    user_id: userId,
+    duration_ms: speech.durationMs,
+    bytes: speech.byteLength,
   });
 }
 
@@ -1362,7 +1571,20 @@ async function handlePrivateBatch(
         outcome.deferredDelayMs,
       );
     } else if (outcome.sentCount > 0) {
-      maybeSendSticker({ kind: "private", userId }, state, inboundSticker);
+      // 用户点名要表情包/语音时，别装没听见：提高对应动作的概率
+      const mediaRequest = detectMediaRequest(text);
+      const stickerSent = maybeSendSticker(
+        { kind: "private", userId },
+        state,
+        inboundSticker,
+        { requested: mediaRequest.sticker && !mediaRequest.voice },
+      );
+      void maybeSendVoice(userId, sharedBase.config, state, outcome, {
+        requested: mediaRequest.voice,
+        mediaSentThisTurn: stickerSent && !mediaRequest.voice,
+      }).catch((err: unknown) => {
+        log.warn("voice.error", { user_id: userId, error: errMessage(err) });
+      });
     }
   } catch (err: unknown) {
     log.error("reply.failed", { user_id: userId, error: errMessage(err) });

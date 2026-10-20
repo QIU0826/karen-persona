@@ -72,6 +72,32 @@ export interface AppConfig {
    * processMessage 的主动发图结果发到群里。
    */
   group_photo_enabled?: boolean;
+  /**
+   * 语音消息（她偶尔用一条短语音代替打字）：
+   * - voice_enabled：总开关（默认 true；本机没有 TTS 能力时自动静默降级为纯文字）
+   * - voice_probability：每轮回复后「顺手发语音」的概率（默认 0.12）
+   * - voice_min_closeness：亲密度门槛（默认 2.5，太低时不会给陌生人发语音）
+   * - voice_cooldown_minutes：同一用户两次语音的最小间隔（默认 8 分钟）
+   * - voice_max_chars：语音最长字数（默认 40，太长会拆句/放弃）
+   * - voice_group_enabled：群聊是否允许发语音（默认 false）
+   */
+  voice_enabled?: boolean;
+  voice_probability?: number;
+  voice_min_closeness?: number;
+  voice_cooldown_minutes?: number;
+  voice_max_chars?: number;
+  voice_group_enabled?: boolean;
+  /**
+   * 打字错字 → 撤回 → 改对（真人感细节）：
+   * - typo_recall_enabled：总开关（默认 true）
+   * - typo_recall_probability：每轮回复触发概率（默认 0.04，太高会显得手滑）
+   * - typo_recall_delay_ms：发错字后多久撤回（默认 1500ms）
+   * - typo_recall_cooldown_minutes：同一用户两次撤回的最小间隔（默认 20 分钟）
+   */
+  typo_recall_enabled?: boolean;
+  typo_recall_probability?: number;
+  typo_recall_delay_ms?: number;
+  typo_recall_cooldown_minutes?: number;
 }
 
 /** 配置错误。消息面向用户，可直接打印。 */
@@ -445,6 +471,50 @@ export function loadConfig(): AppConfig {
     ? parseBooleanOption(groupPhotoPicked.value, groupPhotoPicked.source)
     : false;
 
+  // 语音消息：默认开启（本机无 TTS 时自动降级），概率/门槛/冷却可调
+  const voiceEnabledPicked = pickOption(raw, "voice_enabled", "VOICE_ENABLED");
+  const voiceEnabled = voiceEnabledPicked
+    ? parseBooleanOption(voiceEnabledPicked.value, voiceEnabledPicked.source)
+    : true;
+  const voiceProbabilityPicked = pickOption(raw, "voice_probability", "VOICE_PROBABILITY");
+  const voiceProbability = voiceProbabilityPicked
+    ? parseOptionalNumber(voiceProbabilityPicked.value, voiceProbabilityPicked.source, 0, 1)
+    : 0.12;
+  const voiceMinClosenessPicked = pickOption(raw, "voice_min_closeness", "VOICE_MIN_CLOSENESS");
+  const voiceMinCloseness = voiceMinClosenessPicked
+    ? parseOptionalNumber(voiceMinClosenessPicked.value, voiceMinClosenessPicked.source, 0, 10)
+    : 2.5;
+  const voiceCooldownPicked = pickOption(raw, "voice_cooldown_minutes", "VOICE_COOLDOWN_MINUTES");
+  const voiceCooldownMinutes = voiceCooldownPicked
+    ? parseOptionalNumber(voiceCooldownPicked.value, voiceCooldownPicked.source, 0, 1440)
+    : 8;
+  const voiceMaxCharsPicked = pickOption(raw, "voice_max_chars", "VOICE_MAX_CHARS");
+  const voiceMaxChars = voiceMaxCharsPicked
+    ? Math.round(parseOptionalNumber(voiceMaxCharsPicked.value, voiceMaxCharsPicked.source, 4, 120))
+    : 40;
+  const voiceGroupPicked = pickOption(raw, "voice_group_enabled", "VOICE_GROUP");
+  const voiceGroupEnabled = voiceGroupPicked
+    ? parseBooleanOption(voiceGroupPicked.value, voiceGroupPicked.source)
+    : false;
+
+  // 打字错字 → 撤回 → 改对：私聊正常回复才生效，默认低概率、可关
+  const typoRecallEnabledPicked = pickOption(raw, "typo_recall_enabled", "TYPO_RECALL_ENABLED");
+  const typoRecallEnabled = typoRecallEnabledPicked
+    ? parseBooleanOption(typoRecallEnabledPicked.value, typoRecallEnabledPicked.source)
+    : true;
+  const typoRecallProbabilityPicked = pickOption(raw, "typo_recall_probability", "TYPO_RECALL_PROBABILITY");
+  const typoRecallProbability = typoRecallProbabilityPicked
+    ? parseOptionalNumber(typoRecallProbabilityPicked.value, typoRecallProbabilityPicked.source, 0, 1)
+    : 0.04;
+  const typoRecallDelayPicked = pickOption(raw, "typo_recall_delay_ms", "TYPO_RECALL_DELAY_MS");
+  const typoRecallDelayMs = typoRecallDelayPicked
+    ? Math.round(parseOptionalNumber(typoRecallDelayPicked.value, typoRecallDelayPicked.source, 500, 5000))
+    : 1500;
+  const typoRecallCooldownPicked = pickOption(raw, "typo_recall_cooldown_minutes", "TYPO_RECALL_COOLDOWN_MINUTES");
+  const typoRecallCooldownMinutes = typoRecallCooldownPicked
+    ? Math.round(parseOptionalNumber(typoRecallCooldownPicked.value, typoRecallCooldownPicked.source, 0, 1440))
+    : 20;
+
   return {
     persona,
     her_name: herName,
@@ -472,6 +542,16 @@ export function loadConfig(): AppConfig {
     photo_share_probability: photoShareProbability,
     photo_share_cooldown_minutes: photoShareCooldownMinutes,
     group_photo_enabled: groupPhotoEnabled,
+    voice_enabled: voiceEnabled,
+    voice_probability: voiceProbability,
+    voice_min_closeness: voiceMinCloseness,
+    voice_cooldown_minutes: voiceCooldownMinutes,
+    voice_max_chars: voiceMaxChars,
+    voice_group_enabled: voiceGroupEnabled,
+    typo_recall_enabled: typoRecallEnabled,
+    typo_recall_probability: typoRecallProbability,
+    typo_recall_delay_ms: typoRecallDelayMs,
+    typo_recall_cooldown_minutes: typoRecallCooldownMinutes,
     ai_disclosure: aiDisclosure,
     age_gate_enabled: ageGateEnabled,
   };
