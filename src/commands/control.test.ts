@@ -88,6 +88,16 @@ describe("handleControlCommand", () => {
     expect(text).toContain("/tmp/export.json");
   });
 
+  it("/about 展示 AI 披露与数据去向", async () => {
+    const deps = { reply: vi.fn(), persist: vi.fn(), exportData: vi.fn() };
+    expect(await handleControlCommand("/about", makeState() as never, deps)).toBe(true);
+    const text = deps.reply.mock.calls[0][0] as string;
+    expect(text).toContain("AI 虚拟人角色");
+    expect(text).toContain("DeepSeek");
+    expect(text).toContain("12356");
+    expect(text).toContain("18 岁");
+  });
+
   it("/help 与未知指令", async () => {
     const deps = { reply: vi.fn(), persist: vi.fn(), exportData: vi.fn() };
     expect(await handleControlCommand("/help", makeState() as never, deps)).toBe(true);

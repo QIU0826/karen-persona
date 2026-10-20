@@ -46,6 +46,12 @@ import { deriveStance } from "../world/stance.js";
 import { perceiveTime, buildMomentTag } from "../world/time-awareness.js";
 import { renderExpression } from "../impulse/renderer.js";
 import { trySharePhoto } from "../impulse/unsplash-trigger.js";
+import {
+  detectCrisis,
+  crisisSafetyNote,
+  crisisResourcesText,
+  type CrisisLevel,
+} from "../safety/crisis.js";
 import { shouldUpdateView, generateHerView } from "../evolution/her-view.js";
 import { addCorrection, applyCorrections } from "../persona/correction.js";
 import {
@@ -118,10 +124,17 @@ export interface GateRecord {
 }
 
 /** 记录本轮消息门裁决，供 /why 解释（不落消息正文） */
-function recordGateDecision(state: ConversationState, gate: GateAction, opts: ProcessOptions): void {
+function recordGateDecision(
+  state: ConversationState,
+  gate: GateAction,
+  opts: ProcessOptions,
+  crisis: CrisisLevel | null = null,
+): void {
   let action: GateRecord["action"] = gate.type;
   let reason: string;
-  if (opts.bypassGate) {
+  if (crisis) {
+    reason = "安全优先：检测到危机信号，强制回复并附加求助资源";
+  } else if (opts.bypassGate) {
     reason = "强制回复（延迟补发/连续沉默兜底）";
   } else if (state.consecutiveSilences >= 3) {
     reason = "连续沉默兜底：强制回复一次，避免一直不出现";
@@ -220,6 +233,8 @@ export interface PipelineResult {
   deferred?: { delayMs: number };
   /** 消息门判定「这一轮不回」（沉默） */
   silenced?: boolean;
+  /** 合规：检测到危机信号时附带的专业求助资源（由程序追加，不依赖模型生成） */
+  safetyMessage?: string;
 }
 
 /** processMessage / processMessageStream 的可选行为开关 */
@@ -505,7 +520,10 @@ function decideGateForTurn(
   state: ConversationState,
   ctx: GateContext,
   opts: ProcessOptions,
+  crisis: CrisisLevel | null = null,
 ): GateAction {
+  // 安全优先：危机信号必须触达，不能被门控延迟/沉默
+  if (crisis) return { type: "reply", delayMs: 600 };
   if (opts.bypassGate) return { type: "reply", delayMs: 800 };
   if (state.consecutiveSilences >= 3) {
     console.log(`[消息门] 连续沉默 ${state.consecutiveSilences} 次，强制回复一次`);
@@ -658,6 +676,10 @@ export async function processMessage(
   const logs: string[] = [];
   const now = new Date();
   const { persona, config, emotionState, guiltState, socialTact, driftState, causalChains, silenceState, session, stance, weatherPerception } = state;
+
+  // A-1. 安全兜底：危机信号（不是情感识别，是安全优先）
+  const crisis = detectCrisis(userInput);
+  if (crisis) logs.push("[安全] 检测到危机信号：本轮强制回复并附加专业求助资源");
 
   // A0. 天气定时刷新（30 分钟 TTL）
   await refreshWeatherIfStale(state);
@@ -879,10 +901,12 @@ export async function processMessage(
 
   // 结构化标签 + 风格参考 + RAG + 热点作为额外上下文
   const conflictNote = buildConflictNote(state);
+  const crisisNote = crisis ? crisisSafetyNote() : "";
   const fullSystem =
     systemPrompt +
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
     conflictNote +
+    crisisNote +
     `\n${momentTag}`;
   const messages = buildChatMessages(session, fullSystem);
 
@@ -1022,7 +1046,15 @@ export async function processMessage(
   state.consecutiveSilences = 0;
   logs.push(...updateRelationshipAfterTurn(state, userInput, rawReply, complexity));
   persistRuntimeState(state);
-  return { reply, logs, qqFace: rendered.qqFace, imageUrl, imageFile, imageCaption };
+  return {
+    reply,
+    logs,
+    qqFace: rendered.qqFace,
+    imageUrl,
+    imageFile,
+    imageCaption,
+    safetyMessage: crisis ? crisisResourcesText() : undefined,
+  };
 }
 
 // ── P1: 主动消息（生活流触发 + 沉默保温兜底）────
@@ -1093,6 +1125,8 @@ export interface StreamFragment {
   image?: { url?: string; file?: string; caption?: string };
   /** 消息门判定「晚点回」：调用方应在 delayMs 后以 {bypassGate:true, skipUserPersist:true} 重新调用 */
   deferred?: { delayMs: number };
+  /** 合规：危机信号的专业求助资源（桥接作为独立消息发送） */
+  safetyMessage?: string;
 }
 
 /**
@@ -1106,6 +1140,10 @@ export async function* processMessageStream(
   opts: ProcessOptions = {},
 ): AsyncGenerator<StreamFragment> {
   const { persona, config, emotionState, guiltState, socialTact, session, silenceState, weatherPerception } = state;
+
+  // 安全兜底：危机信号（不是情感识别，是安全优先）
+  const crisis = detectCrisis(userInput);
+  if (crisis) console.log("[安全] 检测到危机信号：本轮强制回复并附加专业求助资源");
 
   // 状态维护（与非流式保持一致：天气刷新/情绪恢复/沉默追踪）
   await refreshWeatherIfStale(state);
@@ -1177,7 +1215,12 @@ export async function* processMessageStream(
   const memories = await retrieveRelevantMemoriesAsync(userInput);
   const ragContext = buildRagContext(memories);
   const shortTermContext = buildShortTermContext(session);
-  const fullSystem = systemPrompt + interruptedNote + buildConflictNote(state) + `\n${momentTag}`;
+  const fullSystem =
+    systemPrompt +
+    interruptedNote +
+    buildConflictNote(state) +
+    (crisis ? crisisSafetyNote() : "") +
+    `\n${momentTag}`;
 
   // 构建消息列表
   const messages = buildChatMessages(session, fullSystem);
@@ -1278,6 +1321,11 @@ export async function* processMessageStream(
       }
     } catch {
       // 发图失败不影响文字回复
+    }
+
+    // 合规：危机信号的专业求助资源（独立消息，由程序生成，不依赖模型）
+    if (crisis) {
+      yield { text: "", safetyMessage: crisisResourcesText() };
     }
   } finally {
     // 无论正常结束还是被消费方中断（break），都持久化「实际已发送」的内容，避免记忆丢失

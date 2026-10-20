@@ -47,6 +47,11 @@ export interface AppConfig {
    */
   web_token?: string;
   /**
+   * 是否对首次对话的用户做 AI 披露（默认 true）。
+   * 商用/公开发布必须保持 true（合规要求）；仅个人自用可关。
+   */
+  ai_disclosure: boolean;
+  /**
    * 主动发图调试覆盖（不设置则用人设 photoShare 里的值）：
    * 亲密度门槛 / 概率（0-1） / 冷却分钟数。仅建议测试期使用。
    */
@@ -389,6 +394,12 @@ export function loadConfig(): AppConfig {
     ? parseToken(webTokenPicked.value, webTokenPicked.source)
     : undefined;
 
+  // AI 披露：默认开启（合规），可用 config.yaml / AI_DISCLOSURE 关闭
+  const disclosurePicked = pickOption(raw, "ai_disclosure", "AI_DISCLOSURE");
+  const aiDisclosure = disclosurePicked
+    ? parseBooleanOption(disclosurePicked.value, disclosurePicked.source)
+    : true;
+
   // 主动发图调试覆盖（可选；不设置时用人设 photoShare 的值）
   const photoMinClosenessPicked = pickOption(raw, "photo_share_min_closeness", "PHOTO_SHARE_MIN_CLOSENESS");
   const photoShareMinCloseness = photoMinClosenessPicked
@@ -428,7 +439,17 @@ export function loadConfig(): AppConfig {
     photo_share_min_closeness: photoShareMinCloseness,
     photo_share_probability: photoShareProbability,
     photo_share_cooldown_minutes: photoShareCooldownMinutes,
+    ai_disclosure: aiDisclosure,
   };
+}
+
+/** 解析布尔配置项（true/false、1/0、yes/no）。 */
+function parseBooleanOption(value: unknown, source: string): boolean {
+  if (typeof value === "boolean") return value;
+  const raw = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(raw)) return true;
+  if (["false", "0", "no", "off"].includes(raw)) return false;
+  throw new ConfigError(`${source} 必须是 true/false（当前: ${String(value)}）`);
 }
 
 /**

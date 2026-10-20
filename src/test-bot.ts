@@ -29,12 +29,20 @@ import {
 } from "./pipeline/orchestrator.js";
 import { handleControlCommand } from "./commands/control.js";
 import { exportUserData } from "./data/user-export.js";
+import { buildFirstContactDisclosure } from "./persona/disclosure.js";
 import readline from "node:readline";
 
 /** 打印一轮结果（即时回复与延迟补回复共用） */
 function printResult(
   personaName: string,
-  result: { reply: string; logs: string[]; imageUrl?: string; imageCaption?: string; silenced?: boolean },
+  result: {
+    reply: string;
+    logs: string[];
+    imageUrl?: string;
+    imageCaption?: string;
+    silenced?: boolean;
+    safetyMessage?: string;
+  },
 ): void {
   for (const log of result.logs) console.log(log);
 
@@ -144,6 +152,10 @@ async function main() {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   console.log("══════════════════════════════════════");
+  if (config.ai_disclosure) {
+    console.log(buildFirstContactDisclosure());
+    console.log("──────────────────────────────────────");
+  }
   console.log(`  和 ${persona.name} 聊天`);
   console.log("  /quit 退出  /stats 统计  /why 解释上一轮  /pause 暂停主动消息  /resume 恢复");
   console.log("  /export 导出记忆  /mood +0.1 调节情绪  /weather 天气");

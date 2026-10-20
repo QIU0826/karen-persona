@@ -69,6 +69,7 @@ import {
 import { describeImage } from "../ai/vision.js";
 import { handleControlCommand } from "../commands/control.js";
 import { exportUserData } from "../data/user-export.js";
+import { buildFirstContactDisclosure } from "../persona/disclosure.js";
 import { pickSticker, toStickerCqCode } from "../impulse/stickers.js";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -1009,6 +1010,13 @@ async function streamPrivateReply(params: {
       continue;
     }
 
+    if (frag.safetyMessage) {
+      // 合规：危机求助资源（程序生成，独立消息）
+      sendPrivateMsg(userId, frag.safetyMessage);
+      log.info("compliance.crisis_resources_sent", { user_id: userId });
+      continue;
+    }
+
     if (!frag.text) continue;
 
     // 流式 fragment 之间的自然间隔（模拟打字间隙）
@@ -1146,6 +1154,10 @@ async function handlePrivateBatch(
       const st = await initConversation(persona, sharedBase.config);
       st.stickerMode = "qqface";
       userStates.set(userId, st);
+      if (sharedBase.config.ai_disclosure && st.session.messages.length === 0) {
+        sendPrivateMsg(userId, buildFirstContactDisclosure());
+        log.info("compliance.disclosure_sent", { user_id: userId });
+      }
     }
     const state = userStates.get(userId)!;
     const handled = await handleControlCommand(text, state, {
@@ -1168,6 +1180,11 @@ async function handlePrivateBatch(
     st.stickerMode = "qqface";
     userStates.set(userId, st);
     log.info("session.created", { user_id: userId, persona: persona.name });
+    // 合规：首次对话披露（AI 身份 + 数据去向 + 18+），仅新会话发一次
+    if (sharedBase.config.ai_disclosure && st.session.messages.length === 0) {
+      sendPrivateMsg(userId, buildFirstContactDisclosure());
+      log.info("compliance.disclosure_sent", { user_id: userId });
+    }
   }
 
   userLastActive.set(userId, Date.now());

@@ -7,6 +7,7 @@
 import { describeEmotion } from "../persona/emotion.js";
 import { closenessLabel } from "../persona/relationship.js";
 import { getStateSummary, type ConversationState } from "../pipeline/orchestrator.js";
+import { buildAboutText } from "../persona/disclosure.js";
 
 export interface ExportSummary {
   path: string;
@@ -93,6 +94,7 @@ export function buildHelpText(): string {
     "/pause: 暂停主动消息（仍会回复你的消息）",
     "/resume: 恢复主动消息",
     "/export: 导出你们的对话与记忆备份（JSON）",
+    "/about: AI 披露、数据去向、年龄与安全说明",
     "/help: 这条帮助",
   ].join("\n");
 }
@@ -134,6 +136,9 @@ export async function handleControlCommand(
       );
       return true;
     }
+    case "about":
+      deps.reply(buildAboutText());
+      return true;
     case "help":
       deps.reply(buildHelpText());
       return true;
