@@ -294,6 +294,28 @@ export interface AddAnchorInput {
   now?: number;
 }
 
+/** 按 summary 查已有锚点 id（复筛用来区分「新建」与「复述强化」）。 */
+export function findAnchorBySummary(
+  db: Database,
+  personaId: string,
+  ownerId: string,
+  summary: string,
+): number | null {
+  const text = summarizeAnchor(summary, 60);
+  if (!text) return null;
+  try {
+    const row = db
+      .prepare(
+        `SELECT id FROM memory_anchors
+         WHERE persona_id = ? AND owner_id = ? AND summary = ? AND valid_to IS NULL`,
+      )
+      .get(personaId, ownerId, text) as { id: number } | undefined;
+    return row ? Number(row.id) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** 写一条锚点（同 owner 同一 summary 去重，避免同一件事反复入库）。 */
 export function addAnchor(db: Database, input: AddAnchorInput): number | null {
   const now = input.now ?? Date.now();

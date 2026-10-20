@@ -209,3 +209,102 @@ describe("runAnchorRefine", () => {
     expect(promptSeen).not.toContain("前天的");
   });
 });
+
+describe("复筛幂等与计数（v0.8.17 真实冒烟驱动）", () => {
+  function makeDb() {
+    const Database = require("better-sqlite3") as typeof import("better-sqlite3");
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE memory_anchors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, persona_id TEXT, owner_id TEXT, kind TEXT,
+        summary TEXT, quote TEXT, strength REAL, recall_count INTEGER DEFAULT 0,
+        source_msg_ids TEXT, created_at INTEGER, valid_from INTEGER, valid_to INTEGER
+      );
+      CREATE TABLE t2_episodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, persona_id TEXT, content TEXT, source TEXT,
+        strength REAL, emotional_weight REAL, half_life_days REAL, salience REAL,
+        anchor_id INTEGER, created_at TEXT
+      );
+    `);
+    return db;
+  }
+
+  const seed = (db: ReturnType<typeof makeDb>) => {
+    db.prepare(
+      `INSERT INTO t2_episodes (persona_id, content, source, strength, emotional_weight, half_life_days, salience, anchor_id, created_at)
+       VALUES ('xiaoya','他爸住院下周手术他睡不好','chat',1,0.2,30,0.7,NULL,'2026-10-20 20:00:00'),
+              ('xiaoya','他说想辞职做独立开发','chat',1,0.2,30,0.65,NULL,'2026-10-20 21:00:00')`,
+    ).run();
+  };
+  const fakeChat = async () =>
+    JSON.stringify({
+      items: [
+        { index: 0, anchor: true, kind: "loss", summary: "他爸住院手术" },
+        { index: 1, anchor: true, kind: "promise", summary: "想辞职独立开发" },
+      ],
+    });
+
+  it("第一次跑：created 等于真正新建的锚点数", async () => {
+    const db = makeDb();
+    seed(db);
+    const { runAnchorRefine } = await import("./anchor-refine.js");
+    const result = await runAnchorRefine({
+      db: db as never,
+      personaId: "xiaoya",
+      ownerId: "cli:local",
+      day: "2026-10-20",
+      chatFn: fakeChat,
+    });
+    expect(result).toMatchObject({ ok: true, candidates: 2, created: 2 });
+    db.close();
+  });
+
+  it("守卫丢失后重跑：episode 已回写 anchor_id → 不再进候选（不重复花 LLM）", async () => {
+    const db = makeDb();
+    seed(db);
+    const { runAnchorRefine } = await import("./anchor-refine.js");
+    await runAnchorRefine({
+      db: db as never,
+      personaId: "xiaoya",
+      ownerId: "cli:local",
+      day: "2026-10-20",
+      chatFn: fakeChat,
+    });
+    // 模拟 job_runs 丢失（不在脚本里建守卫），直接再跑
+    const again = await runAnchorRefine({
+      db: db as never,
+      personaId: "xiaoya",
+      ownerId: "cli:local",
+      day: "2026-10-20",
+      chatFn: fakeChat,
+    });
+    expect(again.candidates).toBe(0);
+    expect(again.created).toBe(0);
+    db.close();
+  });
+
+  it("同 summary 已存在时，复述强化不计入 created", async () => {
+    const db = makeDb();
+    seed(db);
+    const { runAnchorRefine } = await import("./anchor-refine.js");
+    await runAnchorRefine({
+      db: db as never,
+      personaId: "xiaoya",
+      ownerId: "cli:local",
+      day: "2026-10-20",
+      chatFn: fakeChat,
+    });
+    // 手动把 episode 的 anchor_id 清掉（模拟老数据/回写失败），再跑一次
+    db.prepare("UPDATE t2_episodes SET anchor_id = NULL").run();
+    const again = await runAnchorRefine({
+      db: db as never,
+      personaId: "xiaoya",
+      ownerId: "cli:local",
+      day: "2026-10-20",
+      chatFn: fakeChat,
+    });
+    expect(again.candidates).toBe(2);
+    expect(again.created).toBe(0); // 锚点已存在 → 只是强化，不算新建
+    db.close();
+  });
+});

@@ -14,9 +14,16 @@
  * - 候选最多 12 条，内容截断到 120 字。
  */
 import type { Database } from "better-sqlite3";
-import { addAnchor, type AnchorKind } from "../data/memory-v2.js";
+import { addAnchor, findAnchorBySummary, type AnchorKind } from "../data/memory-v2.js";
 
 /** 候选门槛：低于这个显著度的日常闲聊不值得复筛 */
+/**
+ * 已判定「不值得记」的 episode 用这个值标记 anchor_id（v0.8.17）。
+ * 目的：被否掉的候选不再反复进候选池——否则 job_runs 守卫一旦丢失，同一批边界记忆会被再问一遍。
+ * 只影响复筛的候选筛选（只认 anchor_id 为 NULL 的行）。
+ */
+export const REFINE_REJECTED_SENTINEL = -1;
+
 export const REFINE_MIN_SALIENCE = 0.45;
 /** 已经超过自动入库阈值的不用复筛 */
 export const REFINE_MAX_SALIENCE = 0.75;
@@ -187,9 +194,22 @@ export async function runAnchorRefine(input: {
 
   let created = 0;
   for (const verdict of verdicts) {
-    if (!verdict.anchor) continue;
     const candidate = candidates[verdict.index];
     if (!candidate) continue;
+    if (!verdict.anchor) {
+      // 判定"不值得记"：打哨兵，避免下次再拿同一条去问模型（省一次调用、也避免判断摇摆）
+      try {
+        input.db
+          .prepare("UPDATE t2_episodes SET anchor_id = ? WHERE id = ? AND persona_id = ?")
+          .run(REFINE_REJECTED_SENTINEL, candidate.id, input.personaId);
+      } catch {
+        // 标记失败不影响其它条目
+      }
+      continue;
+    }
+    // v0.8.17：先看是否已存在同 summary 的锚点——已存在只是"复述强化"，不算新建
+    // （否则日志会写"新增 N 条"，实际一条没建，误导排查）。
+    const before = findAnchorBySummary(input.db, input.personaId, input.ownerId, verdict.summary);
     const id = addAnchor(input.db, {
       personaId: input.personaId,
       ownerId: input.ownerId,
@@ -199,7 +219,17 @@ export async function runAnchorRefine(input: {
       strength: Math.max(0.5, candidate.salience),
       now,
     });
-    if (id !== null) created += 1;
+    if (id !== null && before === null) created += 1;
+    // 回写 episode.anchor_id：即使 job_runs 守卫丢失，第二天也不会再为同一件事花一次 LLM 调用
+    if (id !== null) {
+      try {
+        input.db
+          .prepare("UPDATE t2_episodes SET anchor_id = ? WHERE id = ? AND persona_id = ?")
+          .run(id, candidate.id, input.personaId);
+      } catch {
+        // 回写失败不影响已建的锚点
+      }
+    }
   }
   return { ok: true, reason: "done", candidates: candidates.length, created };
 }
