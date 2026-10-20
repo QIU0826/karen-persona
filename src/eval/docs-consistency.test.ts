@@ -127,7 +127,8 @@ describe("能力总表（docs/CAPABILITY_MATRIX.md）", () => {
     expect(md).toContain("97.5%"); // 记忆 recall@8
     expect(md).toContain("100%"); // 锚点精确率
     expect(md).toContain("p95");
-    expect(md).toContain("1174");
+    // 用例数会随版本变化，这里只锁「写了具体数字」而不是锁死某个数
+    expect(md).toMatch(/\d{2,3} 文件 \/ \d{3,4} 用例/);
     expect(md).toContain("59.21%");
   });
 });
