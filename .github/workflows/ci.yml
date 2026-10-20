@@ -2,7 +2,8 @@ name: CI
 
 # 提交到任意分支、以及所有 PR 都会跑：
 #   安装锁定依赖（npm ci）→ 类型检查（tsc --noEmit）→ lint（未使用代码）→ 单元测试（vitest run）
-#   Linux 额外跑覆盖率基线（npm run test:coverage，阈值见 vitest.config.ts）
+#   Linux 额外跑：覆盖率基线（阈值见 vitest.config.ts）+ 离线评测守门（npm run eval:offline，
+#   40 条记忆金标 + 30 条锚点金标，卡 facts≥95% / recall@8≥90% / 合并≥95% / anti-forget PASS）
 on:
   push:
   pull_request:
@@ -48,3 +49,9 @@ jobs:
       - name: Coverage baseline (Linux)
         if: runner.os == 'Linux'
         run: npm run test:coverage
+
+      # 离线评测守门（Linux 一次即可）：不改代码也能发现检索/注入链路退化——
+      # 单元测试只验证结构，这个步骤真的跑指标并卡阈值（阈值在 scripts/eval-offline.ts）
+      - name: Offline eval gate (Linux)
+        if: runner.os == 'Linux'
+        run: npm run eval:offline

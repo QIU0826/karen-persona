@@ -1,6 +1,6 @@
 {
   "name": "karen-persona",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "QQ AI 虚拟人设聊天系统 - 让通讯录里住进一个有自己生活、情绪和记忆的人",
   "main": "dist/index.js",
   "scripts": {
@@ -35,7 +35,11 @@
     "media:install": "tsx scripts/media-setup.ts install",
     "media:pull-model": "tsx scripts/media-setup.ts pull-model",
     "media:start": "tsx scripts/media-setup.ts start",
-    "media:purge": "tsx scripts/media-setup.ts purge"
+    "media:purge": "tsx scripts/media-setup.ts purge",
+    "eval:offline": "tsx scripts/eval-offline.ts",
+    "eval:memory": "tsx scripts/memory-eval.ts",
+    "eval:anchor": "tsx scripts/anchor-eval.ts",
+    "eval:live": "tsx scripts/memory-eval.ts --live --limit=40 && tsx scripts/anchor-eval.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",

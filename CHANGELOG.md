@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.8.6 — 2026-10-20
+
+评测进 CI：让"指标掉了但单测全绿"这件事不可能再发生。
+
+### Added
+
+- **`npm run eval:offline`（CI 守门）**：`scripts/eval-offline.ts`
+  - 真跑 40 条记忆金标的离线指标（facts / recall@1·3·8 / 合并 / anti-forget），
+    与 30 条锚点金标的结构校验；
+  - 阈值：facts ≥95%、recall@8 ≥90%、合并 ≥95%、anti-forget 必须 PASS、锚点 ≥30 条且两类齐全；
+  - 不联网、不花 token、几秒完成；失败时打印实测值并 exit 1。
+- **CI 新增步骤**：Linux 上 `npm run eval:offline`（三平台仍各自跑 typecheck/lint/test）。
+- 统一评测入口：`npm run eval:memory` / `eval:anchor` / `eval:live` / `eval:offline`
+  （`eval:live` 会真调模型，约 ¥0.02，只手动跑）。
+
+### Why
+
+`npm test` 只验证**结构**（金标格式、评测函数逻辑），不验证**指标**——
+改了检索或注入链路后指标掉 10 个点，单测依然全绿。守门步骤补上这个缺口。
+
+### Testing
+
+- 守门脚本自带 10 条单测，**专门验证"该失败时真的会失败"**：
+  facts/recall/合并/anti-forget 四项各自低于阈值 → 失败；anti-forget 未跑 → 也失败（不允许静默跳过）；
+  锚点金标条数不足/只有一类/kind 非法 → 失败。
+- 97 个测试文件 / 1167 个用例通过；`tsc --noEmit` 0 错误；`npm run lint` 0 违规。
+- 本地实跑守门：5 项全达标（facts 100%、recall@8 97.5%、合并 100%、anti-forget PASS、锚点 30 条）。
+
 ## v0.8.5 — 2026-10-20
 
 给锚点复筛配一套「回归护栏」：把"该记 / 不该记"的判断变成可复现指标。

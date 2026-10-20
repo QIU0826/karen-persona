@@ -432,3 +432,16 @@ node node_modules/tsx/dist/cli.mjs scripts/memory-eval.ts --offline
 - 这条规则是**行为约束**，不增加检索成本；prompt 只加了一行。
 - 评测 harness 的 system prompt 与生产 prompt 不是同一份（harness 是紧凑版），
   两侧规则都已加上，单测锁住生产侧（`prompt-builder.test.ts` → 「记忆表述层」）。
+
+---
+
+## 入口（v0.8.6 起）
+
+```bash
+npm run eval:offline   # CI 守门：记忆 40 条离线指标 + 锚点 30 条结构，卡阈值，不联网
+npm run eval:memory    # 记忆金标（--offline / --live）
+npm run eval:anchor    # 锚点复筛（默认 live，约 ¥0.003）
+npm run eval:live      # 两套都跑真实模型（约 ¥0.02）
+```
+
+守门阈值在 `scripts/eval-offline.ts` 的 `THRESHOLDS`；守门本身有 10 条单测验证"该失败时会失败"。
