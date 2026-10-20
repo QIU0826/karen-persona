@@ -1,7 +1,8 @@
 # 发布准备（Release Prep）
 
-> 状态：**已拍板发布 v0.2.0（2026-10-20）**。本文件记录可复现的检查结果、发布决策与执行记录。
-> 版本：`0.2.0`。远端：`origin` → `https://github.com/QIU0826/karen-persona.git`（远端现有分支为 `master`，本地为 `main`）。
+> 状态：**已发布 v0.2.0（2026-10-20）**：`main` 与 `v0.2.0` tag 已推送到 GitHub，CI 运行中。
+> 版本：`0.2.0`。远端：`https://github.com/QIU0826/karen-persona.git`；分支 `main`（release commit `82a14ac`），tag `v0.2.0`。
+> 旧分支 `master` 是上游历史，本次未 force push；建议在 GitHub 把默认分支改为 `main`。
 
 ## 1. 已完成检查（可复现）
 
@@ -51,9 +52,9 @@ node node_modules/vitest/vitest.mjs run            # 69 文件 / 687 用例全�
 
 - [x] 版本号 `0.1.0` → `0.2.0`（无破坏性变更）
 - [x] 干净 checkout、密钥扫描、仓库卫生检查
-- [ ] push `main` 到远端（远端 `master` 是上游旧历史，本次**不 force push**；详见 §5）
-- [ ] push tag `v0.2.0`
-- [ ] GitHub CI 三平台绿
+- [x] push `main` 到远端（远端 `master` 是上游旧历史，本次**不 force push**；详见 §5）
+- [x] push tag `v0.2.0`
+- [ ] GitHub CI 三平台绿（run 39380513929，queued）
 - [ ] 提醒用户：宣传页素材公开许可 / DeepSeek Key 轮换 / 朋友试用邀请文案（如需要）
 
 ## 3. 你批准后的发布步骤（草案）
