@@ -116,7 +116,13 @@ fs.rmSync(tmp, { recursive: true, force: true });
 → 用 `pollDb(read, ok, message)`（E2E 里已有）或自己写 50×150ms 轮询；
    失败信息里带上最后读到的值，排查更快。
 
-### 坑 3：临时目录的异步任务会在 cleanup 后报错
+### 坑 3：造数据必须走生产写入路径
+
+直接 `INSERT INTO t2_episodes` 会**绕过 `insertEpisode` 里的 FTS 索引维护**，
+结果是数据在表里、检索 0 命中，测试会误判"检索坏了"（v0.8.21 写 retriever 测试时踩到）。
+→ 用 `insertEpisode()` / `upsertDailyDigest()` 等生产函数造数据；人设用 `setCurrentPersona()` 切。
+
+### 坑 4：临时目录的异步任务会在 cleanup 后报错
 
 冒烟脚本 `fs.rmSync(tmp)` 之后，后台的 embedding 升级/成本写入还在跑，
 会刷 `database connection is not open` 噪声日志。

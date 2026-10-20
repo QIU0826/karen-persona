@@ -169,6 +169,18 @@ describe("验证手册（docs/VERIFICATION_PLAYBOOK.md，v0.8.20）", () => {
     expect(missing, `验证手册提到但 package.json 没有：${missing.join(", ")}`).toEqual([]);
   });
 
+  it("覆盖审计文档存在，且三层口径与「未验证清单」章节齐全", () => {
+    const AUDIT = path.join(ROOT, "docs", "COVERAGE_AUDIT.md");
+    expect(fs.existsSync(AUDIT)).toBe(true);
+    const md = fs.readFileSync(AUDIT, "utf-8");
+    for (const section of ["## 口径说明", "## 一、记忆与数据", "## 六、明确「未验证 / 不存在」清单", "## 八、维护约定"]) {
+      expect(md, `缺少章节：${section}`).toContain(section);
+    }
+    // 审计文档必须诚实标注未验证项（防止以后被删干净）
+    expect(md).toContain("❌ 不存在");
+    expect(md).toContain("⛔ 阻塞");
+  });
+
   it("文档引用的 smoke 脚本文件都真实存在", () => {
     const md = fs.readFileSync(PLAYBOOK, "utf-8");
     const refs = new Set<string>();
