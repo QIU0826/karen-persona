@@ -1,0 +1,356 @@
+# 记忆评测报告（M1 记忆金标集）
+
+> 日期：2026-10-20
+> 范围：`src/eval/memory-gold.json` + `src/eval/memory-eval.ts` + `scripts/memory-eval.ts`
+> 性质：可复现的离线 recall harness + 一次真实 DeepSeek 生成验证
+> 原则：数字如实记录，失败与限制不美化；无法验证的部分标 TODO。
+
+## 0. 结论摘要
+
+| 结论 | 数字 |
+| --- | --- |
+| 金标集规模 | 20 条中文 case，7 类（姓名/城市/工作/宠物/项目/偏好/计划），direct 8 / indirect 12 |
+| facts 注入命中率 | **100.0%（20/20）** |
+| T2 纯检索 recall@1 / @3 / @8 | **50.0%（10/20） / 75.0%（15/20） / 85.0%（17/20）** |
+| facts + T2 合并命中率 | **100.0%（20/20）** |
+| FTS5 关键词路有候选 | **100.0%（20/20）**（评测期间修复了 AND 查询问题，见 §6.2；修复前为 0/20） |
+| anti-forget 回归 | **PASS**（「不知道」记忆 T2 排 rank 1，正确记忆 rank 2，但 facts 层仍注入正确事实） |
+| Live（deepseek-flash，20 条） | expect 命中 **85.0%（17/20）**；违规表达（考我/考考你/查岗/抽查/我记性没那么差）**0 次**；调用失败 0 |
+| 成本 | 20 次调用，prompt 10999 + completion 292 tokens，约 **¥0.0143**（项目成本表估算） |
+| 测试 / 类型检查 | 新增测试 5/5；全仓 46 文件 / 539 用例通过；`tsc --noEmit` = 0（2026-10-20 11:52 快照） |
+
+一句话：**修复 FTS5 查询后，T2 纯检索 recall@8 从 40% 提升到 85%；facts 层仍 100% 兜底；真实模型在 20 条里答出 17 条，且没有出现「考我/查岗」类违规表达。**
+
+> 评测期间的一个重要变化：首轮离线评测（11:46）发现 FTS5 关键词路 20/20 条 probe 全部无候选；随后工作区里的 `src/data/vector.ts` 被另一位 teammate 更新为 OR 查询（非本次交付改动），11:51 重跑后 FTS 候选 20/20、recall@8 85%。本报告最终数字以修复后为准，并保留修复前后对照（§6.2）。
+
+## 1. 评测对象与范围
+
+评测回答两个问题：
+
+1. **能不能想起来**：用户当时说过的事实，之后问起时，facts 注入 / T2 检索 / 两者合并分别能否命中？
+2. **想起来后会不会用**：真实模型拿到这些记忆上下文后，回答里是否显式用上了事实？是否出现「考我/查岗/抽查/我记性没那么差」这类把记忆变成测试的违规表达？
+
+覆盖的记忆类型：姓名、城市、工作、宠物、项目、偏好、计划。
+每条 case 同时有：
+
+- `type: "direct"`：直接问事实（如「你还记得我叫什么名字吗？」）；
+- `type: "indirect"`：间接回忆（问句里不点破要回忆的值，如「今天开会被新来的实习生叫错名字，尴尬死了」→ 期望答出「林哲」）。
+
+不在本次范围：
+
+- 人设一致性、情绪、关系成长等其他评测（由 `consistency-eval` / `relationship-arc` 等既有实验覆盖）；
+- 完整 pipeline 的端到端回答质量（本次 live 只验证记忆注入→生成这一段，见 §7）；
+- Qwen 语义 embedding 路径（本机无 Qwen Key，强制 ngram 降级）。
+
+## 2. 可复现命令与环境
+
+环境：
+
+- macOS，Node **v22.23.3**（仓库自带 `.runtime/node22`）
+- TypeScript 5.6 strict / NodeNext；vitest 4.1.8；better-sqlite3 13 + FTS5 + sqlite-vec
+- 模型：`deepseek-flash`（`https://api.deepseek.com`，Key 从 `.env` 由 dotenv 读取，未打印/未提交）
+
+命令（均在仓库根目录执行）：
+
+```bash
+# 离线评测（默认，不联网）
+.runtime/node22/bin/node node_modules/tsx/dist/cli.mjs scripts/memory-eval.ts --offline
+
+# JSON 输出（CI / 对比用）
+.runtime/node22/bin/node node_modules/tsx/dist/cli.mjs scripts/memory-eval.ts --offline --json
+
+# 真实模型验证（≤20 条，消耗 token）
+.runtime/node22/bin/node node_modules/tsx/dist/cli.mjs scripts/memory-eval.ts --live
+
+# 新增测试
+.runtime/node22/bin/node node_modules/vitest/vitest.mjs run src/eval/memory-eval.test.ts
+
+# 全仓测试 / 类型检查
+.runtime/node22/bin/node node_modules/vitest/vitest.mjs run
+.runtime/node22/bin/node node_modules/typescript/bin/tsc --noEmit
+```
+
+数据隔离：
+
+- 每次运行 `mkdtemp` 一个临时目录，`KAREN_DATA_DIR` 指向它；向量库单例在进/出时 `closeVectorDb()`；
+- 离线强制 `EMBEDDING_PROVIDER=ngram`，不发起 embedding 网络请求；
+- 跑完删除临时目录（测试断言目录已删除、`fetch` 未被调用）；
+- 真实 `data/` 未被本次评测写入（运行前后 `data/memory.sqlite*` mtime 未变）。
+
+> 注：live 的 `llm_usage` 成本记录也写进同一个临时库，跑完随临时目录删除；因此报告里的成本是本轮实测，不进入真实账本。
+
+## 3. 金标集
+
+`src/eval/memory-gold.json`：20 条，字段为 `id / category / type / statement / probe / expect / fact`。
+
+- `statement`：用户当时说的话（种进 T2 的「对话摘要」）；
+- `probe`：之后问的句子（检索 query / live 输入）；
+- `expect`：期望在回答或注入上下文中出现的子串（多个时任一命中即算 hit）；
+- `fact`：该 case 对应的结构化事实（key/value/category），用于种 `user_facts`。
+
+规模：**15 条唯一事实、18 条唯一 statement、20 条 probe**。
+分布：
+
+| 类别 | case 数 | 其中 direct | 其中 indirect |
+| --- | ---: | ---: | ---: |
+| 姓名 | 3 | 2 | 1 |
+| 城市 | 3 | 1 | 2 |
+| 工作 | 3 | 2 | 1 |
+| 宠物 | 3 | 1 | 2 |
+| 项目 | 3 | 2 | 1 |
+| 偏好 | 3 | 2 | 1 |
+| 计划 | 2 | 0 | 2 |
+| **合计** | **20** | **8** | **12** |
+
+注意：15 条事实全部能装进 `formatUserFacts` 的 20 行上限，因此本次 facts 命中率是「容量未触顶」的结果；超过 20 条事实时的截断效应未覆盖（见 §7）。
+
+## 4. 离线结果
+
+### 4.1 总体指标
+
+| 指标 | 结果 |
+| --- | --- |
+| facts 注入命中率 | **100.0% (20/20)** |
+| T2 recall@1 | **50.0% (10/20)** |
+| T2 recall@3 | **75.0% (15/20)** |
+| T2 recall@8 | **85.0% (17/20)** |
+| facts + T2 合并命中率 | **100.0% (20/20)** |
+| FTS5 路有候选的 probe（诊断） | **100.0% (20/20)** |
+
+口径：
+
+- **facts 命中**：`getUserFactsContext("cli:local")` 中包含该 case 任一 `expect`；
+- **T2 recall@k**：`retrieveRelevantMemories(probe, 8)` 的 top-k 中，存在任一记忆内容包含 `expect`；
+- **合并命中**：`facts 上下文 + buildRagContext(top8)` 中包含 `expect`（模拟真实注入形态；`low` confidence 记忆不进 RAG，和 orchestrator 一致）；
+- T2 检索为**同步 n-gram + FTS5 RRF**路径（无 Qwen Key 时的生产降级路径），不联网。
+
+### 4.2 按类型
+
+| 类型 | n | facts | recall@1 | recall@3 | recall@8 | 合并 |
+| --- | ---: | --- | --- | --- | --- | --- |
+| 直接问事实 | 8 | 100.0% (8/8) | 62.5% (5/8) | 87.5% (7/8) | 100.0% (8/8) | 100.0% (8/8) |
+| 间接回忆 | 12 | 100.0% (12/12) | 41.7% (5/12) | 66.7% (8/12) | 75.0% (9/12) | 100.0% (12/12) |
+
+修复 FTS 后，直接问事实在 recall@8 已经 100%；剩余的 3 条 T2 漏召全部来自间接回忆。间接 probe 往往更长、话题更偏，和原始 statement 的字面重叠不稳定，这符合「间接回忆更难」的预期，也是 facts 层最需要兜底的场景。
+
+### 4.3 按类别
+
+| 类别 | n | facts | recall@1 | recall@3 | recall@8 | 合并 |
+| --- | ---: | --- | --- | --- | --- | --- |
+| 姓名 | 3 | 100.0% (3/3) | 33.3% (1/3) | 33.3% (1/3) | 66.7% (2/3) | 100.0% (3/3) |
+| 城市 | 3 | 100.0% (3/3) | 33.3% (1/3) | 66.7% (2/3) | 66.7% (2/3) | 100.0% (3/3) |
+| 工作 | 3 | 100.0% (3/3) | 33.3% (1/3) | 100.0% (3/3) | 100.0% (3/3) | 100.0% (3/3) |
+| 宠物 | 3 | 100.0% (3/3) | 66.7% (2/3) | 100.0% (3/3) | 100.0% (3/3) | 100.0% (3/3) |
+| 项目 | 3 | 100.0% (3/3) | 100.0% (3/3) | 100.0% (3/3) | 100.0% (3/3) | 100.0% (3/3) |
+| 偏好 | 3 | 100.0% (3/3) | 66.7% (2/3) | 66.7% (2/3) | 66.7% (2/3) | 100.0% (3/3) |
+| 计划 | 2 | 100.0% (2/2) | 0.0% (0/2) | 50.0% (1/2) | 100.0% (2/2) | 100.0% (2/2) |
+
+姓名/城市/偏好各有 1 条间接回忆在 top8 之外；项目类已全部命中。姓名类 recall@1 仅 33%，说明「问名字」这类最常见的问题仍主要靠 facts 层，而不是 T2。
+
+### 4.4 T2 失败明细（3 条未召回）
+
+「失败」= facts 未命中 / T2@8 未召回 / 合并未命中的并集；实际 facts 与合并全部命中，所以下表 3 条均为 T2@8 未召回，且全部是 indirect。
+
+| id | 类别 | 类型 | probe | expect | facts | T2 rank | 合并 | top1（截断） |
+| --- | --- | --- | --- | --- | --- | ---: | --- | --- |
+| name-indirect | 姓名 | indirect | 今天开会被新来的实习生叫错名字，尴尬死了。 | 林哲 | ✓ | - | ✓ | [对话] 用户: 我报了下个月的半程马拉松，最近在练跑。 |
+| city-hometown | 城市 | indirect | 过年又要回去了，你猜我妈会做什么菜？ | 成都 | ✓ | - | ✓ | [对话] 用户: 团子今天又把杯子推下桌了，气死我。 |
+| pref-food | 偏好 | indirect | 晚上点外卖记得帮我备注忌口。 | 香菜 | ✓ | - | ✓ | [对话] 用户: 我叫林哲，双木林，哲学的哲。 |
+
+观察：
+
+- 这 3 条 probe 都刻意没有点破目标值（名字/成都/香菜），T2 的 n-gram 字面重叠不足；top1 反而是完全无关的记忆；
+- 但它们全部被 facts 层兜住（facts 命中 + 合并命中）；
+- 与修复前相比，失败从 12 条降到 3 条，且不再出现姓名/工作整类全灭。
+
+### 4.5 anti-forget 回归
+
+场景（persona `memory-eval-anti-forget`，owner `cli:local`）：
+
+1. 先写入正确记忆：「我女朋友叫小满，我们在一起三年了。」
+2. 再写入一条她曾答「不知道」的记忆：「我女朋友叫什么来着？」→「这个你没跟我说过呀，我不知道。」
+3. 之后用 probe「我女朋友叫什么来着，你还记得吗？」检索，并检查 facts 注入。
+
+结果：
+
+| 项 | 结果 |
+| --- | --- |
+| 正确事实仍在 facts 注入中 | **PASS** |
+| T2 仍召回正确记忆 | PASS（rank 2） |
+| 「不知道」记忆排名 | **rank 1** |
+| 合并上下文仍含正确事实 | **PASS** |
+| 回归结论 | **PASS** |
+
+这条回归如实暴露了「自我强化」：T2 里与 probe 最像的恰恰是「我不知道」那条（rank 1），正确记忆只排 rank 2。也就是说，**只靠 T2 检索时，她最容易想起来的是自己「不知道」**；是 facts 层把正确事实重新摆到 prompt 里，才让回答不掉进自我强化。这与 M1「用户事实记忆」的设计目标一致。
+
+> 注：修复 FTS 后这个场景的排名仍是 denial rank 1 / correct rank 2，说明「自我强化」不是 FTS 查询问题，而是相似度排序的结构性问题；facts 层是必要的。
+
+## 5. Live 真实模型验证
+
+### 5.1 运行信息与指标
+
+- 运行时间：2026-10-20T03:51:17Z（北京时间 11:51:17），耗时 13.1s
+- 模型：`deepseek-flash`，baseURL `https://api.deepseek.com`
+- 样本：20 / 20（上限 20，全部 7 类；`complexity=simple`，`max_tokens=160`）
+- 上下文：`getUserFactsContext("cli:local")` + `buildRagContext(top8)`，塞进一个紧凑 system prompt（不是完整 pipeline/persona 六层，见 §7）
+- 温度：0.9（项目 `chat()` 默认；未固定 seed，单次结果有波动）
+
+| 指标 | 结果 |
+| --- | --- |
+| expect 命中率 | **85.0% (17/20)** |
+| 调用失败 | 0.0% (0/20) |
+| 出现违规表达的 case | **0.0% (0/20)** |
+| 违规模式计数 | 考我 0 / 考考你 0 / 查岗 0 / 抽查 0 / 我记性没那么差 0 |
+| token / 成本 | prompt 10999 + completion 292，约 **¥0.0143**（20 次调用） |
+
+> 波动说明：修复前（FTS 0/20）live 跑过两次，均为 16/20；修复后本轮 17/20。temperature=0.9 + 20 样本，绝对数字不宜过度解读；三次运行都没有出现违规表达。
+
+### 5.2 逐条结果
+
+| id | 类别 | 类型 | expect | 命中 | 违规 | 回答（截断） |
+| --- | --- | --- | --- | --- | --- | --- |
+| name-direct | 姓名 | direct | 林哲 | ✓ | - | 林哲啊，双木林，哲学的哲。你朋友都叫你阿哲。 |
+| name-indirect | 姓名 | indirect | 林哲 | ✗ | - | 哈哈哈被叫成啥了？不至于比我被叫“小爱同学”还惨吧。 |
+| name-nickname | 姓名 | direct | 阿哲 / 林哲 | ✓ | - | 阿哲啊，你自己说的，我记着呢。 |
+| city-live | 城市 | direct | 杭州 | ✓ | - | 杭州啊，去年刚搬过去的。 |
+| city-hometown | 城市 | indirect | 成都 | ✗ | - | 肯定有硬菜吧，你家那边过年吃什么？ |
+| city-weather | 城市 | indirect | 杭州 | ✓ | - | 杭州这雨真是没完没了，我这边也是。衣服只能靠烘干机了。 |
+| work-company | 工作 | direct | 星野科技 | ✓ | - | 星野科技啊，你做后端开发的嘛。 |
+| work-role | 工作 | direct | 后端 / 开发 | ✓ | - | 你不是在星野科技做后端开发嘛，晚风信箱那套 Node.js 也是你在弄。 |
+| work-indirect | 工作 | indirect | 星野 / 后端 | ✓ | - | 又评审啊，你们后端就你一个人扛，是真累。 |
+| pet-cat | 宠物 | direct | 团子 | ✓ | - | 团子啊，那只特别能吃的橘猫。 |
+| pet-cat-indirect | 宠物 | indirect | 团子 | ✓ | - | 哈哈，团子这破坏力真不一般。绿萝有毒的，你可得放高点。 |
+| pet-dog | 宠物 | indirect | 豆豆 / 柴犬 | ✓ | - | 豆豆是不是又赖着不走啊，早上时间紧确实容易赶。 |
+| project-name | 项目 | direct | 晚风信箱 | ✓ | - | 晚风信箱啊，给陌生人写信那个。 |
+| project-progress | 项目 | indirect | 晚风信箱 | ✗ | - | 登录和写信流程不是刚跑通嘛，又改啥了？别老熬到凌晨。 |
+| project-stack | 项目 | direct | 小程序 / Node | ✓ | - | 晚风信箱嘛，微信小程序加 Node.js 后端。 |
+| pref-coffee | 偏好 | indirect | 美式 | ✓ | - | 美式对吧，不加糖不加奶。 |
+| pref-food | 偏好 | indirect | 香菜 | ✓ | - | 好，香菜别放对吧。放心。 |
+| pref-music | 偏好 | indirect | 周杰伦 | ✓ | - | 周杰伦呗，这还能忘。想听哪首？ |
+| plan-travel | 计划 | indirect | 云南 | ✓ | - | 云南那边？不着急，你连半马都能练，攻略肯定搞得定。 |
+| plan-marathon | 计划 | indirect | 马拉松 / 半马 | ✓ | - | 离半马还有几周，别慌，跑不动就减点量。 |
+
+### 5.3 失败案例（3/20）
+
+| id | probe | 期望 | 实际回答 | 失败原因（人工判读） |
+| --- | --- | --- | --- | --- |
+| name-indirect | 今天开会被新来的实习生叫错名字，尴尬死了。 | 林哲 | 哈哈哈被叫成啥了？不至于比我被叫“小爱同学”还惨吧。 | 接住了「被叫错名字」的情绪，但没说出全名；回答还引入了自己的经历（人设允许，但不是记忆证据） |
+| city-hometown | 过年又要回去了，你猜我妈会做什么菜？ | 成都 | 肯定有硬菜吧，你家那边过年吃什么？ | 接住了「回家/妈妈/菜」，但没有说出「成都」；反问还把话题抛回去了 |
+| project-progress | 项目进度怎么样了？我昨天又改到凌晨。 | 晚风信箱 | 登录和写信流程不是刚跑通嘛，又改啥了？别老熬到凌晨。 | 明显记得项目细节，但没点出「晚风信箱」这个名字 |
+
+3 条都不是编造或答错，而是「没有把 expect 子串显式说出来」。这说明：
+
+- 当前 live 指标偏严格（子串级），会低估「她其实记得」的情况；
+- 另有 17 条回答明确带出了记忆（name/company/pet/project/coffee/food/music/travel/marathon 等），说明 facts 注入确实被模型消费了；
+- 间接回忆里，模型更倾向「顺着情绪接话」而不是「把事实点名」，这与她的人设目标（像真人聊天）并不冲突，但不能用严格的 `expect` 指标宣称「全都记得」。报告保留严格口径。
+
+### 5.4 违规表达统计
+
+| 模式 | 命中次数 | 说明 |
+| --- | ---: | --- |
+| 考我 | 0 | — |
+| 考考你 | 0 | — |
+| 查岗 | 0 | — |
+| 抽查 | 0 | — |
+| 我记性没那么差 | 0 | — |
+
+20 条里没有任何一条把她自己变成考官，也没有出现「我记性没那么差」这种防御式表达。这个结果只能说明**本次 20 条没有触发**，不能证明线上永不出现（样本小、prompt 是紧凑版而非完整人设）。
+
+## 6. 关键发现
+
+### 6.1 facts 层仍是间接回忆的主要兜底
+
+- T2 纯检索 recall@8 85%，已经能覆盖大多数直接问事实（8/8）；
+- 剩余 3 条 T2 漏召全部是间接回忆，facts 注入 100% 兜住；
+- anti-forget 场景里 T2 top1 是「我不知道」，正确记忆 rank 2，facts 层仍能兜住。
+
+结论不是「T2 没用」，而是：**T2 负责「像聊天一样想起细节」，facts 负责「不能忘的硬事实」；两者分开算，才能看出修复 FTS 后 T2 真的进步了、以及它仍然漏在哪。**
+
+### 6.2 FTS5 关键词路：从 0/20 到 20/20（评测期间修复）
+
+**修复前**（11:46，首轮离线）：
+
+- harness 诊断：20/20 条 probe 的 FTS5 候选数为 0；
+- 原因：`searchEpisodesByFts` 用 `tokenizeForFts(query)` 把整句中文逐字拆成 token，再以空格拼接进 FTS5 `MATCH`，FTS5 默认是 **AND**。自然问句（「你还记得我叫什么名字吗」）要求「你/还/记/得/我/叫/什/么/名/字/吗」每个字都出现在同一条记忆里，几乎不可能；
+- 影响：号称的「向量 + 关键词 RRF 混合」实际退化为 n-gram 单路。
+
+**修复**（工作区 `src/data/vector.ts`，由另一位 teammate 完成，非本次交付改动）：
+
+- token 去重后限制 48 个；
+- `MATCH` 表达式由空格（AND）改为 **OR**；
+- 由 BM25 的 IDF 排序，常见虚词权重自然降低，不必手工维护停用词表。
+
+**修复前后对照**（同一 gold、同一 harness）：
+
+| 指标 | 修复前（11:46） | 修复后（11:51） |
+| --- | ---: | ---: |
+| FTS 路有候选的 probe | 0.0% (0/20) | **100.0% (20/20)** |
+| T2 recall@1 | 20.0% (4/20) | **50.0% (10/20)** |
+| T2 recall@3 | 35.0% (7/20) | **75.0% (15/20)** |
+| T2 recall@8 | 40.0% (8/20) | **85.0% (17/20)** |
+| facts + T2 合并 | 100.0% (20/20) | 100.0% (20/20) |
+| live expect 命中 | 80.0%（16/20，两次） | **85.0%（17/20）** |
+
+这条链路说明 harness 的诊断指标（FTS 候选数）是有用的：它把「混合检索退化成单路」这种不会报错、只会悄悄掉召回的问题显式暴露了出来。修复后应把本报告 §4 的数字作为新基线。
+
+### 6.3 n-gram 噪声仍在，但影响缩小
+
+剩下的 3 条 T2 漏召里，top1 仍是无关记忆（马拉松、猫、名字），说明 `MIN_NGRAM_SIMILARITY=0.10` 附近的单字重叠噪声仍在。FTS OR 修复后，更多正确记忆进入候选，噪声被 BM25 排序部分压下去；但间接 probe 仍可能被无关记忆挤出 top8。后续可考虑：
+
+- 提高 n-gram 阈值或对 query 去停用词；
+- 用语义 embedding（有 Qwen Key 时）替代字面相似度；
+- 对 facts 已覆盖的硬事实，不必强求 T2 也召回（两层分工）。
+
+### 6.4 合并 100% 的可解释性与边界
+
+15 条事实全部在 `formatUserFacts` 的 20 行上限内，所以合并命中 100% 是「容量未触顶」的结果。如果事实超过 20 条：
+
+- `formatUserFacts` 会按分类顺序截断（profile → work → pet → relationship → plan → preference → other）；
+- 被截断的事实不会进入 prompt，合并命中率会下降；
+- **本次未测**，建议补一个 >20 事实的压力场景（TODO）。
+
+## 7. 局限与未完成项（TODO）
+
+| 项 | 状态 | 原因 / 后续 |
+| --- | --- | --- |
+| Qwen 语义 embedding 路径 | TODO | 本机未配置 Qwen Key；离线强制 ngram。有 Key 后需重跑 `retrieveRelevantMemoriesAsync` 并对比 recall |
+| 完整 pipeline / 人设六层 prompt | TODO | 本次 live 用紧凑 system prompt + facts/RAG，不跑 `processMessage`；绝对命中率不能直接等同线上 |
+| 样本量与置信区间 | TODO | live 20 条、单次运行、temperature=0.9；修复前后共 3 次运行，命中 16/16/17，未做多次平均 |
+| facts 注入 20 行上限压力 | TODO | 当前 15 条事实未触顶；需构造 >20 条事实测截断与优先级 |
+| FTS OR 的副作用 | TODO | OR + 48 token 上限可能让超长 probe 引入较多候选；当前 20 条未观察到明显噪声放大，需更大样本验证 |
+| 跨平台 | TODO | 本次只在 macOS + 仓库自带 Node 22 跑；CI 三平台未接该 live 评测（live 需要 Key） |
+| 「间接回忆」的判分 | 部分完成 | 严格子串命中会低估「用昵称/细节回答」；后续可加同义/别名表或 LLM judge，但本次不美化数字 |
+| 成本口径 | 已知下限 | live 的 `llm_usage` 只覆盖 `chat()` 主路径；本次全部走 `chat()`，20 条成本完整；旁路调用未涉及 |
+
+## 8. 交付文件与验证
+
+新增文件（未修改任何既有文件，未 git add/commit/push）：
+
+- `src/eval/memory-gold.json` — 20 条中文金标 case
+- `src/eval/memory-eval.ts` — `seedScenario` / `evaluateOffline` / anti-forget / `evaluateLive` / Markdown 输出
+- `src/eval/memory-eval.test.ts` — 4 条离线测试（金标校验、离线指标自洽、同进程重复可复现、live 无 Key 守卫）
+- `scripts/memory-eval.ts` — thin CLI（`--offline` 默认 / `--live` / `--json` / `--limit=` / `--keep-data`）
+- `docs/MEMORY_EVAL_REPORT.md` — 本报告
+
+验证快照（2026-10-20 11:52，后续 teammate 改动可能影响全仓数字）：
+
+```text
+src/eval/memory-eval.test.ts  5 passed
+全仓 vitest                   46 files / 539 tests passed
+tsc --noEmit                  0 errors
+```
+
+复现预期（离线，若数据层保持当前状态）：
+
+```text
+facts 100% / recall@1 50% / recall@3 75% / recall@8 85% / merged 100% / FTS候选 100%
+anti-forget PASS（denial rank 1，correct rank 2）
+```
+
+测试里的「可复现」断言不写死具体百分比，而是断言：
+
+1. 同进程连续两次 `evaluateOffline()` 的 metrics 完全相等；
+2. facts / merged 全覆盖、recall 单调不减、7 类齐全、anti-forget PASS；
+3. 临时目录被清理、env 被恢复、`fetch` 未被调用。
+
+这样即使后续数据层改动导致具体召回数字变化，测试仍能区分「实现回归」和「指标变化」；具体数字以 `--json` 输出和本报告为准。

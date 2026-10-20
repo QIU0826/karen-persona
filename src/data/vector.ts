@@ -265,7 +265,12 @@ function ftsDelete(database: Database.Database, id: number): void {
 
 /**
  * 中文 BM25 全文检索（返回匹配的 episode id，按 bm25 升序 = 越相关越靠前）。
- * 2 字词（咖啡/下雨/上海）与 ≥3 字词均可命中；查询词逐 token 加引号防注入 FTS 语法。
+ *
+ * 索引是「逐字空格 + unicode61」，所以查询也用逐字 token。关键点：token 之间用
+ * **OR** 而不是空格（FTS5 默认 AND）——自然问句（"我最近在做什么项目"）逐字 AND
+ * 要求每个字都出现在同一条记忆里，实测 20/20 条自然问句 FTS 命中为 0，FTS 路等于
+ * 白建。改 OR 后由 BM25 的 IDF 排序：命中越多/越稀有的字排越前，常见虚词权重低。
+ * token 去重并限制数量，避免超长问句生成过长 MATCH 表达式。
  */
 export function searchEpisodesByFts(
   queryText: string,
@@ -275,9 +280,9 @@ export function searchEpisodesByFts(
   const d = getVectorDb();
   if (!ftsAvailable) return [];
 
-  const tokens = tokenizeForFts(queryText).split(" ").filter(Boolean);
+  const tokens = [...new Set(tokenizeForFts(queryText).split(" ").filter(Boolean))].slice(0, 48);
   if (tokens.length === 0) return [];
-  const matchExpr = tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(" ");
+  const matchExpr = tokens.map((token) => `"${token.replace(/"/g, '""')}"`).join(" OR ");
 
   const excludeSources = opts?.excludeSources ?? [];
   const excludeClause =

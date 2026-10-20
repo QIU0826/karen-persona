@@ -12,6 +12,8 @@
  *   `/api/overview`     总览（人设/会话/记忆/关系/健康/今日成本）
  *   `/api/session`      最近会话消息（?limit=，默认 30，上限 100）
  *   `/api/memory`       最近 T2（无 query）或混合检索（?query=&limit=，默认 10，上限 20）
+ *   `/api/facts`        用户事实（?owner=，默认主用户 qq:2889386774；只读 user_facts）
+ *   `/api/memory-probe` 记忆命中回放（?q=&limit=，q 必填 1-200 字，limit 默认 8 上限 20）
  *   `/api/timeline`     关系时间线 / 里程碑 / herView / 情绪 / 漂移 / 叙事阶段
  *   `/api/health`       复用 obs/health-server 的探活数据（DB/WS/待补发/最近错误）
  *   `/api/cost`         今日 + 最近 7 天成本（复用 cost-tracker）
@@ -20,6 +22,8 @@
  * 手动验证：
  *   curl -s http://127.0.0.1:18082/ | head
  *   curl -s http://127.0.0.1:18082/api/overview
+ *   curl -s "http://127.0.0.1:18082/api/facts?owner=qq:2889386774"
+ *   curl -s "http://127.0.0.1:18082/api/memory-probe?q=%E4%B8%8B%E9%9B%A8&limit=3"
  *   curl -s -H "X-Web-Token: $WEB_TOKEN" http://127.0.0.1:18082/api/timeline
  */
 import http from "node:http";
@@ -30,12 +34,19 @@ import { createLogger } from "../obs/logger.js";
 import { renderDashboard, type DashboardData } from "./dashboard.js";
 import {
   composeOverview,
+  DEFAULT_FACTS_OWNER,
   getCostData,
   getHealthData,
+  getMemoryHitProbe,
   getOverview,
   getRecentMemories,
   getSessionData,
   getTimeline,
+  getUserFactsData,
+  MEMORY_PROBE_DEFAULT_LIMIT,
+  MEMORY_PROBE_MAX_LIMIT,
+  MEMORY_PROBE_MAX_QUERY_LENGTH,
+  MEMORY_PROBE_SAMPLE_QUERY,
   normalizeLimit,
   resolvePersonaContext,
   searchMemories,
@@ -179,6 +190,18 @@ function healthOptions(options: WebServerOptions): HealthDataSourceOptions {
   };
 }
 
+/**
+ * 校验 /api/facts 的 owner 参数（形如 `qq:2889386774` / `cli:local`）。
+ * 空值回退主用户；超长/格式非法返回 null → 路由层 400。
+ * SQL 全部参数化，这里只做输入面收缩，不拼 SQL。
+ */
+function normalizeFactsOwner(value: string | null): string | null {
+  const raw = (value ?? "").trim();
+  if (!raw) return DEFAULT_FACTS_OWNER;
+  if (raw.length > 80) return null;
+  return /^[a-zA-Z][a-zA-Z0-9_]{0,15}:[a-zA-Z0-9._@-]{1,64}$/.test(raw) ? raw : null;
+}
+
 function buildDashboardData(
   options: WebServerOptions,
   persona: WebPersonaContext,
@@ -186,11 +209,14 @@ function buildDashboardData(
   const override = personaOverride(options);
   const session = getSessionData(30, override);
   const memory = getRecentMemories(30, override);
+  const facts = getUserFactsData(DEFAULT_FACTS_OWNER);
+  // 首屏用示例 query 跑一次同步检索；页面内 JS 之后按输入框内容局部回放
+  const probe = getMemoryHitProbe(MEMORY_PROBE_SAMPLE_QUERY, MEMORY_PROBE_DEFAULT_LIMIT, override);
   const timeline = getTimeline(override, options.initialCloseness ?? 3);
   const health = getHealthData(healthOptions(options));
   const cost = getCostData(7);
   const overview = composeOverview(persona, { session, memory, timeline, health, cost });
-  return { overview, session, memory, timeline, health, cost };
+  return { overview, session, memory, facts, probe, timeline, health, cost };
 }
 
 // ── 路由 ────────────────────────────────────────
@@ -267,6 +293,33 @@ async function handleRequest(
         const limit = normalizeLimit(url.searchParams.get("limit"), 30);
         sendJson(res, 200, getRecentMemories(limit, override));
       }
+      return;
+    }
+
+    // 用户事实（只读 user_facts；owner 默认主用户，其他好友可用 ?owner= 查看）
+    if (pathname === "/api/facts") {
+      const owner = normalizeFactsOwner(url.searchParams.get("owner"));
+      if (owner === null) {
+        sendJson(res, 400, { ok: false, error: "invalid_owner" });
+        return;
+      }
+      sendJson(res, 200, getUserFactsData(owner));
+      return;
+    }
+
+    // 记忆命中回放（同步混合检索；q 必填 1-200 字）
+    if (pathname === "/api/memory-probe") {
+      const query = (url.searchParams.get("q") ?? "").trim();
+      if (query.length < 1 || query.length > MEMORY_PROBE_MAX_QUERY_LENGTH) {
+        sendJson(res, 400, { ok: false, error: "invalid_query" });
+        return;
+      }
+      const limit = normalizeLimit(
+        url.searchParams.get("limit"),
+        MEMORY_PROBE_DEFAULT_LIMIT,
+        MEMORY_PROBE_MAX_LIMIT,
+      );
+      sendJson(res, 200, getMemoryHitProbe(query, limit, override));
       return;
     }
 

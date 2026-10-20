@@ -40,7 +40,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
 | 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入已接线（双列，需 Qwen Key 实跑）；TTS/即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | ✅/🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF）**、sqlite-vec 真正启用（cosine + metadata 过滤）、双列 embedding（ngram / semantic 不混比）、schema v2 幂等迁移；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；**多用户隔离已实现**（owner=人设+用户+平台：主用户沿用历史文件/记忆，其他用户会话/状态按后缀隔离、T2 persona_id 带 `@owner` 后缀） |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 42 个测试文件 / 495 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai 测试），`tsc --noEmit` 0 错误，CI 已接入；仍缺真实 QQ 集成测试与覆盖率；eval 多为实验代码、无产品入口，历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 46 个测试文件 / 539 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入；**新增可复现记忆金标集**（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B 脚本（`src/eval/repetition-eval.ts`）；仍缺真实 QQ 集成测试与覆盖率；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -64,7 +64,7 @@ npm run setup      # 交互式配置向导
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + ubuntu/macOS/Windows 三平台矩阵 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 已收紧为 `>=22.12`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm test` 42 文件 / 495 用例通过（审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm test` 46 文件 / 539 用例通过（审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -90,16 +90,17 @@ npm run setup      # 交互式配置向导
 - **双管线对齐（2026-10-20 上午）**：QQ 私聊流式主路径补齐完整管线的状态演化步骤——因果链闯入/漂移、自我叙事弧线注入、纠正层、L1 弹性裁决/EMA 内心状态、动态风格参考、热点注入、T1 人格快照、因果链回响、纠正记录、herView 异步更新、`lastGate` 门控记录；冒烟实测流式回复正常且 T1/T2/成本数据落库。两份实现仍并存，后续可抽取共享 helper。
 - **宣传页（2026-10-20）**：`promo/index.html`（单文件、零构建、响应式）：首屏角色短视频 hero（桌面鼠标左右 scrub + 移动端交替自动播放，失败/减少动态时回退角色图）、黑色画廊面板（10 图错落布局、卡片随滚动缩放）＋ 白场 CTA；品牌/文案/图库/角色素材集中在 `CONFIG`，`/promo/` 由本机 Web 服务提供（含路径穿越防护）。角色素材由用户提供（AI 生成），已裁切去水印并去音轨（视频 720×840、图片 1535×2412），说明见 `promo/README.md`。测试 +1（宣传页路由/素材/穿越防护）。
 - **用户事实记忆 + 去 AI 味（2026-10-20）**：新增 `src/data/user-facts.ts`——后台 LLM 抽取「对方明确说过的稳定事实」（名字/城市/工作/项目/宠物/偏好/计划），SQLite `user_facts` 按 owner 隔离，每轮注入「你确定记得的关于对方的事」，解决 T2 检索漏召/自我强化遗忘；prompt 增加反套话、反「考我/抽查」、反编造往事、限制自我分析、禁逗号结尾规则；burst/流式分条去掉尾部软标点并压缩空行，删除重复的 shortTermContext 注入；实测「5 轮前的项目」从答不出变为答对。详见 [docs/MEMORY_AI_TONE_AUDIT.md](docs/MEMORY_AI_TONE_AUDIT.md)。
+- **记忆评测 + 反重复 + 检索修复（2026-10-20）**：新增 `src/eval/memory-gold.json`（20 条中文金标集）+ `src/eval/memory-eval.ts` + `scripts/memory-eval.ts`（离线 recall@k / facts 命中 / anti-forget；`--live` 真实模型验证，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）；新增 `src/persona/anti-repetition.ts` 跨轮反重复（默认 openers 模式，A/B 脚本 `src/eval/repetition-eval.ts`；**实测回放整句反而诱发模型照抄，故默认只注入开头词**）；修复 `searchEpisodesByFts` FTS5 查询隐式 AND 导致自然问句 0 命中（改 OR + BM25 IDF，T2 recall@8 40%→85%）；补上流式（QQ 私聊）路径此前遗漏的用户事实注入；Web 控制台新增「用户事实」「记忆命中回放」两个只读面板（`/api/facts`、`/api/memory-probe`）。测试 46 文件 / 539 用例。
 - **问题记录**：真机联调问题与修复清单见 [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md)。
 
 ### 已知问题（M0 之后继续修）
 
 - 双管线行为已对齐（QQ 流式主路径补齐叙事/风格/因果链/T1/herView 等），但代码仍是两份实现，后续可抽取共享 helper 降低漂移风险
-- Web 控制台仍只读取主用户（历史文件）数据；多用户下其他好友不展示（本地控制台为单机运维工具，商业多租户 UI 属 M3）
+- Web 控制台默认只展示主用户数据；`/api/facts?owner=` 可只读查看其他 owner，但页面本身仍按主用户（本地控制台为单机运维工具，商业多租户 UI 属 M3）
 - 群聊与私聊共用一个用户 state（同一 QQ 用户在群/私聊的上下文共享），如需严格分开可后续加 platform 维度
 - 主动消息：M0 已加单日上限 4 条、两次最小间隔 30 分钟、连续沉默 3 次强制回复；仍无免打扰/暂停开关（M1-4）
 - 语义检索需配置 Qwen Key（`QWEN_VL_API_KEY`）才能生效；无 Key 时为 n-gram + FTS5 BM25 混合；阈值待真实 Key + 标注集标定
-- 记忆仍缺：跨轮回复去重、T1 快照注入、T3 压缩（线上 0 条）、事实冲突消解、记忆召回时间感、记忆评测金标集（见 docs/MEMORY_AI_TONE_AUDIT.md §6）
+- 记忆仍缺：T1 快照注入、T3 压缩（线上 0 条）、事实冲突消解、记忆召回时间感、语义级重复检测（词法反重复已做）；语义检索需 Qwen Key（见 docs/MEMORY_AI_TONE_AUDIT.md §6）
 - 用户事实抽取是旁路 LLM 调用，未计入成本统计（`cost_today` 为下限）
 - 主动消息/夜间补发仍需真机长跑验证
 - 成本统计仅覆盖 chat/chatStream 主路径；旁路 LLM（独白/T3/视觉等）未计入，`cost_today` 是下限

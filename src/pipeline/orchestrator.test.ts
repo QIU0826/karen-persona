@@ -12,9 +12,19 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+/** 捕获 LLM 调用参数，用于断言 prompt 里注入了什么（不真正发请求） */
+const captured = vi.hoisted(() => ({
+  chatCalls: [] as Array<Array<{ role: string; content: string }>>,
+  chatStreamCalls: [] as Array<Array<{ role: string; content: string }>>,
+}));
+
 vi.mock("../ai/chat.js", () => ({
-  chat: vi.fn(async () => "嗯。"),
-  chatStream: async function* () {
+  chat: vi.fn(async (messages: Array<{ role: string; content: string }>) => {
+    captured.chatCalls.push(messages);
+    return "嗯。";
+  }),
+  chatStream: async function* (messages: Array<{ role: string; content: string }>) {
+    captured.chatStreamCalls.push(messages);
     yield "嗯";
   },
 }));
@@ -132,5 +142,80 @@ describe("M1-1/M1-2 重启恢复与关系成长", () => {
     expect(state2.persona.relationship.closeness).toBeCloseTo(3.5, 2);
     expect(state2.emotionState.vector).toBeCloseTo(0.42, 2);
     expect(state2.relationshipState.milestones.map((m) => m.id)).toContain("getting-familiar");
+  });
+});
+
+describe("跨轮反重复与用户事实注入", () => {
+  const makeConfig = (): import("../data/store.js").AppConfig => ({
+    persona: "xiaoya",
+    her_name: "小雅",
+    your_name: "你",
+    location: "上海",
+    tags: [],
+    message_frequency_limit: 10,
+    log_level: "info",
+  });
+
+  /** 造两轮「连续同开头」的历史，触发反重复点名 */
+  function seedRecentAssistantMessages(
+    state: import("./orchestrator.js").ConversationState,
+  ): void {
+    state.session.messages.push(
+      { role: "assistant", content: "哈哈是吗 我记性不太行", timestamp: Date.now() - 60_000 },
+      { role: "assistant", content: "哈哈真的假的", timestamp: Date.now() - 30_000 },
+    );
+  }
+
+  it("processMessage 注入最近回复提醒与用户事实", async () => {
+    const { loadPersona } = await import("../persona/loader.js");
+    const { initConversation, processMessage } = await import("./orchestrator.js");
+    const { upsertUserFacts } = await import("../data/user-facts.js");
+
+    const persona = await loadPersona("xiaoya");
+    const state = await initConversation(persona, makeConfig());
+    seedRecentAssistantMessages(state);
+    upsertUserFacts(state.owner, [
+      { key: "job", value: "在嘉兴做咖啡店", category: "work" },
+    ]);
+    captured.chatCalls.length = 0;
+
+    await processMessage(state, "我今天好累", { bypassGate: true });
+
+    const call = captured.chatCalls.find((messages) =>
+      messages[0]?.content.includes("避免重复自己"),
+    );
+    expect(call).toBeTruthy();
+    const system = call![0].content;
+    // 默认 openers 模式：只提醒开头，不回放整句（避免模型照抄）
+    expect(system).toContain("这个开头你最近连着用了");
+    expect(system).not.toContain("哈哈是吗 我记性不太行");
+    expect(system).toContain("在嘉兴做咖啡店");
+  });
+
+  it("processMessageStream 也注入用户事实与反重复块（QQ 私聊主路径）", async () => {
+    const { loadPersona } = await import("../persona/loader.js");
+    const { initConversation, processMessageStream } = await import("./orchestrator.js");
+    const { upsertUserFacts } = await import("../data/user-facts.js");
+
+    const persona = await loadPersona("xiaoya");
+    const state = await initConversation(persona, makeConfig());
+    seedRecentAssistantMessages(state);
+    upsertUserFacts(state.owner, [
+      { key: "job", value: "在嘉兴做咖啡店", category: "work" },
+    ]);
+    captured.chatStreamCalls.length = 0;
+
+    for await (const _fragment of processMessageStream(state, "在干嘛", { bypassGate: true })) {
+      // 消费完整个流，确保 prompt 已构建
+    }
+
+    const call = captured.chatStreamCalls.find((messages) =>
+      messages[0]?.content.includes("避免重复自己"),
+    );
+    expect(call).toBeTruthy();
+    const system = call![0].content;
+    expect(system).toContain("你确定记得的关于对方的事");
+    expect(system).toContain("在嘉兴做咖啡店");
+    expect(system).toContain("这个开头你最近连着用了");
   });
 });

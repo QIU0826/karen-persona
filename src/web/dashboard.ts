@@ -12,6 +12,8 @@
 import type {
   CostData,
   HealthData,
+  MemoryHit,
+  MemoryHitProbeData,
   MemoryItem,
   MemoryListData,
   OverviewData,
@@ -20,8 +22,11 @@ import type {
   TimelineData,
   TimelineEvent,
   TimelineMilestone,
+  UserFactItem,
+  UserFactsData,
   WebPersonaContext,
 } from "./data.js";
+import { FACT_CATEGORY_LABELS, FACT_CATEGORY_ORDER, MEMORY_PROBE_SAMPLE_QUERY } from "./data.js";
 import { formatLocalTime } from "../evolution/journal-view.js";
 
 /** HTML 转义（服务端首屏渲染用）。 */
@@ -52,6 +57,10 @@ export interface DashboardData {
   overview: OverviewData;
   session: SessionData;
   memory: MemoryListData;
+  /** 用户事实（只读 user_facts，按分类分组展示）。 */
+  facts: UserFactsData;
+  /** 记忆命中回放首屏（示例 query 的同步检索结果）。 */
+  probe: MemoryHitProbeData;
   timeline: TimelineData;
   health: HealthData;
   cost: CostData;
@@ -69,6 +78,13 @@ function num(value: unknown, digits: number = 2): string {
 function pct(value: unknown): number {
   const n = typeof value === "number" && Number.isFinite(value) ? value : 0;
   return Math.max(0, Math.min(100, Math.round(n * 100)));
+}
+
+/** 截断长文本（回放列表只展示摘要，完整内容留在记忆列表里）。 */
+function truncateText(value: unknown, max: number = 160): string {
+  const text = value === null || value === undefined ? "" : String(value);
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1))}…`;
 }
 
 function deltaText(value: number): string {
@@ -155,9 +171,127 @@ function renderMemoryItems(items: MemoryItem[]): string {
     .join("");
 }
 
-function renderMemory(memory: MemoryListData): string {
+interface FactGroup {
+  category: string;
+  label: string;
+  items: UserFactItem[];
+}
+
+/** 按 category 分组（已知分类按固定顺序，未知分类排在「其他」之后）。 */
+function groupFactsByCategory(items: UserFactItem[]): FactGroup[] {
+  const buckets = new Map<string, UserFactItem[]>();
+  for (const item of items) {
+    const category = item.category in FACT_CATEGORY_LABELS ? item.category : "other";
+    const bucket = buckets.get(category);
+    if (bucket) bucket.push(item);
+    else buckets.set(category, [item]);
+  }
+  const known = FACT_CATEGORY_ORDER.filter((category) => buckets.has(category));
+  const unknown = [...buckets.keys()]
+    .filter((category) => !(category in FACT_CATEGORY_LABELS))
+    .sort();
+  return [...known, ...unknown].map((category) => ({
+    category,
+    label: FACT_CATEGORY_LABELS[category] ?? FACT_CATEGORY_LABELS.other,
+    items: buckets.get(category) ?? [],
+  }));
+}
+
+function renderFactRows(items: UserFactItem[]): string {
+  return items
+    .map(
+      (item: UserFactItem) =>
+        `<div class="fact-row">` +
+        `<span class="fact-key">${escapeHtml(item.key)}</span>` +
+        `<span class="fact-value">${escapeHtml(item.value)}</span>` +
+        `<span class="muted small fact-time">${escapeHtml(time(item.updatedAt))}</span>` +
+        `</div>`,
+    )
+    .join("");
+}
+
+/** 用户事实卡片：按分类分组展示 key / value / updated_at，空态给中文说明。 */
+function renderFacts(facts: UserFactsData): string {
+  const groups = groupFactsByCategory(facts.items);
+  const body =
+    facts.items.length === 0
+      ? `<p class="empty">还没有关于你的用户事实。多聊几句，等她记住了你的名字、工作或喜好，这里会慢慢长出来。</p>`
+      : groups
+          .map(
+            (group: FactGroup) =>
+              `<h3>${escapeHtml(group.label)}` +
+              `<span class="muted small fact-count">${fmtInt(group.items.length)} 条</span></h3>` +
+              renderFactRows(group.items),
+          )
+          .join("");
+  return (
+    `<div class="card" id="facts-card">` +
+    `<div class="card-head"><h2>用户事实</h2><span class="muted small" id="facts-status">` +
+    `${fmtInt(facts.count)} 条 · ${escapeHtml(facts.owner)}</span></div>` +
+    `<div id="facts-list">${body}</div>` +
+    `</div>`
+  );
+}
+
+function confidenceClass(confidence: MemoryHit["confidence"]): string {
+  if (confidence === "high") return "chip ok";
+  if (confidence === "medium") return "chip warn";
+  return "chip";
+}
+
+function renderProbeHits(hits: MemoryHit[]): string {
+  if (hits.length === 0) {
+    return `<p class="empty">没有命中任何记忆。换一个关键词试试——回放只读取本地记忆，不会修改数据。</p>`;
+  }
+  return hits
+    .map(
+      (hit: MemoryHit) =>
+        `<div class="item">` +
+        `<div class="item-head">` +
+        `<span class="${confidenceClass(hit.confidence)}">${escapeHtml(hit.confidence_label)}</span>` +
+        `<span class="chip">${escapeHtml(hit.source_label)}</span>` +
+        `<span class="muted small">相关度 ${pct(hit.relevance)}%</span>` +
+        `</div>` +
+        `<div class="item-body">${escapeHtml(truncateText(hit.content))}</div>` +
+        `<div class="bar probe-bar"><i style="width:${pct(hit.relevance)}%"></i></div>` +
+        `</div>`,
+    )
+    .join("");
+}
+
+/**
+ * 记忆命中回放卡片：输入关键词 → /api/memory-probe → 展示命中内容/置信度/相关度。
+ * 首屏先渲染示例 query 的结果（服务端已查好），之后由内联 JS 局部刷新。
+ */
+function renderMemoryProbe(probe: MemoryHitProbeData): string {
+  const query = probe.query || MEMORY_PROBE_SAMPLE_QUERY;
+  const status =
+    probe.hits.length > 0
+      ? `回放「${query}」命中 ${fmtInt(probe.hits.length)} 条`
+      : `回放「${query}」没有命中记忆`;
+  return (
+    `<div class="card" id="memory-probe-card">` +
+    `<div class="card-head"><h2>记忆命中回放</h2>` +
+    `<span class="muted small" id="probe-status">${escapeHtml(status)}</span></div>` +
+    `<p class="muted small">看看这句话会让她想起哪些记忆——只读回放，不会写入记忆。</p>` +
+    `<form class="search-row" id="probe-form">` +
+    `<input id="probe-query" type="search" value="${escapeHtml(query)}" ` +
+    `placeholder="输入关键词，例如：下雨 / 咖啡 / 加班" autocomplete="off" maxlength="200">` +
+    `<button class="btn primary" type="submit">回放</button>` +
+    `</form>` +
+    `<div class="item-list" id="probe-list">${renderProbeHits(probe.hits)}</div>` +
+    `</div>`
+  );
+}
+
+function renderMemory(
+  memory: MemoryListData,
+  facts: UserFactsData,
+  probe: MemoryHitProbeData,
+): string {
   return (
     `<section class="panel" id="panel-memory" data-panel="memory">` +
+    renderFacts(facts) +
     `<div class="card">` +
     `<div class="card-head"><h2>记忆</h2><span class="muted small" id="memory-status">` +
     `共 ${fmtInt(memory.total)} 条记忆（显示最近 ${fmtInt(memory.items.length)} 条）</span></div>` +
@@ -167,6 +301,7 @@ function renderMemory(memory: MemoryListData): string {
     `</form>` +
     `<div class="item-list" id="memory-list">${renderMemoryItems(memory.items)}</div>` +
     `</div>` +
+    renderMemoryProbe(probe) +
     `</section>`
   );
 }
@@ -283,6 +418,20 @@ h3 { font-size: 13px; margin: 14px 0 8px; color: var(--muted); font-weight: 600;
 .item.compact { padding: 8px 12px; }
 .item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
 .item-body { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; font-size: 14.5px; }
+.fact-row {
+  display: grid; grid-template-columns: minmax(64px, 120px) minmax(0, 1fr) auto;
+  gap: 10px; align-items: baseline; padding: 7px 0;
+  border-bottom: 1px dashed rgba(255,255,255,.05); font-size: 14px;
+}
+.fact-row:last-child { border-bottom: 0; }
+.fact-key {
+  color: var(--accent2); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px; word-break: break-all;
+}
+.fact-value { word-break: break-word; overflow-wrap: anywhere; }
+.fact-time { white-space: nowrap; }
+.fact-count { margin-left: 8px; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.probe-bar { margin: 7px 0 0; max-width: none; height: 5px; }
 .chip {
   display: inline-block; padding: 1px 9px; border-radius: 999px; background: var(--chip);
   color: var(--accent2); font-size: 12px; border: 1px solid transparent;
@@ -329,6 +478,10 @@ blockquote { margin: 6px 0 8px; padding: 2px 0 2px 14px; border-left: 3px solid 
   .cost-row { grid-template-columns: 38px 1fr 70px; }
   .cost-row .muted { display: none; }
   .stat { font-size: 26px; }
+  .fact-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "key time" "value value"; row-gap: 2px; }
+  .fact-key { grid-area: key; }
+  .fact-value { grid-area: value; }
+  .fact-time { grid-area: time; }
 }
 `;
 
@@ -339,6 +492,8 @@ const CLIENT_JS = `
   var BOOT = window.__KAREN_BOOT__ || {};
   var PANELS = ["chat", "memory", "timeline", "status"];
   var REFRESH_MS = 5000;
+  var FACT_LABELS = BOOT.fact_labels || { profile: "基本信息", work: "工作", pet: "宠物", relationship: "关系", plan: "最近计划", preference: "偏好", other: "其他" };
+  var FACT_ORDER = ["profile", "work", "pet", "relationship", "plan", "preference", "other"];
   var view = { paused: false, memorySearchActive: false, herName: BOOT.persona_name || "她" };
 
   function $(id) { return document.getElementById(id); }
@@ -364,6 +519,10 @@ const CLIENT_JS = `
   function pct(value) {
     var n = Math.round(Number(value || 0) * 100);
     return Math.max(0, Math.min(100, n)) + "%";
+  }
+  function truncateText(value) {
+    var text = String(value === null || value === undefined ? "" : value);
+    return text.length > 160 ? text.slice(0, 159) + "…" : text;
   }
   function deltaText(value) {
     var n = Number(value || 0);
@@ -459,6 +618,90 @@ const CLIENT_JS = `
         ? "搜索「" + data.query + "」找到 " + fmtInt(data.items.length) + " 条"
         : "共 " + fmtInt(data.total) + " 条记忆（显示最近 " + fmtInt(data.items.length) + " 条）";
     }
+  }
+
+  function renderFacts(data) {
+    var list = $("facts-list");
+    if (!list) return;
+    var items = data.items || [];
+    if (items.length === 0) {
+      list.innerHTML = '<p class="empty">还没有关于你的用户事实。多聊几句，等她记住了你的名字、工作或喜好，这里会慢慢长出来。</p>';
+    } else {
+      var buckets = {};
+      for (var i = 0; i < items.length; i++) {
+        var category = FACT_LABELS[items[i].category] ? items[i].category : "other";
+        (buckets[category] = buckets[category] || []).push(items[i]);
+      }
+      var order = FACT_ORDER.filter(function (key) { return buckets[key]; });
+      Object.keys(buckets).sort().forEach(function (key) {
+        if (FACT_ORDER.indexOf(key) < 0) order.push(key);
+      });
+      list.innerHTML = order.map(function (key) {
+        var rows = buckets[key].map(function (item) {
+          return '<div class="fact-row">' +
+            '<span class="fact-key">' + esc(item.key) + "</span>" +
+            '<span class="fact-value">' + esc(item.value) + "</span>" +
+            '<span class="muted small fact-time">' + esc(fmtTime(item.updatedAt)) + "</span>" +
+            "</div>";
+        }).join("");
+        return "<h3>" + esc(FACT_LABELS[key] || "其他") +
+          '<span class="muted small fact-count">' + fmtInt(buckets[key].length) + " 条</span></h3>" + rows;
+      }).join("");
+    }
+    var status = $("facts-status");
+    if (status) status.textContent = fmtInt(data.count) + " 条 · " + (data.owner || "");
+  }
+
+  function confidenceClass(confidence) {
+    if (confidence === "high") return "chip ok";
+    if (confidence === "medium") return "chip warn";
+    return "chip";
+  }
+
+  function probeItemHtml(hit) {
+    return '<div class="item"><div class="item-head">' +
+      '<span class="' + confidenceClass(hit.confidence) + '">' + esc(hit.confidence_label || "相关") + "</span>" +
+      '<span class="chip">' + esc(hit.source_label) + "</span>" +
+      '<span class="muted small">相关度 ' + pct(hit.relevance) + "</span>" +
+      "</div>" +
+      '<div class="item-body">' + esc(truncateText(hit.content)) + "</div>" +
+      '<div class="bar probe-bar"><i style="width:' + pct(hit.relevance) + '%"></i></div>' +
+      "</div>";
+  }
+
+  function renderProbe(data) {
+    var list = $("probe-list");
+    var status = $("probe-status");
+    if (!list) return;
+    var hits = data.hits || [];
+    if (hits.length === 0) {
+      list.innerHTML = '<p class="empty">没有命中任何记忆。换一个关键词试试——回放只读取本地记忆，不会修改数据。</p>';
+    } else {
+      list.innerHTML = hits.map(probeItemHtml).join("");
+    }
+    if (status) status.textContent = "回放「" + data.query + "」命中 " + fmtInt(hits.length) + " 条";
+  }
+
+  function onProbe(event) {
+    if (event) event.preventDefault();
+    var input = $("probe-query");
+    if (!input) return;
+    var query = input.value.trim();
+    var statusEl = $("probe-status");
+    if (!query) {
+      if (statusEl) statusEl.textContent = "请输入要回放的关键词。";
+      return;
+    }
+    if (query.length > 200) {
+      if (statusEl) statusEl.textContent = "关键词太长（最多 200 字）。";
+      return;
+    }
+    if (statusEl) statusEl.textContent = "回放中…";
+    fetchJson("/api/memory-probe?q=" + encodeURIComponent(query) + "&limit=8")
+      .then(renderProbe)
+      .catch(function () {
+        if (statusEl) statusEl.textContent = "回放失败，请稍后重试。";
+      });
   }
 
   function renderTimeline(data) {
@@ -573,7 +816,7 @@ const CLIENT_JS = `
   }
 
   function refresh() {
-    var paths = ["/api/overview", "/api/session?limit=30", "/api/memory?limit=30", "/api/timeline", "/api/health", "/api/cost"];
+    var paths = ["/api/overview", "/api/session?limit=30", "/api/memory?limit=30", "/api/timeline", "/api/health", "/api/cost", "/api/facts"];
     return Promise.allSettled(paths.map(fetchJson)).then(function (results) {
       var okCount = results.filter(function (result) { return result.status === "fulfilled"; }).length;
       setConn(okCount > 0);
@@ -584,6 +827,7 @@ const CLIENT_JS = `
       var timeline = value(3);
       var health = value(4);
       var cost = value(5);
+      var facts = value(6);
       if (overview) {
         view.herName = (overview.persona && overview.persona.name) || view.herName;
         var personaEl = $("persona-name");
@@ -596,6 +840,7 @@ const CLIENT_JS = `
           else { conn.textContent = "在线"; conn.className = "chip online"; }
         }
       }
+      if (facts) renderFacts(facts);
       if (session) renderChat(session);
       if (memory && !view.memorySearchActive) renderMemoryList(memory);
       if (timeline) renderTimeline(timeline);
@@ -638,6 +883,8 @@ const CLIENT_JS = `
     }
     var form = $("memory-form");
     if (form) form.addEventListener("submit", onMemorySearch);
+    var probeForm = $("probe-form");
+    if (probeForm) probeForm.addEventListener("submit", onProbe);
     var toggle = $("refresh-toggle");
     if (toggle) {
       toggle.addEventListener("click", function () {
@@ -666,11 +913,12 @@ const CLIENT_JS = `
 
 /** 渲染整个控制台页面（服务端首屏 + 内联样式/脚本）。 */
 export function renderDashboard(data: DashboardData): string {
-  const { overview, session, memory, timeline, health, cost } = data;
+  const { overview, session, memory, facts, probe, timeline, health, cost } = data;
   const herName = personaName(overview.persona);
   const boot = {
     generated_at: overview.generated_at,
     persona_name: herName,
+    fact_labels: FACT_CATEGORY_LABELS,
   };
   return (
     `<!DOCTYPE html>` +
@@ -701,7 +949,7 @@ export function renderDashboard(data: DashboardData): string {
     `<button class="tab" type="button" data-view="status">状态</button>` +
     `</nav>` +
     renderChat(session, herName) +
-    renderMemory(memory) +
+    renderMemory(memory, facts, probe) +
     `<section class="panel" id="panel-timeline" data-panel="timeline">` +
     `<div id="timeline-hero">${renderTimelineHero(timeline)}</div>` +
     `<div class="card"><div class="card-head"><h2>她眼中的你</h2></div><div id="her-view">${renderHerView(timeline)}</div></div>` +

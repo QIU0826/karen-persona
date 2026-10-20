@@ -12,10 +12,12 @@ import { escapeHtml, escapeJsonForScript, renderDashboard } from "./dashboard.js
 import type {
   CostData,
   HealthData,
+  MemoryHitProbeData,
   MemoryListData,
   OverviewData,
   SessionData,
   TimelineData,
+  UserFactsData,
 } from "./data.js";
 
 function overviewFixture(): OverviewData {
@@ -170,11 +172,48 @@ function costFixture(): CostData {
   };
 }
 
+function factsFixture(): UserFactsData {
+  return {
+    ok: true,
+    generated_at: "2026-10-19T12:00:00.000Z",
+    owner: "qq:2889386774",
+    count: 2,
+    items: [
+      { key: "name", value: "林哲", category: "profile", updatedAt: "2026-10-19T10:00:00.000Z" },
+      { key: "pet", value: "一只叫团子的猫", category: "pet", updatedAt: "2026-10-18T09:00:00.000Z" },
+    ],
+    categories: { profile: 1, pet: 1 },
+  };
+}
+
+function probeFixture(): MemoryHitProbeData {
+  return {
+    ok: true,
+    generated_at: "2026-10-19T12:00:00.000Z",
+    persona: { id: "xiaoya", name: "小雅" },
+    query: "下雨天",
+    limit: 8,
+    hits: [
+      {
+        id: 2,
+        content: "[对话] 用户: 用户说喜欢下雨天 | 回复: 嗯，我也喜欢下雨。",
+        relevance: 0.82,
+        confidence: "high",
+        confidence_label: "高相关",
+        source: "chat",
+        source_label: "对话",
+      },
+    ],
+  };
+}
+
 function renderFixture(overrides: Partial<Parameters<typeof renderDashboard>[0]> = {}): string {
   const base = {
     overview: overviewFixture(),
     session: sessionFixture(),
     memory: memoryFixture(),
+    facts: factsFixture(),
+    probe: probeFixture(),
     timeline: timelineFixture(),
     health: healthFixture(),
     cost: costFixture(),
@@ -233,22 +272,65 @@ describe("renderDashboard 首屏", () => {
     expect(html).toContain("deepseek-flash");
   });
 
+  it("用户事实按 category 分组展示 key/value/updated_at", () => {
+    const html = renderFixture();
+    expect(html).toContain('id="facts-card"');
+    expect(html).toContain("用户事实");
+    expect(html).toContain("基本信息");
+    expect(html).toContain("宠物");
+    expect(html).toContain("name");
+    expect(html).toContain("林哲");
+    expect(html).toContain("一只叫团子的猫");
+    expect(html).toContain("qq:2889386774");
+    // 事实卡片放在记忆区上方，命中回放在记忆列表下方
+    expect(html.indexOf('id="facts-card"')).toBeLessThan(html.indexOf('id="memory-form"'));
+    expect(html.indexOf('id="memory-list"')).toBeLessThan(html.indexOf('id="memory-probe-card"'));
+  });
+
+  it("记忆命中回放展示 content 截断、confidence 徽标与 relevance 进度条", () => {
+    const probe = probeFixture();
+    const longContent = `下雨天的对话 ${"很长的记忆内容".repeat(30)}`;
+    probe.hits[0].content = longContent;
+    probe.hits[0].relevance = 0.82;
+    const html = renderFixture({ probe });
+
+    expect(html).toContain('id="memory-probe-card"');
+    expect(html).toContain("记忆命中回放");
+    expect(html).toContain('id="probe-form"');
+    expect(html).toContain('id="probe-query"');
+    expect(html).toContain('value="下雨天"');
+    expect(html).toContain("高相关");
+    expect(html).toContain("相关度 82%");
+    expect(html).toContain("width:82%");
+    // content 截断显示（完整内容不出现，只保留前 159 字 + 省略号）
+    expect(html).not.toContain(longContent);
+    expect(html).toContain(`${longContent.slice(0, 159)}…`);
+    expect(html).toContain("回放「下雨天」命中 1 条");
+  });
+
   it("用户内容全部 HTML 转义（XSS）", () => {
     const payload = '<script>alert("xss")</script><img src=x onerror=alert(1)>';
     const session = sessionFixture();
     session.messages[0].content = payload;
     const memory = memoryFixture();
     memory.items[0].content = payload;
+    const facts = factsFixture();
+    facts.items[1].value = payload;
+    const probe = probeFixture();
+    probe.hits[0].content = payload;
     const timeline = timelineFixture();
     timeline.her_view.current = payload;
     const overview = overviewFixture();
     overview.persona.name = payload;
-    const html = renderFixture({ session, memory, timeline, overview });
+    const html = renderFixture({ session, memory, facts, probe, timeline, overview });
     expect(html).not.toContain(payload);
     expect(html).not.toContain('<script>alert("xss")</script>');
     expect(html).not.toContain("<img src=x");
     expect(html).toContain("&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;");
     expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    // 事实与命中回放两个新面板同样转义（出现至少两次：事实 value + 回放 content）
+    const escaped = html.split("&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;").length - 1;
+    expect(escaped).toBeGreaterThanOrEqual(4);
   });
 
   it("内联脚本语法有效（防止字符串转义破坏页面 JS）", () => {
@@ -261,13 +343,19 @@ describe("renderDashboard 首屏", () => {
     }
   });
 
-  it("空数据（无会话/无记忆/无状态）不崩且有友好提示", () => {
+  it("空数据（无会话/无记忆/无事实/无命中/无状态）不崩且有友好提示", () => {
     const session = sessionFixture();
     session.messages = [];
     session.total = 0;
     const memory = memoryFixture();
     memory.items = [];
     memory.total = 0;
+    const facts = factsFixture();
+    facts.items = [];
+    facts.count = 0;
+    facts.categories = {};
+    const probe = probeFixture();
+    probe.hits = [];
     const timeline = timelineFixture();
     timeline.has_state = false;
     timeline.state_saved_at = null;
@@ -278,9 +366,11 @@ describe("renderDashboard 首屏", () => {
     timeline.guilt = null;
     timeline.drift = null;
     timeline.narrative = null;
-    const html = renderFixture({ session, memory, timeline });
+    const html = renderFixture({ session, memory, facts, probe, timeline });
     expect(html).toContain("还没有聊天记录");
     expect(html).toContain("还没有记忆");
+    expect(html).toContain("还没有关于你的用户事实");
+    expect(html).toContain("没有命中任何记忆");
     expect(html).toContain("她还没把对你的看法写下来");
     expect(html).toContain("还没有里程碑");
     expect(html).toContain("还没有演化状态");

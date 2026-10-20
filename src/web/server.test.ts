@@ -2,8 +2,10 @@
  * Web 控制台服务端测试（步骤 5）。
  *
  * 使用 KAREN_DATA_DIR 临时目录 + 随机空闲端口，通过真实 HTTP 请求断言：
- * 鉴权（401 / token query+header）、页面 200 DOM、6 个 API 字段、404/405、CSP 等安全头、
- * 127.0.0.1 绑定、端口 0/冲突容错；以及 data helpers 的 JSON 结构。
+ * 鉴权（401 / token query+header）、页面 200 DOM（含用户事实/记忆回放卡片）、
+ * 8 个 API 字段（overview/session/memory/facts/memory-probe/timeline/health/cost）、
+ * 404/405、q/owner 参数校验、CSP 等安全头、127.0.0.1 绑定、端口 0/冲突容错；
+ * 以及 data helpers 的 JSON 结构。
  * 全程不联网（无 Qwen Key 时检索自动走本地 n-gram + FTS5），不触碰仓库根 data/。
  */
 import fs from "node:fs";
@@ -77,9 +79,10 @@ async function loadCore() {
   const cost = await import("../obs/cost-tracker.js");
   const relationship = await import("../persona/relationship.js");
   const retriever = await import("../data/retriever.js");
+  const userFacts = await import("../data/user-facts.js");
   const logger = await import("../obs/logger.js");
   vectorModule = vector;
-  return { server, data, vector, history, stateStore, cost, relationship, retriever, logger };
+  return { server, data, vector, history, stateStore, cost, relationship, retriever, userFacts, logger };
 }
 
 type Core = Awaited<ReturnType<typeof loadCore>>;
@@ -135,6 +138,12 @@ function seed(core: Core): void {
     completionTokens: 500,
     cachedTokens: 300,
   });
+
+  // 用户事实（主用户 qq:2889386774；用于 /api/facts 与页面用户事实卡片）
+  core.userFacts.upsertUserFacts(core.data.DEFAULT_FACTS_OWNER, [
+    { key: "name", value: "林哲", category: "profile" },
+    { key: "pet", value: "一只叫团子的猫", category: "pet" },
+  ]);
 }
 
 function getFreePort(): Promise<number> {
@@ -276,12 +285,22 @@ describe("页面与安全头", () => {
     const page = await request(port, "/");
     expect(page.status).toBe(200);
     expect(page.headers.get("content-type")).toContain("text/html");
-    for (const id of ["panel-chat", "panel-memory", "panel-timeline", "panel-status"]) {
+    for (const id of [
+      "panel-chat",
+      "panel-memory",
+      "panel-timeline",
+      "panel-status",
+      "facts-card",
+      "memory-probe-card",
+    ]) {
       expect(page.text).toContain(`id="${id}"`);
     }
-    for (const text of ["聊天", "记忆", "关系", "状态", "暂停刷新", "自动刷新"]) {
+    for (const text of ["聊天", "记忆", "关系", "状态", "暂停刷新", "自动刷新", "用户事实", "记忆命中回放", "林哲"]) {
       expect(page.text).toContain(text);
     }
+    // 首屏回放用示例 query（下雨天）服务端预渲染了命中项（相关度只出现在回放卡片）
+    expect(page.text).toContain("回放「下雨天」");
+    expect(page.text).toContain("相关度");
 
     const csp = page.headers.get("content-security-policy") ?? "";
     expect(csp).toContain("default-src 'none'");
@@ -449,6 +468,102 @@ describe("API", () => {
       expect(["high", "medium", "low"]).toContain(item.confidence);
       expect(typeof item.confidence_label).toBe("string");
     }
+  });
+
+  it("/api/facts 返回主用户事实（分类计数、ISO 时间），支持按 owner 隔离", async () => {
+    const core = await loadCore();
+    seed(core);
+    const { port } = await startServer(core);
+
+    const { status, json } = await getJson(port, "/api/facts");
+    expect(status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.owner).toBe("qq:2889386774");
+    expect(json.count).toBe(2);
+    expect(json.categories).toEqual({ profile: 1, pet: 1 });
+    const items = json.items as Array<Record<string, unknown>>;
+    expect(items.length).toBe(2);
+    expect(items.map((item) => item.key)).toEqual(["name", "pet"]);
+    expect(items[0].value).toBe("林哲");
+    expect(String(items[0].updatedAt)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+    // 其他好友：同一张表按 owner 隔离，读不到主用户事实
+    const other = await getJson(port, "/api/facts?owner=qq:10001");
+    expect(other.status).toBe(200);
+    expect(other.json.count).toBe(0);
+    expect(other.json.items).toEqual([]);
+
+    // 非法 owner → 400 JSON，不泄漏堆栈
+    const invalid = await getJson(port, "/api/facts?owner=not-an-owner");
+    expect(invalid.status).toBe(400);
+    expect(invalid.json).toEqual({ ok: false, error: "invalid_owner" });
+    expect(invalid.text).not.toContain("at ");
+    expect(invalid.text).not.toContain("SQLITE");
+  });
+
+  it("/api/memory-probe 返回命中内容/相关度/置信度/来源", async () => {
+    const core = await loadCore();
+    seed(core);
+    const { port } = await startServer(core);
+    const { status, json } = await getJson(
+      port,
+      `/api/memory-probe?q=${encodeURIComponent("下雨")}&limit=5`,
+    );
+
+    expect(status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.query).toBe("下雨");
+    expect(json.limit).toBe(5);
+    const hits = json.hits as Array<Record<string, unknown>>;
+    expect(hits.length).toBeGreaterThanOrEqual(1);
+    expect(hits.some((hit) => String(hit.content).includes("下雨"))).toBe(true);
+    for (const hit of hits) {
+      expect(typeof hit.id).toBe("number");
+      expect(typeof hit.relevance).toBe("number");
+      expect(Number(hit.relevance)).toBeGreaterThan(0);
+      expect(Number(hit.relevance)).toBeLessThanOrEqual(1);
+      expect(["high", "medium", "low"]).toContain(hit.confidence);
+      expect(typeof hit.confidence_label).toBe("string");
+      expect(typeof hit.source_label).toBe("string");
+    }
+
+    // limit 走 normalizeLimit：20 封顶
+    const capped = await getJson(port, `/api/memory-probe?q=${encodeURIComponent("下雨")}&limit=999`);
+    expect(capped.json.limit).toBe(20);
+  });
+
+  it("/api/memory-probe 缺 q / 空白 / 超长都返回 400 JSON（不泄漏堆栈）", async () => {
+    const core = await loadCore();
+    seed(core);
+    const { port } = await startServer(core);
+
+    const missing = await getJson(port, "/api/memory-probe");
+    expect(missing.status).toBe(400);
+    expect(missing.json).toEqual({ ok: false, error: "invalid_query" });
+
+    const blank = await getJson(port, "/api/memory-probe?q=%20%20%20");
+    expect(blank.status).toBe(400);
+    expect(blank.json).toEqual({ ok: false, error: "invalid_query" });
+
+    const tooLong = await getJson(
+      port,
+      `/api/memory-probe?q=${encodeURIComponent("下".repeat(201))}`,
+    );
+    expect(tooLong.status).toBe(400);
+    expect(tooLong.json).toEqual({ ok: false, error: "invalid_query" });
+    for (const result of [missing, blank, tooLong]) {
+      expect(result.text).not.toContain("at ");
+      expect(result.text).not.toContain("SQLITE");
+      expect(result.text).not.toContain("Error");
+    }
+
+    // 边界 200 字可以正常回放
+    const boundary = await getJson(
+      port,
+      `/api/memory-probe?q=${encodeURIComponent("下".repeat(200))}`,
+    );
+    expect(boundary.status).toBe(200);
+    expect((boundary.json.hits as unknown[]).length).toBeGreaterThanOrEqual(0);
   });
 
   it("/api/timeline 返回亲密度/标签/里程碑/事件/herView/情绪/漂移/叙事", async () => {

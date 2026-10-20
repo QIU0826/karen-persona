@@ -90,6 +90,14 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 记忆与反重复专项）
+
+- **FTS5 自然问句 0 命中（已修）**：`searchEpisodesByFts` 逐字 token 用 FTS5 默认 AND，自然问句要求每个字都在同一条记忆里，20/20 probe 无候选、混合检索退化为 n-gram 单路。改为 OR + BM25 IDF（token 去重、≤48），T2 recall@1/3/8 = 20%/35%/40% → 50%/75%/85%。
+- **QQ 私聊（流式）漏注入用户事实（已修）**：事实层只接在 `processMessage`，而 QQ 私聊走 `processMessageStream`；已补事实块 + 反重复块，单测断言两条管线都注入。此前文档「流式/非流式都生效」的说法已修正。
+- **跨轮反重复（已完成）**：`src/persona/anti-repetition.ts`（抽取最近开头词/检测 exact/prefix/similar/opener）；reply/stream/proactive 三条路径注入；默认 `openers` 模式（A/B 实测回放整句会诱发模型照抄自己上一轮，full 组复读对 0→0.33，openers 组 0 且相似度 0.056→0.027）。
+- **记忆评测金标集（已完成）**：20 条中文 case（7 类，direct 8 / indirect 12）+ 离线 recall@k/facts 命中/anti-forget harness + `--live` 真实模型验证；报告 `docs/MEMORY_EVAL_REPORT.md`。live 20 条 expect 命中 17/20、违规表达 0。
+- **Web 控制台新面板（已完成）**：`/api/facts`（只读 user_facts，owner 参数）、`/api/memory-probe`（同步混合检索回放）；页面新增「用户事实」「记忆命中回放」两张卡；CSP/转义/无写库（表不存在不建表）保持不变。
+
 - **BUG-2 延迟队列持久化**：`src/data/pending-queue.ts` + 桥接恢复；实测重启后到点补发成功。
 - **IMP-1 图片描述增强**：30–60 字描述 + max_tokens 240，单测已更新。
 - **步骤 3 可观测最小闭环（已完成）**：`src/obs/logger.ts`（JSON lines/脱敏/TTY 可读）、`cost-tracker.ts`（SQLite `llm_usage`，DeepSeek 峰谷价）、`health-server.ts`（`/health` + `/cost`，仅 127.0.0.1:18081）；qq/chat 关键链路接结构化日志；PM2 改跑 dist。实测 `/health` 200、单次调用成本正确入账；30 文件 / 419 用例全绿。

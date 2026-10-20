@@ -40,6 +40,11 @@ import {
   type CorrectionOverlay,
   type InnerState,
 } from "../persona/prompt-builder.js";
+import {
+  buildAvoidRepeatNote,
+  detectRepetition,
+  extractRecentReplies,
+} from "../persona/anti-repetition.js";
 import { mockWeather, fetchWeather, perceiveWeather, clearWeatherCache, type WeatherPerception } from "../world/weather.js";
 import { getTrendingTopics, matchTrendingTopics, buildTrendingContext } from "../world/trending-fetcher.js";
 import { deriveStance } from "../world/stance.js";
@@ -584,6 +589,34 @@ function narrationContext(style: string, trending: string, interrupt: string, na
   return style + trending + interrupt + narrative;
 }
 
+/**
+ * 跨轮反重复注入块：读最近几条她自己发过的话，提醒模型换开头/换句式。
+ * - 默认 `openers` 模式（只给开头片段，避免模型照抄整句）；
+ * - `KAREN_NO_ANTI_REPEAT=1` 关闭（评测 A/B 用，正常使用不要设置）；
+ * - `KAREN_REPEAT_NOTE_MODE=full` 回放整句（仅评测对照用）。
+ */
+function buildAvoidRepeatInjection(recentReplies: string[]): string {
+  if (process.env.KAREN_NO_ANTI_REPEAT === "1") return "";
+  const mode = process.env.KAREN_REPEAT_NOTE_MODE === "full" ? "full" : "openers";
+  return buildAvoidRepeatNote(recentReplies, mode);
+}
+
+/**
+ * 检测本轮回复是否在复述最近几轮，命中时记一行日志（不额外调模型、不改回复）。
+ * 非流式路径写进 /why 可看的 logs；流式路径由调用方 console 输出。
+ */
+function noteRepetitionIfAny(
+  reply: string,
+  recentReplies: string[],
+  push: (line: string) => void,
+): void {
+  if (recentReplies.length === 0) return;
+  const repetition = detectRepetition(reply, recentReplies);
+  if (repetition.duplicate) {
+    push(`[重复] 与最近回复相似 ${repetition.score.toFixed(2)}(${repetition.kind})`);
+  }
+}
+
 /** 未化解的冲突：给她的下一条回复一个「还没缓过来」的处境，而不是当没事发生 */
 function buildConflictNote(state: ConversationState): string {
   const last = state.relationshipState.lastConflictAt;
@@ -929,12 +962,16 @@ export async function processMessage(
   const conflictNote = buildConflictNote(state);
   const crisisNote = crisis ? crisisSafetyNote() : "";
   const factsContext = getUserFactsContext(state.owner);
+  // 跨轮反重复：最近几条她自己的话（prompt 注入与回复后检测共用同一份）
+  const recentReplies = extractRecentReplies(session.messages);
+  const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
   const fullSystem =
     systemPrompt +
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
     conflictNote +
     crisisNote +
     factsContext +
+    avoidRepeatNote +
     `\n${momentTag}`;
   const messages = buildChatMessages(session, fullSystem);
 
@@ -942,6 +979,7 @@ export async function processMessage(
   const complexity = classifyComplexity(userInput);
   if (complexity !== "normal") logs.push(`[路由] ${complexity}(${userInput.length}字)`);
   const rawReply = await chat(messages, persona, { ragContext, complexity });
+  noteRepetitionIfAny(rawReply, recentReplies, (line) => logs.push(line));
 
   // N. 表达渲染
   const rendered = renderExpression(rawReply, {
@@ -1350,12 +1388,18 @@ export async function* processMessageStream(
 
   const memories = await retrieveRelevantMemoriesAsync(userInput, 8);
   const ragContext = buildRagContext(memories);
-  const shortTermContext = buildShortTermContext(session);
+  // 结构化事实（与非流式对齐）：此前流式主路径漏注入，QQ 私聊里「记得对方说过的事」会失效
+  const factsContext = getUserFactsContext(state.owner);
+  // 跨轮反重复（与非流式对齐）
+  const recentReplies = extractRecentReplies(session.messages);
+  const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
   const fullSystem =
     systemPrompt +
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
     buildConflictNote(state) +
     (crisis ? crisisSafetyNote() : "") +
+    factsContext +
+    avoidRepeatNote +
     `\n${momentTag}`;
 
   // 构建消息列表
@@ -1465,6 +1509,7 @@ export async function* processMessageStream(
     // 无论正常结束还是被消费方中断（break），都持久化「实际已发送」的内容，避免记忆丢失
     const persisted = sentReply || fullReply;
     if (persisted) {
+      noteRepetitionIfAny(persisted, recentReplies, (line) => console.log(`  ${line}`));
       addMessage(session, "assistant", persisted);
       storeConversationEpisode(userInput, persisted, emotionState.vector);
       maybeCompressToT3();
@@ -1761,11 +1806,15 @@ export async function processProactive(
     `自然地发一条消息，从你当下的生活出发。不要用"最近咋样"这种泛泛的开场——你是因为具体的事情才想到他的。`,
   ].join("\n");
 
-  const fullSystem = systemPrompt + proactiveInject;
+  // 跨轮反重复：主动消息同样别和上一轮开口一样
+  const recentReplies = extractRecentReplies(session.messages);
+  const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
+  const fullSystem = systemPrompt + proactiveInject + avoidRepeatNote;
   const messages = buildChatMessages(session, fullSystem);
 
   // LLM 调用
   const rawReply = await chat(messages, persona);
+  noteRepetitionIfAny(rawReply, recentReplies, (line) => logs.push(line));
 
   // 表达渲染
   const rendered = renderExpression(rawReply, {
@@ -1799,25 +1848,6 @@ export async function processProactive(
 
   logs.push(`[主动] 已发送: "${reply.slice(0, 50)}..."`);
   return { reply, logs, qqFace: rendered.qqFace };
-}
-
-// ── 短期上下文构建 ──────────────────────────────
-
-/** 从当前 session 最近消息构建短期上下文（人设无关） */
-function buildShortTermContext(
-  session: ConversationSession,
-  maxMessages: number = 8,
-): string {
-  const recent = session.messages.slice(-maxMessages);
-  if (recent.length === 0) return "";
-
-  let ctx = "\n## 你们刚才在聊的事情\n";
-  for (const m of recent) {
-    const truncated = m.content.slice(0, 80);
-    const label = m.role === "user" ? "对方" : "你";
-    ctx += `- ${label}: ${truncated}\n`;
-  }
-  return ctx;
 }
 
 // ── 统计信息 ──────────────────────────────────

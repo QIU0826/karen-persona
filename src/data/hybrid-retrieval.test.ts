@@ -73,27 +73,48 @@ async function loadModules() {
 // ── FTS5 中文 BM25 ─────────────────────────────
 
 describe("FTS5 中文 BM25", () => {
-  it("2 字词（咖啡/下雨/上海）与 ≥3 字词都能命中", async () => {
+  it("2 字词（咖啡/下雨/上海）与 ≥3 字词都能命中，BM25 把最相关排前", async () => {
     const { vector } = await loadModules();
     vector.setCurrentPersona("小雅");
+    const ids: Record<string, number> = {};
     for (const content of [
       "用户说最喜欢喝咖啡",
       "外面下雨了记得带伞",
       "下周要去上海出差，顺便见朋友",
     ]) {
-      vector.insertEpisodeWithEmbedding(content, "chat", generateEmbedding(content));
+      ids[content] = vector.insertEpisodeWithEmbedding(content, "chat", generateEmbedding(content));
     }
 
-    expect(vector.searchEpisodesByFts("咖啡")).toHaveLength(1);
-    expect(vector.searchEpisodesByFts("下雨")).toHaveLength(1);
-    expect(vector.searchEpisodesByFts("上海")).toHaveLength(1);
-    expect(vector.searchEpisodesByFts("上海出差")).toHaveLength(1);
-    // 不存在的词不命中
-    expect(vector.searchEpisodesByFts("咖啡豆")).toHaveLength(0);
+    // OR 语义下可能召回「部分字命中」的记忆，但 BM25 会把最相关的排第一
+    expect(vector.searchEpisodesByFts("咖啡")[0]?.id).toBe(ids["用户说最喜欢喝咖啡"]);
+    expect(vector.searchEpisodesByFts("下雨")[0]?.id).toBe(ids["外面下雨了记得带伞"]);
+    expect(vector.searchEpisodesByFts("上海")[0]?.id).toBe(ids["下周要去上海出差，顺便见朋友"]);
+    expect(vector.searchEpisodesByFts("上海出差")[0]?.id).toBe(ids["下周要去上海出差，顺便见朋友"]);
+    // OR 语义：多一个不存在的字（豆）仍能通过 BM25 召回同主题的咖啡记忆
+    expect(vector.searchEpisodesByFts("咖啡豆")[0]?.id).toBe(ids["用户说最喜欢喝咖啡"]);
 
     // 人设隔离
     vector.setCurrentPersona("秋瑶");
     expect(vector.searchEpisodesByFts("咖啡")).toHaveLength(0);
+  });
+
+  it("自然问句能召回相关记忆（旧 AND 语义下 FTS 命中为 0）", async () => {
+    const { vector } = await loadModules();
+    vector.setCurrentPersona("小雅");
+    const project = vector.insertEpisodeWithEmbedding(
+      "我在做一个咖啡品牌包装项目，最近在改排版",
+      "chat",
+      generateEmbedding("我在做一个咖啡品牌包装项目，最近在改排版"),
+    );
+    vector.insertEpisodeWithEmbedding(
+      "今天公司楼下新开了家面馆",
+      "chat",
+      generateEmbedding("今天公司楼下新开了家面馆"),
+    );
+
+    const hits = vector.searchEpisodesByFts("我最近那个咖啡包装项目做到哪了");
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].id).toBe(project);
   });
 
   it("deleteEpisode 同步删除 FTS 索引；source 过滤生效", async () => {

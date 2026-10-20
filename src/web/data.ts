@@ -1,12 +1,13 @@
 /**
  * 本地 Web 控制台数据层（步骤 5，只读）。
  *
- * 职责：把已有的运行数据（会话 / T2 记忆 / 持久化人格状态 / 关系 / 健康 / 成本）
+ * 职责：把已有的运行数据（会话 / T2 记忆 / 用户事实 / 持久化人格状态 / 关系 / 健康 / 成本）
  * 组装成前端与 API 都能直接消费的 JSON 结构。**不写任何业务数据**：
  * - 只读会话 JSON（loadSession 不存在时返回空会话，不落盘）；
  * - 只读 T2（手写 SQL 全部是 SELECT；不使用 INSERT/UPDATE/DELETE）；
+ * - 只读 user_facts（同样手写 SELECT；表不存在时返回空，不建表）；
  * - 只读持久化状态（loadPersonaState）；
- * - 复用现成模块：retriever（混合检索）、cost-tracker、obs/health-server、journal-view。
+ * - 复用现成模块：retriever（混合检索 / 命中回放）、cost-tracker、obs/health-server、journal-view。
  *
  * 人设隔离：默认按当前活跃人设（getCurrentPersona）；桥接进程会把 config.persona 与
  * persona.name 显式传入（两者分别用于 T2 的 persona_id 与 state/session 文件名）。
@@ -17,8 +18,9 @@ import { loadPersonaState } from "../data/state-store.js";
 import type { PersistedPersonaState } from "../data/state-store.js";
 import { loadSession } from "../data/history.js";
 import type { ConversationSession } from "../data/history.js";
-import { retrieveRelevantMemoriesAsync } from "../data/retriever.js";
+import { retrieveRelevantMemories, retrieveRelevantMemoriesAsync } from "../data/retriever.js";
 import type { RetrievedMemory } from "../data/retriever.js";
+import { ownerForQq } from "../data/owner.js";
 import { getCostReport, getTodayCostSummary } from "../obs/cost-tracker.js";
 import type { CostReport, TodayCostSummary } from "../obs/cost-tracker.js";
 import { buildHealthPayload } from "../obs/health-server.js";
@@ -92,6 +94,135 @@ function toDate(value: number | string | null | undefined): Date | null {
 export function toIsoTimestamp(value: number | string | null | undefined): string | null {
   const date = toDate(value);
   return date ? date.toISOString() : null;
+}
+
+// ── 用户事实（只读 user_facts）───────────────────
+
+/**
+ * 主用户 QQ（与 owner.ts 的 legacy 约定一致）：控制台默认展示他的用户事实。
+ * 其他 owner 可通过 `/api/facts?owner=qq:<id>` 指定（本地只读，不写库）。
+ */
+export const DEFAULT_PRIMARY_QQ = "2889386774";
+export const DEFAULT_FACTS_OWNER = ownerForQq(DEFAULT_PRIMARY_QQ);
+
+/** 分类展示顺序（与 data/user-facts 的注入顺序保持一致）。 */
+export const FACT_CATEGORY_ORDER = [
+  "profile",
+  "work",
+  "pet",
+  "relationship",
+  "plan",
+  "preference",
+  "other",
+] as const;
+
+/** user_facts.category → 中文标签（页面渲染与服务端内联 JS 共用；未知分类统一归「其他」）。 */
+export const FACT_CATEGORY_LABELS: Record<string, string> = {
+  profile: "基本信息",
+  work: "工作",
+  pet: "宠物",
+  relationship: "关系",
+  plan: "最近计划",
+  preference: "偏好",
+  other: "其他",
+};
+
+export interface UserFactItem {
+  key: string;
+  value: string;
+  category: string;
+  updatedAt: string | null;
+}
+
+export interface UserFactsData {
+  ok: true;
+  generated_at: string;
+  owner: string;
+  count: number;
+  items: UserFactItem[];
+  /** 分类计数：{ profile: 2, work: 1, ... }，空数据为 {}。 */
+  categories: Record<string, number>;
+}
+
+interface UserFactRow {
+  fact_key: string;
+  fact_value: string;
+  category: string;
+  updated_at: number | string | null;
+}
+
+/** 分类排序（未知分类排在末尾）。 */
+function factCategoryRank(category: string): number {
+  const index = FACT_CATEGORY_ORDER.indexOf(category as (typeof FACT_CATEGORY_ORDER)[number]);
+  return index >= 0 ? index : FACT_CATEGORY_ORDER.length;
+}
+
+/**
+ * 手写只读 SELECT（刻意不调用 data/user-facts.listUserFacts）：
+ * listUserFacts 内部 ensureTable 会 CREATE TABLE，而 Web 控制台必须保持零写入；
+ * 这里先查 sqlite_master，表不存在直接返回空。
+ */
+function readUserFactRows(owner: string): UserFactRow[] {
+  const db = getVectorDb();
+  const exists = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'user_facts'")
+    .get();
+  if (!exists) return [];
+  return db
+    .prepare(
+      `SELECT fact_key, fact_value, category, updated_at
+         FROM user_facts
+        WHERE owner_id = ?`,
+    )
+    .all(owner) as UserFactRow[];
+}
+
+/**
+ * 某个 owner 的结构化事实（名字/工作/宠物/偏好/计划…）。
+ * 只读；表不存在、空 owner、DB 异常都返回空结构（控制台不能因此 500）。
+ */
+export function getUserFactsData(owner: string = DEFAULT_FACTS_OWNER): UserFactsData {
+  const ownerId =
+    typeof owner === "string" && owner.trim() !== "" ? owner.trim() : DEFAULT_FACTS_OWNER;
+
+  let items: UserFactItem[] = [];
+  try {
+    items = readUserFactRows(ownerId).map((row) => {
+      const category =
+        typeof row.category === "string" && row.category in FACT_CATEGORY_LABELS
+          ? row.category
+          : "other";
+      return {
+        key: typeof row.fact_key === "string" ? row.fact_key : "",
+        value: typeof row.fact_value === "string" ? row.fact_value : "",
+        category,
+        updatedAt: toIsoTimestamp(row.updated_at),
+      };
+    });
+  } catch {
+    items = [];
+  }
+
+  // 分类分组优先，同分类内最新在前（API 返回顺序稳定，页面直接渲染）
+  items.sort((a, b) => {
+    const rank = factCategoryRank(a.category) - factCategoryRank(b.category);
+    if (rank !== 0) return rank;
+    return (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
+  });
+
+  const categories: Record<string, number> = {};
+  for (const item of items) {
+    categories[item.category] = (categories[item.category] ?? 0) + 1;
+  }
+
+  return {
+    ok: true,
+    generated_at: new Date().toISOString(),
+    owner: ownerId,
+    count: items.length,
+    items,
+    categories,
+  };
 }
 
 // ── 记忆 ────────────────────────────────────────
@@ -283,6 +414,88 @@ export async function searchMemories(
     query: text,
     limit: safeLimit,
     items,
+  };
+}
+
+// ── 记忆命中回放（同步检索路径）─────────────────
+
+export const MEMORY_PROBE_DEFAULT_LIMIT = 8;
+export const MEMORY_PROBE_MAX_LIMIT = 20;
+export const MEMORY_PROBE_MAX_QUERY_LENGTH = 200;
+/** 页面首屏回放用的示例 query（可在输入框里改成任意关键词）。 */
+export const MEMORY_PROBE_SAMPLE_QUERY = "下雨天";
+
+export interface MemoryHit {
+  id: number;
+  content: string;
+  relevance: number;
+  confidence: "high" | "medium" | "low";
+  confidence_label: string;
+  source: string;
+  source_label: string;
+}
+
+export interface MemoryHitProbeData {
+  ok: true;
+  generated_at: string;
+  persona: WebPersonaContext;
+  query: string;
+  limit: number;
+  hits: MemoryHit[];
+}
+
+/**
+ * 记忆命中回放：复用 retriever 的同步混合检索（n-gram + FTS5 BM25 → RRF），
+ * 返回这次 query 实际会命中哪些 T2、相关度多高、命中来源是什么。
+ *
+ * 只读边界说明：检索器内部会对命中的记忆应用艾宾浩斯衰减（applyDecay 会 UPDATE
+ * strength），这是既有检索路径的副作用，控制台不额外写入任何业务数据。
+ * ⚠️ 与 /api/memory 搜索一致：检索按「当前活跃人设」过滤（retriever 用 getCurrentPersona）。
+ */
+export function getMemoryHitProbe(
+  query: string,
+  limit: number = MEMORY_PROBE_DEFAULT_LIMIT,
+  override: WebPersonaOverride = {},
+): MemoryHitProbeData {
+  const persona = resolvePersonaContext(override);
+  const safeLimit = normalizeLimit(limit, MEMORY_PROBE_DEFAULT_LIMIT, MEMORY_PROBE_MAX_LIMIT);
+  const text =
+    typeof query === "string" ? query.trim().slice(0, MEMORY_PROBE_MAX_QUERY_LENGTH) : "";
+
+  let memories: RetrievedMemory[] = [];
+  if (text) {
+    try {
+      memories = retrieveRelevantMemories(text, safeLimit);
+    } catch {
+      // 记忆库不可用/检索异常：回放面板展示空态，不影响页面其他区块
+      memories = [];
+    }
+  }
+
+  const sources = lookupSources(
+    memories.map((memory) => memory.id),
+    persona.id,
+  );
+  const hits: MemoryHit[] = memories.map((memory) => {
+    const source = sources.get(memory.id) ?? "unknown";
+    return {
+      id: memory.id,
+      content: stripJournalPrefix(memory.content),
+      relevance: memory.relevance,
+      confidence: memory.confidence,
+      confidence_label: CONFIDENCE_LABELS[memory.confidence] ?? "相关",
+      source,
+      source_label: sourceLabel(source),
+    };
+  });
+
+  return {
+    ok: true,
+    generated_at: new Date().toISOString(),
+    persona,
+    query: text,
+    limit: safeLimit,
+    hits,
   };
 }
 
