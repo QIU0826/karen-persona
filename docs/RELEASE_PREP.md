@@ -10,14 +10,17 @@
 ```bash
 TMP=$(mktemp -d)
 git archive HEAD | tar -x -C "$TMP"
-ln -s "$PWD/node_modules" "$TMP/node_modules"
 cd "$TMP"
-node node_modules/tsx/dist/cli.mjs src/doctor.ts     # 无 config/.env 时给出可执行修复指引
-node node_modules/typescript/bin/tsc --noEmit        # 0 错误
-node node_modules/vitest/vitest.mjs run              # 69 文件 / 687 用例全绿
+npm ci --registry=https://registry.npmmirror.com   # 真实安装（不是软链已有 node_modules）
+node node_modules/tsx/dist/cli.mjs src/doctor.ts   # 无 config/.env 时给出可执行修复指引
+node node_modules/typescript/bin/tsc --noEmit      # 0 错误
+node node_modules/vitest/vitest.mjs run            # 69 文件 / 687 用例全绿
 ```
 
-结果（2026-10-20）：typecheck 0 错误；679 用例全绿（含 mock-OneBot bridge E2E、setup E2E、人设包、多用户 Web、真实长跑报告）；`doctor` 在缺 `config.yaml` / `.env` 时输出 ✅/❌ 清单和修复命令，不崩溃。
+结果（2026-10-20，本机 macOS）：
+- **真实 `npm ci`**：122 个包、约 40s 安装完成（npmmirror 源）；
+- typecheck 0 错误；**69 文件 / 687 用例全绿**（含 mock-OneBot bridge E2E、setup E2E、人设包、多用户 Web、真实长跑报告）；
+- `doctor` 在缺 `config.yaml` / `.env` 时输出 ✅/❌ 清单和修复命令，不崩溃。
 
 ### 1.2 仓库卫生 / 隐私
 
