@@ -10,12 +10,16 @@
  *
  * 设计：
  * - 默认开启；`KAREN_SEMANTIC_BOOST=off` 关闭（故障/延迟敏感场景）；
+ * - **本地真向量启用时默认关闭**（v0.5）：实测「本地向量 + 不重排」17-18/20 优于
+ *   「ngram/本地 + 重排」16/20，还省掉每轮 ~664ms 与 ¥0.00025；
+ *   需要时可 `KAREN_SEMANTIC_BOOST=on` 强制打开；
  * - 超时/解析失败/无 Key/模型异常一律**降级为原顺序**，绝不影响主回复；
  * - 用 `chat()`（带 usage 记账/重试/脱敏日志），复杂度 simple；
  * - 重排结果不足时用原顺序补齐，保证不会因为重排漏掉候选。
  */
 import { chat } from "../ai/chat.js";
 import { retrieveRelevantMemoriesAsync, type RetrievedMemory } from "./retriever.js";
+import { isLocalEmbeddingEnabled } from "./local-embed.js";
 
 /** 关闭开关：off/0/false/disable 均视为关闭；默认开启。 */
 export const SEMANTIC_BOOST_ENV = "KAREN_SEMANTIC_BOOST";
@@ -33,6 +37,9 @@ export type BoostMode = "off" | "rerank";
 export function resolveBoostMode(): BoostMode {
   const raw = (process.env[SEMANTIC_BOOST_ENV] ?? "").trim().toLowerCase();
   if (["off", "0", "false", "disable", "disabled", "no"].includes(raw)) return "off";
+  // 本地真向量在跑：语义召回已经够准，默认不再额外花一次 LLM 重排
+  const forcedOn = ["on", "1", "true", "enable", "enabled", "yes"].includes(raw);
+  if (isLocalEmbeddingEnabled() && !forcedOn) return "off";
   return "rerank";
 }
 

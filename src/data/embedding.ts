@@ -13,6 +13,12 @@
  * 相关测试通过 mock fetch 覆盖，不要在生产断言里假设语义可用。
  */
 
+import {
+  LOCAL_EMBEDDING_MODEL,
+  embedLocal,
+  isLocalEmbeddingEnabled,
+  resetLocalEmbeddingState,
+} from "./local-embed.js";
 import { getEmbeddingConfig } from "../ai/router.js";
 
 /** 向量维度（与 t2_episodes.embedding / t2_vec FLOAT[768] 对齐）。 */
@@ -112,16 +118,20 @@ let dimensionsParamRejected = false;
 export function isSemanticEmbeddingConfigured(): boolean {
   const provider = (process.env.EMBEDDING_PROVIDER || "auto").toLowerCase();
   if (provider === "ngram") return false;
+  // 本地向量（KAREN_EMBED=on）：不依赖任何云 Key，优先使用
+  if (isLocalEmbeddingEnabled()) return true;
   return getEmbeddingConfig() !== null;
 }
 
 /** 当前配置下写入/查询应有的向量模型。 */
 export function getConfiguredEmbeddingModel(): string {
-  return isSemanticEmbeddingConfigured() ? QWEN_EMBEDDING_MODEL : NGRAM_EMBEDDING_MODEL;
+  if (!isSemanticEmbeddingConfigured()) return NGRAM_EMBEDDING_MODEL;
+  return isLocalEmbeddingEnabled() ? LOCAL_EMBEDDING_MODEL : QWEN_EMBEDDING_MODEL;
 }
 
 /** 重置探测状态（单元测试用；生产无需调用）。 */
 export function resetEmbeddingApiState(): void {
+  resetLocalEmbeddingState();
   apiState = "unknown";
   apiRetryAt = 0;
   warnedDegrade = false;
@@ -133,9 +143,20 @@ export function resetEmbeddingApiState(): void {
  * 统一 embedder：有 Qwen Key 时用 text-embedding-v3，否则/失败降级 n-gram。
  * 返回的 model 必须随向量一起落库，检索时只与同 model 的向量比较。
  */
-export async function embedText(text: string): Promise<EmbeddingResult> {
+export async function embedText(
+  text: string,
+  mode: "query" | "document" = "document",
+): Promise<EmbeddingResult> {
   if (!isSemanticEmbeddingConfigured()) {
     return { vector: generateEmbedding(text), model: NGRAM_EMBEDDING_MODEL, degraded: false };
+  }
+
+  // 本地向量优先：服务不可用时自动落回 Qwen/ngram（不阻塞对话）
+  if (isLocalEmbeddingEnabled()) {
+    const local = await embedLocal(text, mode);
+    if (local) {
+      return { vector: local, model: LOCAL_EMBEDDING_MODEL, degraded: false };
+    }
   }
   if (apiState === "unavailable" && Date.now() < apiRetryAt) {
     return { vector: generateEmbedding(text), model: NGRAM_EMBEDDING_MODEL, degraded: true };

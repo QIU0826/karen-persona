@@ -248,7 +248,7 @@ export async function retrieveRelevantMemoriesAsync(
 ): Promise<RetrievedMemory[]> {
   const fetchK = Math.max(limit * CANDIDATE_MULTIPLIER, MIN_CANDIDATES);
 
-  const embeddingResult = await embedText(userMessage);
+  const embeddingResult = await embedText(userMessage, "query");
   const isSemantic = embeddingResult.model !== NGRAM_EMBEDDING_MODEL;
   if (isSemantic) {
     // 历史数据（M1-7 之前写入）没有语义向量：本进程只触发一次后台回填
