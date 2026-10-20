@@ -11,7 +11,7 @@ import { getChatModel } from "../ai/router.js";
 import { withThinking } from "../ai/chat.js";
 import { fetchUnsplashPhoto } from "../ai/image-gen.js";
 import { describeEmotion } from "../persona/emotion.js";
-import { pickPhoto, pickPhotoCaption, photoFilePath } from "./photo-library.js";
+import { pickPhotoShare, photoFilePath } from "./photo-library.js";
 import { createLogger } from "../obs/logger.js";
 import type { ConversationState } from "../pipeline/orchestrator.js";
 
@@ -104,7 +104,7 @@ async function generateQuery(
 
 // ── 主入口 ────────────────────────────────────
 
-const MINIMAL_CAPTIONS = ["今天拍的", "随手拍了一张", "喏", "刚好看到"];
+const MINIMAL_CAPTIONS = ["随手拍了一张", "喏", "刚好看到", "这张挺好看的"];
 
 export interface PhotoShareResult {
   /** Unsplash 图片 URL（有 Key 且搜索成功时） */
@@ -123,19 +123,24 @@ function hasUnsplashKey(): boolean {
 
 /** 挑选本地兜底图并发图；资源缺失返回 null。 */
 function shareLocalPhoto(state: ConversationState): PhotoShareResult | null {
-  const photo = pickPhoto({
+  // 时间关系不是硬过滤：早上可以发「昨天的晚霞」，亲密度够了才会分享「以前的照片」
+  const choice = pickPhotoShare({
     emotion: state.emotionState.vector,
     hour: new Date().getHours(),
+    closeness: state.persona.relationship.closeness,
   });
-  if (!photo) return null;
-  const imageFile = photoFilePath(photo);
+  if (!choice) return null;
+  const imageFile = photoFilePath(choice.photo);
   if (!imageFile) {
-    log.warn("photo.local_missing", { photo_id: photo.id });
+    log.warn("photo.local_missing", { photo_id: choice.photo.id });
     return null;
   }
-  const caption = pickPhotoCaption(photo);
-  log.info("photo.local", { photo_id: photo.id, caption_chars: caption.length });
-  return { imageFile, caption, source: "local" };
+  log.info("photo.local", {
+    photo_id: choice.photo.id,
+    era: choice.era,
+    caption_chars: choice.caption.length,
+  });
+  return { imageFile, caption: choice.caption, source: "local" };
 }
 
 /**
