@@ -12,6 +12,22 @@
 
 export const AGE_GATE_VERSION = 1;
 
+/**
+ * 从一段话里去掉确认年龄的标记，返回剩余内容。
+ *
+ * 场景：用户「我成年了」和下一句聊天在 400ms 合并窗口里被拼成一批
+ * （text = "我成年了\n今天好累啊"），确认动作不能把后面的正常聊天吞掉。
+ */
+export function stripAgeConfirmationMarkers(text: string): string {
+  return text
+    .replace(
+      /我成年了|已成年|成年了|已满18岁|满18岁|满18了|满18|18岁|十八岁|确认成年|我18岁?/g,
+      "",
+    )
+    .replace(/[，,。！？!?；;\s]+/g, " ")
+    .trim();
+}
+
 /** 是否对某个 owner 强制年龄门：仅 QQ 用户，且配置开启。 */
 export function shouldEnforceAgeGate(owner: string, enabled: boolean | undefined): boolean {
   return enabled !== false && /^qq:/.test(owner);

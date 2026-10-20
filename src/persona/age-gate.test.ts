@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgeConfirmedText,
+  stripAgeConfirmationMarkers,
   buildAgeDeclinedText,
   buildAgeGatePrompt,
   buildAgeGateReminder,
@@ -73,5 +74,18 @@ describe("文案", () => {
 
   it("确认后回复简短", () => {
     expect(buildAgeConfirmedText()).toContain("继续聊");
+  });
+});
+
+describe("stripAgeConfirmationMarkers（合并窗口：确认 + 聊天）", () => {
+  it("去掉确认标记，保留后面的聊天内容", () => {
+    expect(stripAgeConfirmationMarkers("我成年了\n今天好累啊")).toBe("今天好累啊");
+    expect(stripAgeConfirmationMarkers("已成年，在吗")).toBe("在吗");
+    expect(stripAgeConfirmationMarkers("满18岁 你好")).toBe("你好");
+  });
+
+  it("纯确认时返回空串", () => {
+    expect(stripAgeConfirmationMarkers("我成年了")).toBe("");
+    expect(stripAgeConfirmationMarkers("确认成年！")).toBe("");
   });
 });

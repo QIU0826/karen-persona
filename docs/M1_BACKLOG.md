@@ -90,6 +90,16 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 mock-OneBot 桥接端到端测试）
+
+- **新增 E2E**：`src/eval/bridge-e2e.test.ts` + `npm run test:e2e`（随 `npm test` 也跑）。测试进程扮演 NapCat（OneBot WS 客户端），用临时 config/数据目录启动真实 bridge 子进程；fake DeepSeek HTTP 服务提供非流式/SSE/视觉/事实抽取响应。
+- **覆盖**：新用户披露 → 年龄门 → 「我成年了」+ 紧接着的聊天（合并窗口）→ 私聊流式回复 → 图片消息（断言 image_url 视觉请求）→ 群聊 @ 回复。
+- **抓到并修复的真实 bug**：
+  - 「确认 + 下一句」在 400ms 合并窗口被拼成一批，确认分支提前 return 吞掉后半句 → 确认后剥离标记，继续走正常回复（`stripAgeConfirmationMarkers` + 单测）；
+  - 私聊缓冲消费竞态：新消息在 `processing=true` 时入队，而 drain 恰好退出 → 消息卡死不回；`drainUserBuffer` finally 再检查积压并重新排期。
+- **稳定性**：单跑 3/3、连续 3 次全过（约 1.6s/次，无真实网络/QQ 依赖）。
+- **测试**：59 文件 / 626 用例，tsc 0、lint 0。
+
 ### ✅ 已完成（2026-10-20 修复后端到端复验）
 
 - **30 轮真实长跑 ×2**：记忆 6/6、复读对 0、错误/空回复 0；延迟 avg 2175→2039ms；成本 ¥0.0766/¥0.0762。报告 `docs/LONGRUN_REGRESSION.md` §2.1。

@@ -76,6 +76,7 @@ import {
   buildAgeGateReminder,
   evaluateAgeGate,
   shouldEnforceAgeGate,
+  stripAgeConfirmationMarkers,
 } from "../persona/age-gate.js";
 import { ackDisclosure, confirmAge, hasAgeConfirmation } from "../data/consent.js";
 import { ownerForQq } from "../data/owner.js";
@@ -504,6 +505,17 @@ async function drainUserBuffer(
     }
   } finally {
     buf.processing = false;
+    // 竞态修复：enqueueMessage 看到 processing=true 时只入队不设 timer；
+    // 若它恰好发生在「while 检查 events 为空」之后、本 finally 之前，消息会永远卡住。
+    // 收尾时再检查一次，有积压就重新排一个消费窗口。
+    if (buf.events.length > 0 && userBuffers.get(userId) === buf) {
+      if (buf.timer) clearTimeout(buf.timer);
+      buf.timer = setTimeout(() => {
+        if (userBuffers.get(userId) !== buf) return;
+        buf.timer = null;
+        void drainUserBuffer(userId, buf, sharedBase);
+      }, MERGE_WINDOW_MS);
+    }
   }
 }
 
@@ -1199,7 +1211,7 @@ async function handlePrivateBatch(
   }
 
   if (texts.length === 0) return;
-  const text = texts.join("\n");
+  let text = texts.join("\n");
   if (!text) return;
 
   const userName = sanitizeLogValue(
@@ -1287,7 +1299,14 @@ async function handlePrivateBatch(
     confirmAge(state.owner);
     sendPrivateMsg(userId, buildAgeConfirmedText());
     log.info("compliance.age_gate_confirmed", { user_id: userId });
-    return;
+    // 合并窗口里「确认 + 紧接着的聊天」会被拼成一段：不能把后半句吞掉
+    const remainder = stripAgeConfirmationMarkers(text);
+    if (!remainder) return;
+    log.info("compliance.age_gate_confirmed_with_chat", {
+      user_id: userId,
+      chars: charCount(remainder),
+    });
+    text = remainder;
   }
   if (ageGateAction === "ask") {
     const lastPromptAt = ageGateReminderAt.get(userId) ?? 0;
