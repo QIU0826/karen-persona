@@ -85,7 +85,6 @@ const ANSWERS: Answer[] = [
   { match: "那我该叫你什么", answer: "林哲" },
   { match: "，你呢？", answer: "杭州" },
   { match: "你已年满 18 岁吗", answer: "y" },
-  { match: "确认已阅读以上说明并继续", answer: "y" },
   { match: "标签:", answer: "话痨" },
   { match: "NapCat 反向 WS 端口", answer: "" },
   { match: "允许和她聊天的 QQ 号", answer: "123456" },

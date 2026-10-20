@@ -223,7 +223,7 @@ plan 3 / preference 2 / other 2），小数据量时行为不变。压测（29 �
 | `src/impulse/renderer.ts` | burst 分条去尾部软标点；压缩连续空行 |
 | `src/impulse/photo-library.ts`（上一轮） | 照片时间关系模型（今天/昨天/以前 + 亲密度门槛） |
 
-验证：`tsc` 0 错误、lint 0 违规；**67 文件 / 679 用例全绿**（2026-10-20 记忆评测 + 反重复 + Web 面板 + T1/T3 + 检索重排 + 时间感/事实历史 + 句式复读 + T3 质量/facts 压测后）。
+验证：`tsc` 0 错误、lint 0 违规；**68 文件 / 682 用例全绿**（2026-10-20 记忆评测 + 反重复 + Web 面板 + T1/T3 + 检索重排 + 时间感/事实历史 + 句式复读 + T3 质量/facts 压测后）。
 记忆评测：`docs/MEMORY_EVAL_REPORT.md`（20 条金标集；修复 FTS 后 T2 recall@8 85%、facts 100%）。
 
 ---

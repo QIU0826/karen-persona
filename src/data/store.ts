@@ -412,11 +412,12 @@ export function loadConfig(): AppConfig {
     ? parseToken(webTokenPicked.value, webTokenPicked.source)
     : undefined;
 
-  // AI 披露：默认开启（合规），可用 config.yaml / AI_DISCLOSURE 关闭
+  // AI 披露：默认关闭（个人自用体验优先，用户明确不希望聊天里出现 AI 披露）。
+  // 公开发布/商用建议在 config.yaml 显式开启 ai_disclosure: true（合规）。
   const disclosurePicked = pickOption(raw, "ai_disclosure", "AI_DISCLOSURE");
   const aiDisclosure = disclosurePicked
     ? parseBooleanOption(disclosurePicked.value, disclosurePicked.source)
-    : true;
+    : false;
 
   // 年龄门（18+ 确认）：默认开启（合规）；个人自用可 AGE_GATE=false 关闭
   const ageGatePicked = pickOption(raw, "age_gate_enabled", "AGE_GATE");

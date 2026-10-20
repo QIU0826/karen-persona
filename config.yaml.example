@@ -73,9 +73,9 @@ health_port: 18081
 # group_photo_enabled: false
 
 # === 合规 ===
-# 首次对话时是否明确告知「这是 AI 虚拟角色」以及数据去向（默认 true）。
-# 公开发布/商用必须保持 true；仅个人自用可改为 false。
-# ai_disclosure: true
+# 首次对话时是否明确告知「这是 AI 虚拟角色」以及数据去向。
+# 默认 false（个人自用体验优先，不在聊天里插入披露）；公开发布/商用建议显式开启。
+# ai_disclosure: false
 # 是否要求 QQ 用户先确认已满 18 岁（默认 true；CLI 开发者模式不强制）。
 # 这是自我声明式年龄门，不是身份证/生日校验；个人自用可改为 false。
 # age_gate_enabled: true

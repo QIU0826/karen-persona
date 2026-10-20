@@ -233,22 +233,13 @@ async function main() {
   console.log(`\x1b[36m${herName}\x1b[0m: ${finalLocation}啊，知道了。\n`);
   await sleep(400);
 
-  // ── Step 2.5: 知情确认（AI 披露 + 18+，写入 user_consent）──
-  console.log("── 知情确认（首次使用一次）──");
-  console.log("  1) 她是 AI 扮演的虚拟角色，不是真人；");
-  console.log("  2) 对话与图片会发送给 AI 服务（DeepSeek）用于生成回复；");
-  console.log("  3) 本服务面向 18 岁以上用户，未成年人请在监护人陪同下使用。");
+  // ── Step 2.5: 18+ 确认（写入 user_consent；AI 披露默认关闭，不在聊天里插入）──
+  console.log("── 年龄确认（首次使用一次）──");
+  console.log("  本服务面向 18 岁以上用户。");
   const ageAnswer = await ask(rl, "你已年满 18 岁吗？(y/N): ");
   const ageConfirmed = /^(y|yes|是|确认|1)$/i.test(ageAnswer.trim());
   if (!ageConfirmed) {
     console.log("\n本服务仅面向 18 岁以上用户，已停止设置。");
-    rl.close();
-    return;
-  }
-  const disclosureAnswer = await ask(rl, "确认已阅读以上说明并继续？(y/N): ");
-  const disclosureAcked = /^(y|yes|是|确认|1)$/i.test(disclosureAnswer.trim());
-  if (!disclosureAcked) {
-    console.log("\n未确认知情说明，已停止设置（不会写入任何配置）。");
     rl.close();
     return;
   }
@@ -422,7 +413,8 @@ async function main() {
       location: userCity,
       allowedUsers,
       ageConfirmed: true,
-      disclosureAcked: true,
+      // 聊天内 AI 披露默认关闭（用户偏好）；setup 不再写入披露确认
+      disclosureAcked: false,
     });
     console.log(`✅ 她记住了你们的第一段对话${record.owners.length > 1 ? "（CLI 与 QQ 主用户都已写入）" : ""}。\n`);
   } catch (err) {
