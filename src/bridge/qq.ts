@@ -17,6 +17,7 @@
  * - 日志只打印长度/摘要，不打印消息全文、token 或不必要的外部内容。
  */
 import "dotenv/config";
+import { computeTypingDelay } from "./humanizer.js";
 import { WebSocketServer, type WebSocket } from "ws";
 import { loadPersona } from "../persona/loader.js";
 import type { Persona } from "../persona/loader.js";
@@ -806,7 +807,16 @@ async function main() {
         if (!checkRateLimit(userId, freqLimit)) continue;
 
         const result = await processProactive(state);
-        if (!result || !result.reply) continue;
+        if (!result.sent) {
+          // v0.4.0：每次心跳都留下"为什么没主动找你"，/why 可查。
+          // 日志走 debug，避免每 15 分钟写一条 info 把日志刷满。
+          const reason = result.decision.action === "skip" ? result.decision.reason : "gated";
+          log.debug("proactive.skip", { user_id: userId, reason, detail: result.decision.detail });
+          if (process.env.KAREN_PROACTIVE_VERBOSE === "1") {
+            for (const line of result.logs) console.log(`  ${line}`);
+          }
+          continue;
+        }
 
         for (const line of result.logs) {
           console.log(`  ${line}`);
@@ -824,7 +834,11 @@ async function main() {
           }
 
           sendPrivateMsg(userId, line.trim());
-          log.info("proactive.sent", { user_id: userId, chars: charCount(line.trim()) });
+          log.info("proactive.sent", {
+            user_id: userId,
+            channel: result.channel,
+            chars: charCount(line.trim()),
+          });
           await sleep(1500 + Math.random() * 2000);
         }
         if (result.qqFace) {
@@ -1036,14 +1050,12 @@ async function sendPhotoToGroup(groupId: number, photo: OutboundPhoto): Promise<
 
 /**
  * 估算「把这条气泡打出来」需要多久（毫秒）。
- * 中文手打约 80–120ms/字；再叠加一点读屏/点发送的固定开销，夹在 0.5–3s 之间。
+ * 中文手打约 80–120ms/字；再叠加一点读屏/点发送的固定开销，白天夹在 0.3–3s。
+ * v0.4.0 起深夜（23:00–06:00）会慢约 1.35 倍、封顶 4.2s（人困的时候确实打得慢）。
  * 目的：让她不是「char 级流式刷屏」，而是像人一样一条一条地把话打完。
  */
 function typingDelayFor(text: string): number {
-  const chars = charCount(text);
-  const perChar = 80 + Math.random() * 40;
-  const delay = 300 + chars * perChar + Math.random() * 250;
-  return Math.min(delay, 3000);
+  return computeTypingDelay(charCount(text), new Date().getHours());
 }
 
 // ── 打错字 → 撤回 → 重发修正（v0.3 真实感）──────

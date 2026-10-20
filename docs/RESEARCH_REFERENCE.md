@@ -29,12 +29,14 @@
 1. **「说话动作」选择器**（`src/persona/talk-moves.ts`）：对方在倒苦水 → 先接住情绪；否则低概率（28%）顺手补一句自己的近况；带亲密度门槛、连续两轮不重复、危机/免打扰不触发，`KAREN_TALK_MOVES=off` 可关（对应 ai-companion-kit 的 Humanizer/Waker 与 qq-agent-plus 的主动链路）。
 2. **贴纸跨轮去重**：每个用户最近 3 张贴纸不重复（对应 qq-agent-plus「常用+未用轮换」）。
 3. 图库 7→15 张 + 场景匹配（v0.3.2）。
+4. **主动消息四条链路 + 决策留痕**（v0.4.0，`src/impulse/proactive-plan.ts`）：`follow_up` / `open_topic` / `life_share` / `silence_revive`，独立开关、各自概率与说话姿态；每次心跳记录原因，`/why` 可回答「她最近为什么没主动找我」；连推 2 条收手（对应 qq-agent-plus「主动发言三链路 + 跳过原因日志」）。
+5. **深夜打字变慢**（v0.4.0，`src/bridge/humanizer.ts`）：23:00–06:00 打字时长 ×1.35、封顶 4.2s（对应 ai-companion-kit 的 Humanizer）。
 
 **后续建议（按性价比）**
 
-1. **群聊「插话/潜水」模型**（ai-bot-groupmate）——现在群聊只在被 @ 时回。
+1. **群聊「插话/潜水」模型**（ai-bot-groupmate）——现在群聊只在被 @ 时回；这是主动链路之后最值得做的下一步。
 2. **记忆热度 + 夜间 Dream 整合**（kiwi-mem）——T2 已有衰减，可加访问热度进入召回排序。
-3. **会话交接摘要上限**（qq-agent-plus 省 Token）——控制长对话 prompt 膨胀。
+3. **会话交接摘要上限**（qq-agent-plus 省 Token）——历史已限最近 15 条 + 旧消息摘要 10×40 字，实际膨胀点待 [docs/PROMPT_BUDGET.md](PROMPT_BUDGET.md) 的实测结论。
 4. **World Info 式按需注入**（SillyTavern）——人设细节按话题触发，降低常驻 token。
 5. **ASR（语音转文字）**——参考 AIRI/Open-LLM-VTuber；目前用户发来的语音只当 `[语音]` 占位。
 

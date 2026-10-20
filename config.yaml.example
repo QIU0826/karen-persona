@@ -98,6 +98,20 @@ health_port: 18081
 # 同一用户两次撤回的最小间隔（分钟，0-1440，默认 20）
 # typo_recall_cooldown_minutes: 20
 
+# === 主动消息链路（v0.4.0）===
+# 她会自己找你，靠四条独立链路；可以单独关掉某一条（不写 = 四条全开）：
+#   follow_up      她说完一句、你没回，隔 20 分钟~3 小时补一句（不催不追问）
+#   open_topic     冷场 3 小时以上，主动开个话头
+#   life_share     她自己生活里有事发生（因果链/天气/情绪/时段），想跟你分享
+#   silence_revive 好几天没联系，重启联系（一轮失联只问一次）
+# 护栏：单日最多 4 条、两次最少间隔 30 分钟、对方不回时一天最多 2 条就收手。
+# 调试可以用环境变量 KAREN_PROACTIVE_CHANNELS=off 一次性全关。
+# proactive_channels:
+#   follow_up: true
+#   open_topic: true
+#   life_share: true
+#   silence_revive: true
+
 # === 合规 ===
 # 首次对话时是否明确告知「这是 AI 虚拟角色」以及数据去向。
 # 默认 false（个人自用体验优先，不在聊天里插入披露）；公开发布/商用建议显式开启。

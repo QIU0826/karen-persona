@@ -58,6 +58,17 @@ import {
   stripFabricatedMeeting,
 } from "../persona/meeting-guard.js";
 import { decideTalkMove, isTroubleTalk, type TalkMove } from "../persona/talk-moves.js";
+import {
+  ALL_CHANNELS_OFF,
+  CHANNEL_LABEL,
+  DEFAULT_PROACTIVE_CHANNELS,
+  buildChannelNote,
+  decideProactive,
+  formatProactiveDecision,
+  type ProactiveChannel,
+  type ProactiveChannels,
+  type ProactiveDecision,
+} from "../impulse/proactive-plan.js";
 import { resolveOwnerScope, OWNER_CLI } from "../data/owner.js";
 import { extractUserFactsAsync, getUserFactsContext } from "../data/user-facts.js";
 import { getT1ArcContext } from "../data/t1-injection.js";
@@ -1742,15 +1753,143 @@ export async function* processMessageStream(
   }
 }
 
+// ── 主动消息：链路窗口 + 决策留痕（v0.4.0）──────
+
+/**
+ * 每条 owner 的"冷场窗口"标记与最近决策。
+ * 只存在进程内（重启后最多多补一句，治理上限仍在持久化状态里），
+ * 目的是让 /why 能回答「她最近为什么没主动找我」。
+ */
+interface ProactiveWindowState {
+  /** 本轮冷场里已经补过话的时间 */
+  followUpAt: number | null;
+  /** 本轮冷场里已经开过话题的时间 */
+  openTopicAt: number | null;
+  /** 对方上一次回话之后，她已经主动发过几条（对方回话后清零） */
+  sentSinceUserReply: number;
+  /** 已计入的对方最后回话时间（用于判断是否来新消息） */
+  lastUserAtSeen: number | null;
+  /** 最近决策（最新在前，最多 8 条）；note 记录"决定了但没发出去"的原因 */
+  recent: Array<{ at: number; decision: ProactiveDecision; note?: string }>;
+}
+
+const MAX_PROACTIVE_RECORDS = 8;
+const proactiveWindows = new Map<string, ProactiveWindowState>();
+
+function proactiveWindowFor(owner: string): ProactiveWindowState {
+  let w = proactiveWindows.get(owner);
+  if (!w) {
+    w = {
+      followUpAt: null,
+      openTopicAt: null,
+      sentSinceUserReply: 0,
+      lastUserAtSeen: null,
+      recent: [],
+    };
+    proactiveWindows.set(owner, w);
+  }
+  return w;
+}
+
+/** 测试用：清空进程内窗口状态 */
+export function resetProactiveWindows(): void {
+  proactiveWindows.clear();
+}
+
+/** 记录一次主动决策（供 /why 与模拟脚本使用） */
+export function recordProactiveDecision(owner: string, decision: ProactiveDecision): void {
+  const w = proactiveWindowFor(owner);
+  w.recent.unshift({ at: Date.now(), decision });
+  if (w.recent.length > MAX_PROACTIVE_RECORDS) w.recent.length = MAX_PROACTIVE_RECORDS;
+}
+
+/** 决定了要发、但被消息门挡住（深夜/免打扰等）——补一条注记，别让 /why 显示成"发送" */
+function markProactiveBlocked(owner: string, note: string): void {
+  const w = proactiveWindowFor(owner);
+  if (w.recent.length > 0) w.recent[0].note = note;
+}
+
+/**
+ * /why 用：她最近怎么决定「要不要主动找你」。
+ * 只列最近决策 + 今天已发送次数/下一次最早时间，不复述对话正文。
+ */
+export function buildProactiveExplain(owner: string): string[] {
+  const w = proactiveWindows.get(owner);
+  const lines: string[] = ["", "【她最近怎么决定要不要主动找你】"];
+  if (!w || w.recent.length === 0) {
+    lines.push("还没有记录（生活流心跳每 15 分钟跑一次，跑过之后这里会有原因）。");
+    return lines;
+  }
+  for (const item of w.recent.slice(0, 5)) {
+    const time = new Date(item.at).toLocaleTimeString("zh-CN", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const label = item.decision.action === "send" ? (item.note ? "触发但没发" : "发送") : "跳过";
+    const detail =
+      item.decision.action === "send"
+        ? `${CHANNEL_LABEL[item.decision.channel]}（${item.decision.detail}）`
+        : `${item.decision.detail}`;
+    lines.push(`- ${time} ${label} · ${detail}${item.note ? `（${item.note}）` : ""}`);
+  }
+  lines.push("提示：主动消息受「单日上限 / 两次间隔 / 链路开关 / 亲密度 / 沉默时长」共同决定。");
+  return lines;
+}
+
+/** 把配置里的链路开关归一化成完整对象（`KAREN_PROACTIVE_CHANNELS=off` 一键全关） */
+function resolveProactiveChannels(config: ConversationState["config"]): ProactiveChannels {
+  if (process.env.KAREN_PROACTIVE_CHANNELS === "off") return { ...ALL_CHANNELS_OFF };
+  const raw = config.proactive_channels ?? {};
+  return {
+    follow_up: raw.follow_up ?? DEFAULT_PROACTIVE_CHANNELS.follow_up,
+    silence_revive: raw.silence_revive ?? DEFAULT_PROACTIVE_CHANNELS.silence_revive,
+    life_share: raw.life_share ?? DEFAULT_PROACTIVE_CHANNELS.life_share,
+    open_topic: raw.open_topic ?? DEFAULT_PROACTIVE_CHANNELS.open_topic,
+  };
+}
+
+/** 会话里用户/她各自最后一条消息的时间（按时间顺序扫，最后写入者胜出） */
+function lastMessageTimes(session: ConversationSession): {
+  lastUserAt: number | null;
+  lastHerAt: number | null;
+} {
+  let lastUserAt: number | null = null;
+  let lastHerAt: number | null = null;
+  for (const m of session.messages) {
+    if (m.role === "user") lastUserAt = m.timestamp;
+    else if (m.role === "assistant") lastHerAt = m.timestamp;
+  }
+  return { lastUserAt, lastHerAt };
+}
+
+/** 各链路的"冲动强度"（沿用 0-1 语义，供渲染/门控复用） */
+const CHANNEL_INTENSITY: Record<ProactiveChannel, number> = {
+  follow_up: 0.45,
+  open_topic: 0.4,
+  silence_revive: 0.55,
+  life_share: 0.5,
+};
+
 /**
  * 生活流心跳：检查她此刻的生活状态，生成分享冲动。
  * 触发源优先级：因果链 > 天气 > 情绪 > 时间节点。
  * 沉默保温仅在阶段 4（>72h）作为兜底。
  * 不做深夜禁言——消息门自会判断延迟或发送。
  */
+export type ProactiveOutcome =
+  | {
+      sent: true;
+      reply: string;
+      logs: string[];
+      qqFace?: string;
+      channel: ProactiveChannel;
+    }
+  | { sent: false; logs: string[]; decision: ProactiveDecision };
+
 export async function processProactive(
   state: ConversationState,
-): Promise<{ reply: string; logs: string[]; qqFace?: string } | null> {
+): Promise<ProactiveOutcome> {
   const logs: string[] = [];
   const { persona, config, emotionState, guiltState, socialTact, silenceState, session,
     causalChains, weatherPerception } = state;
@@ -1768,7 +1907,11 @@ export async function processProactive(
 
   // 最小间隔：两次心跳之间至少 8 分钟（防止并发重复）
   if (state.lastHeartbeatAt && now.getTime() - state.lastHeartbeatAt < 8 * 60 * 1000) {
-    return null;
+    return {
+      sent: false,
+      logs,
+      decision: { action: "skip", reason: "min_gap", detail: "心跳过于频繁（距上次不足 8 分钟）" },
+    };
   }
   state.lastHeartbeatAt = now.getTime();
   persistRuntimeState(state);
@@ -1781,12 +1924,8 @@ export async function processProactive(
   }
   const MAX_PROACTIVE_PER_DAY = 4;
   const MIN_PROACTIVE_GAP_MS = 30 * 60 * 1000;
-  if (state.proactiveCountToday >= MAX_PROACTIVE_PER_DAY) return null;
-  if (state.lastProactiveSentAt && now.getTime() - state.lastProactiveSentAt < MIN_PROACTIVE_GAP_MS) {
-    return null;
-  }
 
-  // ── 1. 收集触发候选 ──────────────────────────
+  // ── 1. 收集生活流候选（她自己的生活里正在发生的事）───
 
   const candidates: ImpulseCandidate[] = [];
 
@@ -1821,7 +1960,7 @@ export async function processProactive(
     const dir = emotionState.vector > 0 ? "开心" : "有点闷";
     candidates.push({
       source: "情绪",
-      description: `你此刻心情${dir}。你想到了一个人可以说说话。`,
+      description: `你此刻心情${dir}。你想到了一个可以说说话。`,
       intensity: emotionAbs * 0.6,
       priority: 5,
     });
@@ -1844,29 +1983,55 @@ export async function processProactive(
     });
   }
 
-  // ── 2. 沉默保温（仅阶段 4: >72h，兜底）─────
+  // ── 2. 四条链路决策（v0.4.0：补话 / 沉默保温 / 生活流 / 冷场开话题）───
+  // 沉默保温由决策模块按沉默时长判定，不再只看阶段 4。
+  const lifeTop = candidates.length > 0
+    ? [...candidates].sort((a, b) => b.priority - a.priority)[0]
+    : null;
+  const window = proactiveWindowFor(state.owner);
+  const { lastUserAt, lastHerAt } = lastMessageTimes(session);
+  // 对方来新消息 → "连推"计数清零
+  if (lastUserAt !== null && (window.lastUserAtSeen === null || lastUserAt > window.lastUserAtSeen)) {
+    window.lastUserAtSeen = lastUserAt;
+    window.sentSinceUserReply = 0;
+  }
+  const decision = decideProactive({
+    now: now.getTime(),
+    lastUserAt,
+    lastHerAt,
+    followUpAt: window.followUpAt,
+    openTopicAt: window.openTopicAt,
+    lastProactiveAt: state.lastProactiveSentAt || null,
+    proactiveCountToday: state.proactiveCountToday,
+    maxPerDay: MAX_PROACTIVE_PER_DAY,
+    minGapMs: MIN_PROACTIVE_GAP_MS,
+    closeness: persona.relationship.closeness,
+    silencePhase: getSilencePhase(silenceState),
+    silenceReviveSent: silenceState.restartSent,
+    hasLifeCandidate: lifeTop !== null,
+    lifePriority: lifeTop?.priority ?? 0,
+    unansweredProactive: window.sentSinceUserReply,
+    paused: state.proactivePaused,
+    channels: resolveProactiveChannels(config),
+  });
 
-  const phase = getSilencePhase(silenceState);
-  if (phase >= 4 && !silenceState.restartSent) {
-    candidates.push({
-      source: "沉默保温",
-      description: "对方好几天没消息了。你有点在意，决定主动问问。",
-      intensity: 0.5,
-      priority: 8, // 高但不是最高——因果链比她更自然
-    });
+  recordProactiveDecision(state.owner, decision);
+  logs.push(`[主动] ${formatProactiveDecision(decision)}｜${decision.detail}`);
+
+  if (decision.action === "skip") {
+    return { sent: false, logs, decision };
   }
 
-  // ── 3. 选择触发 ──────────────────────────────
-
-  if (candidates.length === 0) return null;
-
-  // 按优先级排序，取最高的
-  candidates.sort((a, b) => b.priority - a.priority);
-  const picked = candidates[0];
-
-  // 触发概率 = priority/10（高优先级更可能触发）
-  const chance = Math.min(0.75, picked.priority / 10);
-  if (Math.random() > chance) return null;
+  // 统一成"触发候选"形状，下游（日志/门控/生成/渲染）继续复用
+  const picked: ImpulseCandidate =
+    decision.channel === "life_share" && lifeTop
+      ? lifeTop
+      : {
+          source: CHANNEL_LABEL[decision.channel],
+          description: decision.detail,
+          intensity: CHANNEL_INTENSITY[decision.channel],
+          priority: 0,
+        };
 
   logs.push(`[主动] 触发源=${picked.source} 强度=${picked.intensity.toFixed(2)}`);
 
@@ -1912,16 +2077,21 @@ export async function processProactive(
     } else {
       logs.push(`[主动] 门控延迟(${picked.source}): ${gate.reason}`);
     }
-    return null;
+    markProactiveBlocked(state.owner, `消息门延迟：${gate.reason}`);
+    return { sent: false, logs, decision };
   }
   if (gate.type !== "reply") {
     logs.push(`[主动] 消息门阻止(${picked.source}): ${gate.reason}`);
-    return null;
+    markProactiveBlocked(state.owner, `消息门阻止：${gate.reason}`);
+    return { sent: false, logs, decision };
   }
 
   // 标记状态
   state.lastSharedWeather = cond;
-  if (phase >= 4) silenceState.restartSent = true;
+  if (decision.channel === "silence_revive") silenceState.restartSent = true;
+  // 记录本轮冷场已用过的链路（对方回话后自动失效：时间戳会比较）
+  if (decision.channel === "follow_up") window.followUpAt = now.getTime();
+  if (decision.channel === "open_topic") window.openTopicAt = now.getTime();
 
   // ── 5. 生成消息 ──────────────────────────────
 
@@ -1931,7 +2101,12 @@ export async function processProactive(
     guilt: guiltState.guilt,
     emotion: emotionState.vector,
     hour,
-    mode: phase >= 4 ? "guilty" : emotionState.vector > 0.3 ? "close" : "neutral",
+    mode:
+      decision.channel === "silence_revive"
+        ? "guilty"
+        : emotionState.vector > 0.3
+          ? "close"
+          : "neutral",
     closeness: persona.relationship.closeness,
   };
   state.innerState = currentInner;
@@ -1949,12 +2124,12 @@ export async function processProactive(
     herViewOfYou: state.herViewOfYou ?? undefined,
   });
 
-  // 注入触发上下文：告诉 LLM 她因为什么想到了对方
+  // 注入触发上下文：告诉 LLM 她因为什么、以什么姿态开口
   const proactiveInject = [
     ``,
     `## 此刻的冲动`,
-    `${picked.description}`,
-    `自然地发一条消息，从你当下的生活出发。不要用"最近咋样"这种泛泛的开场——你是因为具体的事情才想到他的。`,
+    buildChannelNote(decision.channel, picked.description),
+    `自然地发一条消息。不要用"最近咋样"这种泛泛的开场——你是因为具体的事情才想到他的。`,
   ].join("\n");
 
   // 跨轮反重复：主动消息同样别和上一轮开口一样
@@ -2003,10 +2178,11 @@ export async function processProactive(
   state.consecutiveSilences = 0;
   state.lastProactiveSentAt = now.getTime();
   state.proactiveCountToday += 1;
+  window.sentSinceUserReply += 1;
   persistRuntimeState(state);
 
   logs.push(`[主动] 已发送: ${previewText(reply)}`);
-  return { reply, logs, qqFace: rendered.qqFace };
+  return { sent: true, reply, logs, qqFace: rendered.qqFace, channel: decision.channel };
 }
 
 // ── 统计信息 ──────────────────────────────────

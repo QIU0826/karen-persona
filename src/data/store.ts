@@ -98,6 +98,20 @@ export interface AppConfig {
   typo_recall_probability?: number;
   typo_recall_delay_ms?: number;
   typo_recall_cooldown_minutes?: number;
+  /**
+   * 主动消息链路开关（v0.4.0）。四条链路独立，缺省全部开启：
+   * - follow_up：她说完一句、你没回，隔 20 分钟~3 小时补一句（不催不追问）
+   * - open_topic：冷场 3 小时以上，主动开个话头
+   * - life_share：她自己生活里有事发生（因果链/天气/情绪/时段），想跟你分享
+   * - silence_revive：好几天没联系，重启联系
+   * 调试可用环境变量 `KAREN_PROACTIVE_CHANNELS=off` 一次性全关。
+   */
+  proactive_channels?: {
+    follow_up?: boolean;
+    open_topic?: boolean;
+    life_share?: boolean;
+    silence_revive?: boolean;
+  };
 }
 
 /** 配置错误。消息面向用户，可直接打印。 */
@@ -515,6 +529,9 @@ export function loadConfig(): AppConfig {
     ? Math.round(parseOptionalNumber(typoRecallCooldownPicked.value, typoRecallCooldownPicked.source, 0, 1440))
     : 20;
 
+  // 主动消息链路开关（可选；不写则四条全开）
+  const proactiveChannels = parseProactiveChannels(raw.proactive_channels);
+
   return {
     persona,
     her_name: herName,
@@ -552,9 +569,44 @@ export function loadConfig(): AppConfig {
     typo_recall_probability: typoRecallProbability,
     typo_recall_delay_ms: typoRecallDelayMs,
     typo_recall_cooldown_minutes: typoRecallCooldownMinutes,
+    proactive_channels: proactiveChannels,
     ai_disclosure: aiDisclosure,
     age_gate_enabled: ageGateEnabled,
   };
+}
+
+/** 主动消息链路名（与 src/impulse/proactive-plan.ts 的 ProactiveChannel 对应） */
+const PROACTIVE_CHANNEL_KEYS = ["follow_up", "open_topic", "life_share", "silence_revive"] as const;
+
+/**
+ * 解析 proactive_channels（嵌套布尔映射）。
+ * 严格校验：写错链路名或非布尔值直接报错，避免"以为关了其实没关"。
+ */
+function parseProactiveChannels(value: unknown): AppConfig["proactive_channels"] {
+  if (value === undefined || value === null) return undefined;
+  if (!isPlainObject(value)) {
+    throw new ConfigError(
+      'proactive_channels 必须是对象，例如：proactive_channels: { follow_up: false }',
+    );
+  }
+  const src = value as Record<string, unknown>;
+  for (const key of Object.keys(src)) {
+    if (!(PROACTIVE_CHANNEL_KEYS as readonly string[]).includes(key)) {
+      throw new ConfigError(
+        `proactive_channels 里有未知链路 "${key}"（可选：${PROACTIVE_CHANNEL_KEYS.join(" / ")}）`,
+      );
+    }
+  }
+  const out: NonNullable<AppConfig["proactive_channels"]> = {};
+  for (const key of PROACTIVE_CHANNEL_KEYS) {
+    const v = src[key];
+    if (v === undefined || v === null) continue;
+    if (typeof v !== "boolean") {
+      throw new ConfigError(`proactive_channels.${key} 必须是 true 或 false（收到 ${JSON.stringify(v)}）`);
+    }
+    out[key] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** 解析布尔配置项（true/false、1/0、yes/no）。 */

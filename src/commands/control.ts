@@ -6,7 +6,11 @@
  */
 import { describeEmotion } from "../persona/emotion.js";
 import { closenessLabel } from "../persona/relationship.js";
-import { getStateSummary, type ConversationState } from "../pipeline/orchestrator.js";
+import {
+  buildProactiveExplain,
+  getStateSummary,
+  type ConversationState,
+} from "../pipeline/orchestrator.js";
 import { buildAboutText } from "../persona/disclosure.js";
 import { getConsent } from "../data/consent.js";
 import { deleteEpisode, searchEpisodesByKeyword } from "../data/vector.js";
@@ -78,6 +82,7 @@ export function buildWhyText(state: ConversationState): string {
   );
   lines.push(`主动消息：${state.proactivePaused ? "已暂停（/resume 恢复）" : "开启"}`);
   lines.push(`连续被沉默次数：${state.consecutiveSilences}（≥3 会强制回复一次）`);
+  lines.push(...buildProactiveExplain(state.owner));
   lines.push("", "提示：裁决由「情绪/时间/亲密度/话题/免打扰」共同决定，不是关键词匹配。");
   return lines.join("\n");
 }
@@ -91,7 +96,7 @@ export function buildPauseText(paused: boolean): string {
 export function buildHelpText(): string {
   return [
     "可用指令：",
-    "/why: 解释她上一轮为什么这样回",
+    "/why: 解释她上一轮为什么这样回、最近为什么没主动找你",
     "/stats: 关系/情绪/记忆状态",
     "/forget 关键词: 删除包含关键词的记忆（先预览，加 --yes 才删）",
     "/pause: 暂停主动消息（仍会回复你的消息）",
