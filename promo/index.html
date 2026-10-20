@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>KAREN — 住在你 QQ 里的 AI 虚拟人</title>
+<meta name="description" content="KAREN：一个有自己生活、情绪和记忆的 AI 虚拟人。她能记住你说过的话，也会在某个时刻主动来找你。" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --bg: #ffffff;
+  --ink: #0a0a0a;
+  --font: "Inter Tight", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: auto; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+#scroll-spacer { position: relative; width: 100%; user-select: none; background: #fff; }
+
+/* ── 自定义光标（桌面） ───────────────────────── */
+#cursor {
+  position: fixed; left: 0; top: 0; z-index: 50;
+  width: 48px; height: 48px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  mix-blend-mode: exclusion;
+  opacity: 0; transition: opacity .35s ease;
+}
+#cursor svg { display: block; width: 48px; height: 48px; }
+#cursor .glyph {
+  font-family: var(--font); font-weight: 500; font-size: 12px;
+  letter-spacing: .02em; fill: #fff;
+}
+body.cursor-ready #cursor { opacity: 1; }
+@media (hover: none), (pointer: coarse), (max-width: 1023px) {
+  #cursor { display: none; }
+  body { cursor: auto; }
+}
+@media (hover: hover) and (pointer: fine) and (min-width: 1024px) {
+  body.cursor-active, body.cursor-active * { cursor: none !important; }
+}
+
+/* ── Logo ─────────────────────────────── */
+#logo {
+  position: fixed; top: 16px; left: 16px; z-index: 20;
+  width: 124px; pointer-events: none;
+  mix-blend-mode: exclusion;
+  animation: rise .6s cubic-bezier(.25,.1,.25,1) both;
+}
+#logo svg { display: block; width: 100%; height: auto; }
+#logo .word { font-family: var(--font); font-weight: 500; font-size: 74px; letter-spacing: -0.06em; fill: #fff; }
+#logo .ring { fill: none; stroke: #fff; stroke-width: 3; }
+#logo .ring-text { font-family: var(--font); font-weight: 500; font-size: 26px; fill: #fff; letter-spacing: -0.02em; }
+
+/* ── Caption ──────────────────────────── */
+#caption {
+  position: fixed; z-index: 20; pointer-events: none;
+  left: 16px; top: 118px;
+  width: calc(100vw - 32px);
+  font-family: var(--font); font-weight: 500; font-size: 12px;
+  line-height: 140%; letter-spacing: -0.04em; color: #fff;
+  mix-blend-mode: exclusion;
+  animation: rise .6s cubic-bezier(.25,.1,.25,1) .3s both;
+}
+#caption .dim { opacity: .62; }
+
+/* ── Nav ──────────────────────────────── */
+#nav {
+  position: fixed; top: 16px; right: 16px; z-index: 20;
+  width: auto; height: 30px; pointer-events: none;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px; mix-blend-mode: exclusion;
+  animation: rise .6s cubic-bezier(.25,.1,.25,1) .15s both;
+}
+#nav .about {
+  display: none;
+  font-family: var(--font); font-weight: 500; font-size: 15px;
+  letter-spacing: -0.04em; text-transform: uppercase; color: #fff;
+}
+#nav .right { display: flex; align-items: center; gap: 20px; }
+#nav svg { display: block; width: 24px; height: 24px; }
+#nav .cart {
+  font-family: var(--font); font-weight: 500; font-size: 13px;
+  letter-spacing: -0.04em; color: #fff; text-transform: uppercase;
+}
+#nav a, #outro-buy { text-decoration: none; }
+
+/* ── 产品信息 / Outro info ─────────────── */
+#outro-info {
+  position: fixed; z-index: 20; pointer-events: none;
+  left: 0; right: 0; bottom: 48px;
+  display: flex; flex-direction: column; align-items: center;
+  mix-blend-mode: exclusion;
+  opacity: 0; animation: fadein .8s ease .45s forwards;
+}
+#outro-info .top { display: flex; flex-direction: column; align-items: flex-start; width: 252px; margin-bottom: 12px; }
+#outro-info .circle {
+  position: relative; width: 20px; height: 20px; margin: 0 auto;
+}
+#outro-info .circle svg { display: block; width: 100%; height: 100%; }
+#outro-info .circle .symbol {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-family: var(--font); font-weight: 500; font-size: 10px;
+  letter-spacing: -0.04em; text-transform: uppercase; color: #fff;
+}
+#outro-info .collection {
+  margin-top: 10px; width: 100%;
+  font-family: var(--font); font-weight: 500; font-size: 20px;
+  line-height: 100%; letter-spacing: -0.04em; text-transform: uppercase;
+  text-align: center; color: #fff;
+}
+#outro-info .price {
+  font-family: var(--font); font-weight: 500; font-size: 60px;
+  line-height: 100%; letter-spacing: -0.04em; color: #fff;
+  text-align: center;
+}
+
+/* ── CTA（滚动到底部出现） ─────────────── */
+#outro-buy {
+  position: fixed; z-index: 20; pointer-events: none;
+  left: 16px; right: 16px; bottom: 60px; height: 100px;
+  border-radius: 1335px; background: #fff;
+  display: flex; align-items: center; justify-content: center;
+  transform-origin: center bottom; transform: scale(0);
+  mix-blend-mode: exclusion;
+}
+#outro-buy span {
+  font-family: var(--font); font-weight: 500; font-size: 72px;
+  letter-spacing: -0.04em; color: #fff; mix-blend-mode: exclusion;
+}
+
+/* ── 视频 / 角色层 ────────────────────── */
+#main-canvas {
+  position: fixed; left: 0; top: 220px; z-index: 0;
+  width: 100vw; height: calc(100vh - 220px);
+  overflow: hidden; pointer-events: none;
+  opacity: 0; transition: opacity .3s ease;
+}
+#main-canvas.ready { opacity: 1; }
+#main-canvas video {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; display: none;
+}
+#main-canvas video.active { display: block; }
+#character-layer {
+  position: fixed; left: 0; top: 220px; z-index: 0;
+  width: 100vw; height: calc(100vh - 220px);
+  display: none; align-items: flex-end; justify-content: center;
+  padding-bottom: 150px;
+  pointer-events: none;
+}
+#character-layer img {
+  height: 96%; max-width: 92vw; object-fit: contain;
+  filter: drop-shadow(0 30px 60px rgba(0,0,0,.45));
+  animation: floaty 7s ease-in-out infinite;
+}
+#character-layer.show { display: flex; }
+
+/* ── 白色遮罩 ─────────────────────────── */
+#outro-overlay {
+  position: fixed; inset: 0; z-index: 12; background: #fff;
+  opacity: 0; pointer-events: none;
+}
+
+/* ── 黑色画廊面板 ─────────────────────── */
+#black-panel {
+  position: fixed; inset: 0; z-index: 10; background: #000;
+  transform: translateY(100vh);
+  will-change: transform;
+  overflow: hidden;
+}
+#panel-inner {
+  width: 100%;
+  padding-top: min(400px, 40vh);
+  will-change: transform;
+}
+#gallery {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6vw 5vw;
+  padding: 0 5vw 24vh;
+}
+.bp-cell { position: relative; aspect-ratio: 2 / 3; }
+.bp-card {
+  position: absolute; inset: 0;
+  transform: scale(0);
+  transform-origin: center bottom;
+  will-change: transform;
+  overflow: hidden;
+  background: #111;
+}
+.bp-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bp-card .label {
+  position: absolute; left: 10px; top: 10px;
+  font-family: var(--font); font-weight: 500; font-size: 10px;
+  letter-spacing: .02em; color: #fff; text-transform: uppercase;
+  opacity: .9; text-shadow: 0 1px 8px rgba(0,0,0,.6);
+  background: rgba(0,0,0,.35); padding: 3px 6px; border-radius: 2px;
+  backdrop-filter: blur(2px);
+}
+.bp-card .cap {
+  position: absolute; left: 12px; bottom: 12px;
+  font-family: var(--font); font-weight: 500; font-size: 11px;
+  letter-spacing: -0.02em; color: #fff;
+  opacity: .92; text-shadow: 0 1px 10px rgba(0,0,0,.7);
+  background: rgba(0,0,0,.3); padding: 3px 6px; border-radius: 2px;
+}
+
+/* ── Footer ───────────────────────────── */
+#outro-footer {
+  position: fixed; left: 16px; bottom: 24px; z-index: 20;
+  display: flex; justify-content: space-between; width: calc(100vw - 32px);
+  pointer-events: none; mix-blend-mode: exclusion;
+  opacity: 0;
+}
+#outro-footer span {
+  font-family: var(--font); font-weight: 500; font-size: 11px;
+  letter-spacing: -0.02em; text-transform: uppercase; color: #fff;
+}
+
+/* ── 桌面适配 ─────────────────────────── */
+@media (min-width: 640px) {
+  #logo { width: 266px; top: 24px; left: 24px; }
+  #caption { left: 24px; top: 180px; width: calc(50vw - 48px); }
+  #nav { top: 24px; right: 24px; }
+  #nav .about { display: block; }
+  #nav .right { gap: 50px; }
+  #nav svg { width: 30px; height: 30px; }
+  #nav .cart { font-size: 15px; }
+  #gallery { grid-template-columns: repeat(3, 1fr); }
+}
+@media (min-width: 1024px) {
+  #logo { width: 355px; top: 32px; left: 32px; }
+  #caption { left: 32px; top: 244px; width: 692px; }
+  #nav { top: 32px; right: 32px; width: 330px; }
+  #main-canvas, #character-layer { top: 0; height: 100vh; }
+  #character-layer { padding-bottom: 0; }
+  #outro-info { bottom: 80px; width: 330px; left: auto; right: 32px; align-items: center; }
+  #outro-info .top { width: 100%; margin-bottom: 32px; }
+  #outro-info .circle { width: 30px; height: 30px; }
+  #outro-info .circle .symbol { font-size: 15px; }
+  #outro-info .collection { font-size: 30px; }
+  #outro-info .price { font-size: 80px; }
+  #outro-buy { left: auto; right: 32px; bottom: 32px; width: 330px; height: 174px; transform-origin: right bottom; }
+  #outro-buy span { font-size: 110px; }
+  #outro-footer { left: 32px; bottom: 32px; width: auto; gap: 80px; }
+  #outro-footer span { font-size: 13px; }
+  #gallery { grid-template-columns: repeat(4, 1fr); gap: 8vh 6vw; padding: 0 6vw 30vh; }
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+@keyframes floaty { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-14px) scale(1.012); } }
+
+@media (prefers-reduced-motion: reduce) {
+  #logo, #caption, #nav, #outro-info { animation: none; opacity: 1; }
+  #character-layer img { animation: none; }
+  .bp-card { will-change: auto; }
+}
+</style>
+</head>
+<body>
+<div id="scroll-spacer">
+  <!-- 自定义光标 -->
+  <div id="cursor" aria-hidden="true">
+    <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="24" cy="24" r="22.75" stroke="#fff" stroke-width="2.5" />
+      <text class="glyph" x="24" y="29" text-anchor="middle">K</text>
+    </svg>
+  </div>
+
+  <!-- Logo -->
+  <div id="logo" aria-label="KAREN">
+    <svg viewBox="0 0 355 110" xmlns="http://www.w3.org/2000/svg">
+      <text class="word" x="0" y="82">KAREN</text>
+      <circle class="ring" cx="310" cy="55" r="26" />
+      <text class="ring-text" x="310" y="64" text-anchor="middle">R</text>
+    </svg>
+  </div>
+
+  <!-- Caption -->
+  <div id="caption">
+    她不是聊天机器人。她有自己的生活、情绪和记忆——<br />
+    住在你的 QQ 里，慢慢记得你说过的每一件小事。<br />
+    <span class="dim">A SELF-HOSTED AI PERSONA · QQ / ONEBOT</span>
+  </div>
+
+  <!-- Nav -->
+  <header id="nav">
+    <a class="about" href="#gallery" style="pointer-events:auto">ABOUT</a>
+    <div class="right">
+      <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M0 14H40" stroke="#fff" stroke-width="2.5" />
+        <path d="M0 26H40" stroke="#fff" stroke-width="2.5" />
+      </svg>
+      <a class="cart" id="nav-cta" href="#" style="pointer-events:auto">[ 体验 ]</a>
+    </div>
+  </header>
+
+  <!-- 产品信息 -->
+  <div id="outro-info">
+    <div class="top">
+      <div class="circle">
+        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="20" cy="20" r="18.75" stroke="#fff" stroke-width="2.5" />
+        </svg>
+        <span class="symbol" id="circle-symbol">8</span>
+      </div>
+      <div class="collection" id="collection"><span>ARCHIVE COLLECTION</span><br /><span>「KAREN」</span></div>
+    </div>
+    <div class="price">BETA</div>
+  </div>
+
+  <!-- CTA -->
+  <a id="outro-buy" href="#" aria-label="体验 KAREN"><span>体验</span></a>
+
+  <!-- 视频 / 角色 -->
+  <div id="main-canvas">
+    <video id="video-left" muted playsinline preload="auto"></video>
+    <video id="video-right" muted playsinline preload="auto"></video>
+  </div>
+  <div id="character-layer"><img src="assets/character.svg" alt="KAREN 卡通角色占位图" /></div>
+
+  <!-- 白色遮罩 -->
+  <div id="outro-overlay"></div>
+
+  <!-- 黑色画廊 -->
+  <div id="black-panel">
+    <div id="panel-inner">
+      <div id="gallery" aria-label="KAREN 日常档案"></div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer id="outro-footer">
+    <span>KAREN (R) 2026</span>
+    <span>PRIVACY POLICY</span>
+  </footer>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   KAREN 宣传页 · 素材与文案配置
+   — 想换成自己的角色/视频/图片，只改这一块即可。
+   - heroMode: "video" 用两段视频（左右鼠标 scrub）；"character" 用卡通角色图（可做透明 PNG）
+   - leftVideo/rightVideo: 任意可直接访问的 mp4（本地相对路径或 https 均可）
+   - characterImage: 卡通角色图（推荐透明背景 PNG/SVG，竖图 2:3 或更高）
+   - gallery: 10 张产品/角色档案图（可本地 assets，也可外链）
+   ═══════════════════════════════════════════════════════════════ */
+const CONFIG = {
+  heroMode: "video",
+
+  leftVideo: "https://d8j0ntlcm91z4.cloudfront.net/user_39ca84eAE1ODL9hbR5VhoEj8tBf/hf_20260625_154433_532a85d3-dabf-4265-b8bd-19ac6af31842.mp4",
+  rightVideo: "https://d8j0ntlcm91z4.cloudfront.net/user_39ca84eAE1ODL9hbR5VhoEj8tBf/hf_20260625_154401_a664f076-b971-4557-8728-40ef9ea4c49b.mp4",
+  characterImage: "assets/character.svg",
+
+  // 产品链接：默认打开本机 Web 控制台；正式发布时改成你的官网/下载页
+  ctaUrl: "/",
+  aboutUrl: "#gallery",
+
+  galleryLabels: [
+    "01 / 她的咖啡店", "02 / 雨天记忆", "03 / 深夜独白", "04 / 她的照片", "05 / 关系时间线",
+    "06 / 情绪切片", "07 / 表情与贴纸", "08 / 她眼中的你", "09 / 进化日志", "10 / 只属于你",
+  ],
+  galleryCaptions: [
+    "上海 · 静安区", "她记得你说过喜欢下雨", "凌晨两点还在想你说的话", "随手拍的一张",
+    "第 37 天", "今天有点累", "猫咪贴纸", "她偷偷写的", "承认自己在变化", "留在通讯录里的人",
+  ],
+  gallery: [
+    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_104530_521b2f85-c0f3-4d0e-9704-b578315b4cb9.png&w=1920&q=85",
+    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103711_76ccdb8b-5043-4f47-9c54-4379713393ea.png&w=1920&q=85",
+    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103728_394f6a1b-85e2-4386-a4f6-408472a0a5b7.png&w=1920&q=85",
+    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103739_86743e0e-16a7-4bee-bf38-dd67985344dc.png&w=1920&q=85",
+    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103748_b2215dc8-a3a7-470d-b19a-5b87fa7d0c37.png&w=1920&q=85",
+    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103758_e919ce72-5c9d-4b87-9be6-d7647b34825c.png&w=1920&q=85",
+    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103808_013583d0-3386-4547-9832-37c7d8edb3ac.png&w=1920&q=85",
+    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103937_a0c49d0a-33eb-4ead-aea6-c1baf241acbc.png&w=1920&q=85",
+    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103956_d18ed8fd-7b6f-4b86-91f9-20010fe38670.png&w=1920&q=85",
+    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_104034_ba5a9963-87ff-4008-a545-6bd686c088b5.png&w=1920&q=85"
+  ],
+};
+
+const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const vh = () => window.innerHeight;
+const vw = () => window.innerWidth;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+/* ── 链接 ─────────────────────────────── */
+document.getElementById("nav-cta").href = CONFIG.ctaUrl;
+document.getElementById("outro-buy").href = CONFIG.ctaUrl;
+document.querySelector("#nav .about").href = CONFIG.aboutUrl;
+
+/* ── 自定义光标 ───────────────────────── */
+(function initCursor() {
+  if (window.matchMedia("(pointer: coarse)").matches || vw() < 1024) return;
+  const cursor = document.getElementById("cursor");
+  document.body.classList.add("cursor-active");
+  document.body.classList.add("cursor-ready");
+  window.addEventListener("mousemove", (e) => {
+    cursor.style.left = e.clientX + "px";
+    cursor.style.top = e.clientY + "px";
+  }, { passive: true });
+  window.addEventListener("mouseleave", () => document.body.classList.remove("cursor-ready"));
+  window.addEventListener("mouseenter", () => document.body.classList.add("cursor-ready"));
+})();
+
+/* ── 视频 / 角色模式 ──────────────────── */
+const canvas = document.getElementById("main-canvas");
+const charLayer = document.getElementById("character-layer");
+const videoLeft = document.getElementById("video-left");
+const videoRight = document.getElementById("video-right");
+const videos = [videoLeft, videoRight];
+
+function fallbackToCharacter() {
+  canvas.style.display = "none";
+  charLayer.classList.add("show");
+  charLayer.querySelector("img").src = CONFIG.characterImage;
+}
+
+function setHeroMode() {
+  if (CONFIG.heroMode === "character") {
+    canvas.style.display = "none";
+    charLayer.classList.add("show");
+    charLayer.querySelector("img").src = CONFIG.characterImage;
+    return;
+  }
+  canvas.style.display = "block";
+  charLayer.classList.remove("show");
+  videoLeft.src = CONFIG.leftVideo;
+  videoRight.src = CONFIG.rightVideo;
+  videoRight.classList.add("active");
+  videos.forEach((v) => { v.load(); });
+  let ready = 0;
+  videos.forEach((v) => {
+    v.addEventListener("loadeddata", () => {
+      ready++;
+      if (ready >= 2) canvas.classList.add("ready");
+    }, { once: true });
+    v.addEventListener("error", () => fallbackToCharacter(), { once: true });
+  });
+  if (reduced) {
+    // 减少动态：不自动播放视频，直接展示卡通角色占位
+    fallbackToCharacter();
+    return;
+  }
+  // 5 秒内没有加载出视频（网络/外链失效）→ 回退角色图
+  setTimeout(() => {
+    if (!canvas.classList.contains("ready") && CONFIG.heroMode === "video") {
+      fallbackToCharacter();
+    }
+  }, 5000);
+}
+
+/* 桌面：鼠标 X 控制左右视频 scrub（方向与参考实现一致） */
+let activeSide = "right";
+let mouseX = null;
+function initVideoScrub() {
+  if (reduced) return;
+  const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  if (!finePointer || vw() < 1024) return;
+
+  window.addEventListener("mousemove", (e) => { mouseX = e.clientX; }, { passive: true });
+
+  function tick() {
+    requestAnimationFrame(tick);
+    if (mouseX === null || CONFIG.heroMode !== "video") return;
+    if (window.scrollY > vh() - 2) return; // 首屏之后不再 scrub
+
+    const w = vw();
+    const dead = Math.max(30, w * 0.05);
+    const center = w / 2;
+
+    if (mouseX >= center - dead && mouseX <= center + dead) {
+      // 死区：保持当前视频且 currentTime = 0（不重置正在 seek 的视频）
+      const v = activeSide === "left" ? videoLeft : videoRight;
+      if (!v.seeking && Math.abs(v.currentTime) > 0.02) v.currentTime = 0;
+      return;
+    }
+
+    // 鼠标在右侧 → 显示 LEFT 视频；鼠标在左侧 → 显示 RIGHT 视频
+    const side = mouseX > center + dead ? "left" : "right";
+    if (side !== activeSide) {
+      activeSide = side;
+      videoLeft.classList.toggle("active", side === "left");
+      videoRight.classList.toggle("active", side === "right");
+    }
+
+    const video = side === "left" ? videoLeft : videoRight;
+    const duration = video.duration || 0;
+    if (!duration || video.seeking) return;
+
+    const progress = side === "left"
+      ? (mouseX - (center + dead)) / (w - (center + dead))
+      : ((center - dead) - mouseX) / (center - dead);
+    video.currentTime = clamp(progress, 0, 1) * duration;
+  }
+  requestAnimationFrame(tick);
+}
+
+/* 移动端：两段视频交替自动播放 */
+function initMobileAutoplay() {
+  if (reduced || CONFIG.heroMode !== "video") return;
+  if (window.matchMedia("(hover: hover) and (pointer: fine)").matches && vw() >= 1024) return;
+
+  let current = videoLeft;
+  videoLeft.classList.add("active");
+  const play = (v) => { v.currentTime = 0; v.play().catch(() => {}); };
+  videoLeft.addEventListener("ended", () => {
+    current = videoRight;
+    videoLeft.classList.remove("active");
+    videoRight.classList.add("active");
+    play(videoRight);
+  });
+  videoRight.addEventListener("ended", () => {
+    current = videoLeft;
+    videoRight.classList.remove("active");
+    videoLeft.classList.add("active");
+    play(videoLeft);
+  });
+  play(videoLeft);
+}
+
+/* ── 画廊布局（与参考实现一致的错落算法） ── */
+function buildLayout(count, cols) {
+  const rows = [];
+  let placed = 0;
+  let r = 0;
+  while (placed < count) {
+    const row = new Array(cols).fill(-1);
+    const a = (r * 2 + (r % 2)) % cols;
+    row[a] = placed++;
+    if (r % 3 === 0 && placed < count) {
+      let b = (a + 2) % cols;
+      if (b === a) b = (a + 1) % cols;
+      if (row[b] === -1) row[b] = placed++;
+    }
+    rows.push(row);
+    r++;
+    if (r > 200) break;
+  }
+  return rows;
+}
+
+function cols() {
+  if (vw() < 640) return 2;
+  if (vw() < 1024) return 3;
+  return 4;
+}
+
+const galleryEl = document.getElementById("gallery");
+let cards = [];
+
+function buildGallery() {
+  galleryEl.innerHTML = "";
+  cards = [];
+  const rows = buildLayout(CONFIG.gallery.length, cols());
+  let index = 0;
+  rows.forEach((row) => {
+    row.forEach((cellIndex) => {
+      const cell = document.createElement("div");
+      cell.className = "bp-cell";
+      if (cellIndex < 0) { galleryEl.appendChild(cell); return; }
+      const card = document.createElement("div");
+      card.className = "bp-card";
+      if (cellIndex < CONFIG.gallery.length) {
+        const img = document.createElement("img");
+        img.src = CONFIG.gallery[cellIndex];
+        img.alt = CONFIG.galleryLabels[cellIndex] || "";
+        img.loading = "lazy";
+        img.decoding = "async";
+        card.appendChild(img);
+      }
+      const label = document.createElement("div");
+      label.className = "label";
+      label.textContent = CONFIG.galleryLabels[cellIndex] || "";
+      card.appendChild(label);
+      const cap = document.createElement("div");
+      cap.className = "cap";
+      cap.textContent = CONFIG.galleryCaptions[cellIndex] || "";
+      card.appendChild(cap);
+      cell.appendChild(card);
+      galleryEl.appendChild(cell);
+      cards.push({ el: card, index: index++ });
+    });
+  });
+
+  // transform-origin：左半列 → right bottom，右半列 → left bottom
+  cards.forEach(({ el }) => {
+    const rect = el.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    el.style.transformOrigin = centerX < vw() / 2 ? "right bottom" : "left bottom";
+  });
+}
+
+/* ── 滚动 & 卡片缩放（RAF 驱动） ──────── */
+const spacer = document.getElementById("scroll-spacer");
+const panel = document.getElementById("black-panel");
+const panelInner = document.getElementById("panel-inner");
+const overlay = document.getElementById("outro-overlay");
+const info = document.getElementById("outro-info");
+const buy = document.getElementById("outro-buy");
+const footer = document.getElementById("outro-footer");
+const symbolEl = document.getElementById("circle-symbol");
+const SYMBOLS = ["8", "$", "^^", "%", "/"];
+let maxScroll = 0;
+let lastSymbolAt = 0;
+
+function measure() {
+  maxScroll = Math.max(0, panelInner.scrollHeight - vh());
+  spacer.style.height = `${vh() + maxScroll + 2 * vh()}px`;
+}
+
+function updateCards(scrollY) {
+  cards.forEach(({ el }) => {
+    if (reduced) { el.style.transform = "scale(1)"; return; }
+    const rect = el.getBoundingClientRect();
+    const top = rect.top;
+    const bottom = rect.bottom;
+    if (bottom <= 0 || top >= vh()) { el.style.transform = "scale(0)"; return; }
+    const enter = clamp((vh() - top) / (vh() * 0.6), 0, 1);
+    const exit = clamp(bottom / (vh() * 0.4), 0, 1);
+    const scale = Math.max(0, Math.min(enter, exit));
+    el.style.transform = `scale(${scale.toFixed(4)})`;
+  });
+}
+
+function tick() {
+  requestAnimationFrame(tick);
+  const y = window.scrollY;
+  const H = vh();
+
+  // Phase 1：黑色面板从下方滑上来
+  if (y < H) {
+    panel.style.transform = `translateY(${H - y}px)`;
+    panelInner.style.transform = "translateY(0)";
+  } else {
+    panel.style.transform = "translateY(0)";
+    panelInner.style.transform = `translateY(${-(y - H)}px)`;
+  }
+
+  // 首屏之后隐藏视频
+  const hero = document.getElementById("main-canvas");
+  if (hero.style.visibility !== (y > H ? "hidden" : "visible")) {
+    hero.style.visibility = y > H ? "hidden" : "visible";
+    charLayer.style.visibility = y > H ? "hidden" : "visible";
+  }
+
+  // Outro：白场 + 产品信息 + 按钮 + footer
+  const outroStart = H + maxScroll;
+  const p = clamp((y - outroStart) / Math.max(1, H - 100), 0, 1);
+  overlay.style.opacity = String(p);
+  info.style.transform = `translateY(${-p * (vw() < 1024 ? 132 : 166)}px)`;
+  buy.style.transform = `scale(${p})`;
+  footer.style.opacity = String(p);
+
+  // Circle symbol 随滚动随机切换（80ms 节流）
+  if (p === 0) {
+    const now = performance.now();
+    if (now - lastSymbolAt > 80 && y > 0) {
+      lastSymbolAt = now;
+      symbolEl.textContent = SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
+    }
+  }
+
+  updateCards(y);
+}
+
+/* ── 初始化 ───────────────────────────── */
+function init() {
+  setHeroMode();
+  buildGallery();
+  measure();
+  initVideoScrub();
+  initMobileAutoplay();
+  requestAnimationFrame(tick);
+}
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { buildGallery(); measure(); }, 180);
+});
+
+init();
+
+// 调试/截图用：?scroll=1600 直接滚到指定位置；?mode=character 强制角色模式
+(function debugParams() {
+  const params = new URLSearchParams(location.search);
+  const mode = params.get("mode");
+  if (mode === "character") {
+    CONFIG.heroMode = "character";
+    setHeroMode();
+  }
+  const scroll = Number(params.get("scroll") || 0);
+  if (scroll > 0) {
+    requestAnimationFrame(() => window.scrollTo(0, scroll));
+  }
+})();
+</script>
+</body>
+</html>

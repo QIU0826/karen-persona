@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1100" width="800" height="1100">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b1b22"/>
+      <stop offset="1" stop-color="#0a0a0c"/>
+    </linearGradient>
+    <linearGradient id="hair" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2433"/>
+      <stop offset="1" stop-color="#17131d"/>
+    </linearGradient>
+    <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6d8c8"/>
+      <stop offset="1" stop-color="#eec2ae"/>
+    </linearGradient>
+    <linearGradient id="coat" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b4152"/>
+      <stop offset="1" stop-color="#1f2430"/>
+    </linearGradient>
+  </defs>
+  <!-- 身体 -->
+  <path d="M250 1100c8-170 55-300 150-318 95 18 142 148 150 318z" fill="url(#coat)"/>
+  <path d="M330 800l70 60 70-60 28 34-98 86-98-86z" fill="#e9edf5" opacity="0.9"/>
+  <!-- 脖子 -->
+  <rect x="360" y="700" width="80" height="90" rx="34" fill="url(#skin)"/>
+  <!-- 头发后层 -->
+  <path d="M250 520c-16-150 43-283 150-283s166 133 150 283c-10 96-48 160-48 210H298c0-50-38-114-48-210z" fill="url(#hair)"/>
+  <!-- 脸 -->
+  <ellipse cx="400" cy="500" rx="130" ry="150" fill="url(#skin)"/>
+  <!-- 刘海 -->
+  <path d="M270 470c10-120 60-190 130-190s120 70 130 190c-30-54-72-84-130-84s-100 30-130 84z" fill="url(#hair)"/>
+  <!-- 眼睛 -->
+  <g fill="#241d26">
+    <path d="M330 505c0-20 14-34 33-34s33 14 33 34c0 24-14 38-33 38s-33-14-33-38z" opacity="0.92"/>
+    <path d="M470 505c0-20-14-34-33-34s-33 14-33 34c0 24 14 38 33 38s33-14 33-38z" opacity="0.92"/>
+  </g>
+  <g fill="#ffffff" opacity="0.9">
+    <circle cx="352" cy="498" r="9"/><circle cx="492" cy="498" r="9"/>
+  </g>
+  <!-- 腮红 -->
+  <ellipse cx="318" cy="566" rx="26" ry="14" fill="#f39a92" opacity="0.45"/>
+  <ellipse cx="482" cy="566" rx="26" ry="14" fill="#f39a92" opacity="0.45"/>
+  <!-- 嘴 -->
+  <path d="M382 590c8 8 28 8 36 0" stroke="#b4665f" stroke-width="6" fill="none" stroke-linecap="round"/>
+  <!-- 发饰 -->
+  <circle cx="266" cy="430" r="20" fill="#ff8f6b"/>
+  <path d="M266 410l6 14 15 2-11 10 3 15-13-8-13 8 3-15-11-10 15-2z" fill="#ffd8c9"/>
+  <!-- 衣领 -->
+  <path d="M330 820c30 34 60 40 70 40s40-6 70-40l-24-18-46 32-46-32z" fill="#12151c"/>
+  <!-- 耳麦/科技点缀 -->
+  <path d="M262 500c-22 0-40 18-40 40v60c0 22 18 40 40 40" stroke="#9aa4b8" stroke-width="8" fill="none" stroke-linecap="round" opacity="0.7"/>
+  <rect x="212" y="584" width="26" height="46" rx="13" fill="#9aa4b8" opacity="0.7"/>
+  <!-- 下方文字 -->
+</svg>

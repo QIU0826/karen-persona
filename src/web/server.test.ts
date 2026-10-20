@@ -308,6 +308,26 @@ describe("页面与安全头", () => {
     expect(page.text).toContain("你好呀");
   });
 
+  it("宣传页 /promo/ 返回 200（含角色素材），/promo 做 308 跳转，路径穿越被拒", async () => {
+    const core = await loadCore();
+    const { port } = await startServer(core);
+
+    const redirect = await request(port, "/promo", { redirect: "manual" });
+    expect(redirect.status).toBe(308);
+
+    const page = await request(port, "/promo/");
+    expect(page.status).toBe(200);
+    expect(page.text).toContain("KAREN");
+    expect(page.text).toContain("CONFIG");
+
+    const svg = await request(port, "/promo/assets/character.svg");
+    expect(svg.status).toBe(200);
+    expect(svg.headers.get("content-type")).toContain("image/svg");
+
+    const traversal = await request(port, "/promo/assets/../../.env");
+    expect(traversal.status).toBe(404);
+  });
+
   it("只绑定 127.0.0.1", async () => {
     const core = await loadCore();
     const { handle } = await startServer(core);

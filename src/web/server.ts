@@ -24,6 +24,8 @@
  */
 import http from "node:http";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { createLogger } from "../obs/logger.js";
 import { renderDashboard, type DashboardData } from "./dashboard.js";
 import {
@@ -283,12 +285,91 @@ async function handleRequest(
       return;
     }
 
+    // ── 宣传页（promo/，静态单页；仅本地）──
+    if (rawPath === "/promo") {
+      res.writeHead(308, { Location: "/promo/", "Cache-Control": "no-store" });
+      res.end();
+      return;
+    }
+    if (rawPath === "/promo/" || rawPath === "/promo/index.html") {
+      serveFile(res, path.resolve("promo"), "index.html", "text/html; charset=utf-8");
+      return;
+    }
+    if (rawPath.startsWith("/promo/assets/")) {
+      serveFile(
+        res,
+        path.resolve("promo", "assets"),
+        rawPath.slice("/promo/assets/".length),
+        mimeFor(rawPath),
+      );
+      return;
+    }
+    // 允许宣传页直接引用仓库 assets（贴纸/本地图库），只读
+    if (rawPath.startsWith("/assets/")) {
+      serveFile(res, path.resolve("assets"), rawPath.slice("/assets/".length), mimeFor(rawPath));
+      return;
+    }
+
     sendJson(res, 404, { ok: false, error: "not_found" });
   } catch (err) {
     log.error("web.request_failed", {
       error: err instanceof Error ? err.message : String(err),
     });
     sendJson(res, 500, { ok: false, error: "internal_error" });
+  }
+}
+
+/** 简易 MIME 表（宣传页静态资源） */
+function mimeFor(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case ".html": return "text/html; charset=utf-8";
+    case ".css": return "text/css; charset=utf-8";
+    case ".js": return "text/javascript; charset=utf-8";
+    case ".svg": return "image/svg+xml";
+    case ".png": return "image/png";
+    case ".jpg":
+    case ".jpeg": return "image/jpeg";
+    case ".webp": return "image/webp";
+    case ".gif": return "image/gif";
+    case ".mp4": return "video/mp4";
+    case ".json": return "application/json; charset=utf-8";
+    default: return "application/octet-stream";
+  }
+}
+
+/**
+ * 只读静态文件服务（宣传页/角色素材）。
+ * 路径穿越防护：解析后的绝对路径必须仍在 baseDir 内。
+ */
+function serveFile(
+  res: http.ServerResponse,
+  baseDir: string,
+  relativePath: string,
+  contentType: string,
+): void {
+  try {
+    const resolvedBase = path.resolve(baseDir);
+    const target = path.resolve(resolvedBase, decodeURIComponent(relativePath));
+    if (target !== resolvedBase && !target.startsWith(resolvedBase + path.sep)) {
+      sendJson(res, 404, { ok: false, error: "not_found" });
+      return;
+    }
+    if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+      sendJson(res, 404, { ok: false, error: "not_found" });
+      return;
+    }
+    const content = fs.readFileSync(target);
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Cache-Control": "no-store, max-age=0",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy":
+        "default-src 'none'; script-src 'unsafe-inline' https://fonts.googleapis.com; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; media-src https: 'self'; connect-src 'self' https:; frame-ancestors 'none'",
+    });
+    res.end(content);
+  } catch {
+    sendJson(res, 404, { ok: false, error: "not_found" });
   }
 }
 
