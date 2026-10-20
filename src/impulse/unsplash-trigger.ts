@@ -15,6 +15,8 @@ import { fetchUnsplashPhoto } from "../ai/image-gen.js";
 import { describeEmotion } from "../persona/emotion.js";
 import { pickPhotoShare, photoFilePath } from "./photo-library.js";
 import { createLogger } from "../obs/logger.js";
+import { buildScenePrompt, generateImage, isImageGenEnabled } from "../media/comfyui.js";
+import { saveGeneratedImage } from "../media/generated-store.js";
 import type { ConversationState } from "../pipeline/orchestrator.js";
 
 const log = createLogger("photo");
@@ -117,7 +119,7 @@ export interface PhotoShareResult {
   /** 本地兜底图片绝对路径（无 Key/搜索失败时） */
   imageFile?: string;
   caption: string;
-  source: "unsplash" | "local";
+  source: "unsplash" | "local" | "generated";
 }
 
 /** 是否配置了 Unsplash Key（未配置时直接走本地图库，省一次 LLM query） */
@@ -131,6 +133,51 @@ function hasUnsplashKey(): boolean {
 const recentLocalPhotoIds = new Map<string, string[]>();
 /** 每个用户最近用过的配文（避免同一句话反复出现） */
 const recentPhotoCaptions = new Map<string, string[]>();
+
+/** 生图占照片的比例（其余仍用图库：真实、便宜、不占算力） */
+export const GENERATED_PHOTO_RATIO = 0.2;
+
+/**
+ * 尝试用本机 ComfyUI 生成一张"她随手拍的"照片。
+ * 未开启 / 失败 / 超时 → 返回 null，由调用方回退本地图库（绝不阻塞聊天）。
+ */
+async function tryGeneratedPhoto(
+  state: ConversationState,
+  options: PhotoShareOptions,
+  random: () => number = Math.random,
+): Promise<PhotoShareResult | null> {
+  if (!isImageGenEnabled()) return null;
+  // 点名要图时不赌概率，直接尝试（他要看"现在的"）
+  if (!options.requested && random() > GENERATED_PHOTO_RATIO) return null;
+
+  const hour = new Date().getHours();
+  const prompt = buildScenePrompt({
+    ...(options.preferredTags && options.preferredTags.length > 0
+      ? { tags: options.preferredTags }
+      : {}),
+    emotionVector: state.emotionState.vector,
+    hour,
+    ...(state.persona.photoShare?.aesthetic
+      ? { characterPrompt: state.persona.photoShare.aesthetic }
+      : {}),
+  });
+
+  const result = await generateImage({ prompt });
+  if (!result.ok || !result.bytes) {
+    log.warn("photo.gen_failed", { reason: result.reason ?? "unknown" });
+    return null;
+  }
+  const file = saveGeneratedImage(result.bytes);
+  if (!file) return null;
+
+  const captionPool =
+    (options.preferredTags ?? []).includes("sunset")
+      ? ["刚拍的，天这样了", "你看今天的天空"]
+      : ["刚拍的", "随手拍了一张", "这个角度还行吧"];
+  const caption = captionPool[Math.floor(random() * captionPool.length)];
+  log.info("photo.generated", { bytes: result.bytes.length, elapsed_ms: result.elapsedMs ?? 0 });
+  return { imageFile: file, caption, source: "generated" };
+}
 
 function shareLocalPhoto(
   state: ConversationState,
@@ -215,6 +262,10 @@ export async function trySharePhoto(
 
   // 提前锁定冷却（防止并发重复触发）
   cooldownMap.set(personaId, Date.now());
+
+  // v0.7：约 20% 的照片用本机 ComfyUI 生成（失败静默回退图库）
+  const generated = await tryGeneratedPhoto(state, options);
+  if (generated) return generated;
 
   // ── 无 Key：本地图库兜底 ─────────────────────
   if (!hasUnsplashKey()) {

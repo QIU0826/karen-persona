@@ -30,7 +30,12 @@
     "models:list": "tsx scripts/models.ts --list",
     "models:purge": "tsx scripts/models.ts --purge",
     "embed:start": "cd services/embed && uv run --python 3.12 --with fastapi --with uvicorn --with fastembed server.py",
-    "embed:spike": "tsx scripts/spike-embed.ts"
+    "embed:spike": "tsx scripts/spike-embed.ts",
+    "media:status": "tsx scripts/media-setup.ts status",
+    "media:install": "tsx scripts/media-setup.ts install",
+    "media:pull-model": "tsx scripts/media-setup.ts pull-model",
+    "media:start": "tsx scripts/media-setup.ts start",
+    "media:purge": "tsx scripts/media-setup.ts purge"
   },
   "dependencies": {
     "axios": "^1.7.0",
