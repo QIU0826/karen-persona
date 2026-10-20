@@ -52,10 +52,31 @@ export interface ChatLine {
   timestamp: number;
 }
 
-/** 取某一天的消息（保留原始顺序，最多 N 条，避免超长） */
+/**
+ * 取某一天的消息（保留原始顺序，最多 N 条，避免超长）。
+ *
+ * v0.8.16：原来是 `slice(-limit)`，只留**最后** N 条——真实冒烟发现一天 >80 条时，
+ * **早上说的关键事实（下周三去上海见客户、签星潮合同）被整段丢掉**，日记忆只剩下午闲聊。
+ * 改成「保头 + 保尾」：前 1/4 与后 3/4，中间超出部分丢弃（日记忆里用一条省略号提示）。
+ */
 export function pickDayMessages(messages: ChatLine[], dayKey: string, limit = 80): ChatLine[] {
   const picked = messages.filter((m) => localDayKey(m.timestamp) === dayKey);
-  return picked.slice(-limit);
+  if (picked.length <= limit) return picked;
+  // 省略提示行本身占 1 条，所以头尾只取 limit-1 条（保证返回总数不超上限）
+  const bodyLimit = Math.max(2, limit - 1);
+  const headCount = Math.max(2, Math.floor(bodyLimit / 4));
+  const tailCount = bodyLimit - headCount;
+  const head = picked.slice(0, headCount);
+  const tail = picked.slice(-tailCount);
+  // 中间省略的部分用一条合成行提示，避免模型以为一天只有这些内容
+  const omitted = picked.length - head.length - tail.length;
+  if (omitted <= 0) return [...head, ...tail];
+  const gap: ChatLine = {
+    role: "user",
+    content: `（中间还有 ${omitted} 条消息省略）`,
+    timestamp: head[head.length - 1]!.timestamp + 1,
+  };
+  return [...head, gap, ...tail];
 }
 
 export interface DailyDigestPrompt {

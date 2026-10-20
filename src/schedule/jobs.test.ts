@@ -239,3 +239,55 @@ describe("computeDueJobs：到期与补跑", () => {
     expect(due.weeklyRollupWeeks).toContain("2026-10-12");
   });
 });
+
+describe("pickDayMessages：超长一天要保头保尾（v0.8.16 真实冒烟驱动）", () => {
+  const day = "2026-10-20";
+  const at = (h: number, m: number) => new Date(2026, 9, 20, h, m, 0).getTime();
+
+  it("消息数不超过上限时原样返回（顺序不变）", () => {
+    const messages = [
+      { role: "user" as const, content: "早上好", timestamp: at(8, 0) },
+      { role: "assistant" as const, content: "早", timestamp: at(8, 1) },
+    ];
+    expect(pickDayMessages(messages, day, 80)).toHaveLength(2);
+  });
+
+  it("超过上限时不能只留最后 N 条——早上的关键事实必须还在", () => {
+    const messages = [
+      { role: "user" as const, content: "我下周三要去上海见客户，签星潮的合同", timestamp: at(8, 0) },
+      { role: "assistant" as const, content: "周三啊 那要提前准备", timestamp: at(8, 1) },
+    ];
+    // 后面 90 条无关闲聊（把早上两条挤出最后 80 条）
+    for (let i = 0; i < 90; i++) {
+      messages.push({
+        role: "user",
+        content: `闲聊第${i}条`,
+        timestamp: at(9, 0) + i * 60_000,
+      });
+    }
+    const picked = pickDayMessages(messages, day, 80);
+    expect(picked).toHaveLength(80);
+    expect(picked[0]!.content).toContain("上海");
+    expect(picked[0]!.content).toContain("星潮");
+    // 尾部保留最近的对话
+    expect(picked[picked.length - 1]!.content).toContain("闲聊第89条");
+  });
+
+  it("中间被省略的部分会有一条提示行（模型能知道不完整）", () => {
+    const messages = Array.from({ length: 120 }, (_, i) => ({
+      role: "user" as const,
+      content: `第${i}条`,
+      timestamp: at(8, 0) + i * 60_000,
+    }));
+    const picked = pickDayMessages(messages, day, 80);
+    expect(picked.some((m) => m.content.includes("省略"))).toBe(true);
+  });
+
+  it("只取目标日期的消息", () => {
+    const messages = [
+      { role: "user" as const, content: "今天", timestamp: at(10, 0) },
+      { role: "user" as const, content: "昨天", timestamp: at(10, 0) - 24 * 60 * 60 * 1000 },
+    ];
+    expect(pickDayMessages(messages, day)).toHaveLength(1);
+  });
+});
