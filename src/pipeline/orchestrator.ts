@@ -46,6 +46,7 @@ import { deriveStance } from "../world/stance.js";
 import { perceiveTime, buildMomentTag } from "../world/time-awareness.js";
 import { renderExpression } from "../impulse/renderer.js";
 import { trySharePhoto } from "../impulse/unsplash-trigger.js";
+import { resolveOwnerScope, OWNER_CLI } from "../data/owner.js";
 import {
   detectCrisis,
   crisisSafetyNote,
@@ -216,6 +217,12 @@ export interface ConversationState {
   lastGate: GateRecord | null;
   /** M1-gov: 主动消息是否暂停（/pause），持久化 */
   proactivePaused: boolean;
+  /** 多用户隔离：owner（qq:<id> / cli:local） */
+  owner: string;
+  /** 多用户隔离：会话/状态文件后缀（"" = 历史/主用户） */
+  storageKey: string;
+  /** 多用户隔离：T2/T1 记忆使用的 persona_id（隔离用户带 @slug） */
+  storagePersona: string;
 }
 
 export interface PipelineResult {
@@ -247,16 +254,27 @@ export interface ProcessOptions {
 
 // ── 初始化 ────────────────────────────────────
 
-export async function initConversation(persona: Persona, config: AppConfig): Promise<ConversationState> {
-  // 设置当前人设 ID，确保 T1/T2 记忆按人设隔离
-  setCurrentPersona(config.persona);
+export async function initConversation(
+  persona: Persona,
+  config: AppConfig,
+  owner: string = OWNER_CLI,
+): Promise<ConversationState> {
+  // 多用户隔离：owner 决定会话/状态文件后缀与 T2/T1 的 persona_id
+  const scope = resolveOwnerScope(config.persona, owner, config.allowed_users);
+
+  // 设置当前人设 ID（隔离用户用带 owner 后缀的存储 id），确保 T1/T2 记忆按人+用户隔离
+  setCurrentPersona(scope.storagePersona);
 
   // V2: 从 persona 加载链式规则和行为脚本
   const chainRules = persona.chainRules ?? defaultChainRules();
   const behavioralScripts = persona.behavioralScripts ?? defaultBehavioralScripts();
 
   // M1-1: 先加载持久化的人格运行时状态（情绪/负债/漂移/关系/因果链/herView…）
-  const persisted = loadPersonaState(persona.name, persona.relationship.closeness);
+  const persisted = loadPersonaState(
+    persona.name,
+    persona.relationship.closeness,
+    scope.storageKey,
+  );
 
   const emotionState = persisted?.emotion ?? createEmotionState();
   const guiltState = persisted?.guilt ?? createGuiltState();
@@ -272,7 +290,7 @@ export async function initConversation(persona: Persona, config: AppConfig): Pro
   // persona.relationship.closeness 是全代码读取的唯一来源：用持久化值覆盖静态人设值
   persona.relationship.closeness = relationshipState.closeness;
 
-  const session = loadSession(persona.name);
+  const session = loadSession(persona.name, scope.storageKey);
   const personaType = inferPersonaType(persona.speaking.tone, persona.emotions.attachmentStyle);
   const stance = deriveStance(persona.identity.age, persona.emotions.attachmentStyle);
 
@@ -340,6 +358,9 @@ export async function initConversation(persona: Persona, config: AppConfig): Pro
     relationshipState,
     lastGate: persisted?.lastGate ?? null,
     proactivePaused: persisted?.proactivePaused ?? false,
+    owner: scope.owner,
+    storageKey: scope.storageKey,
+    storagePersona: scope.storagePersona,
   };
 }
 
@@ -610,6 +631,7 @@ export function persistRuntimeState(state: ConversationState): void {
       weather: { raw: state.weatherPerception.raw, fetchedAt: state.weatherFetchedAt },
       lastGate: state.lastGate,
       proactivePaused: state.proactivePaused,
+      storageKey: state.storageKey,
     };
     savePersonaState(snapshot);
   } catch (err) {
@@ -680,6 +702,9 @@ export async function processMessage(
   // A-1. 安全兜底：危机信号（不是情感识别，是安全优先）
   const crisis = detectCrisis(userInput);
   if (crisis) logs.push("[安全] 检测到危机信号：本轮强制回复并附加专业求助资源");
+
+  // 多用户隔离：每轮显式切回本 state 的存储 persona（防止多用户交替时串记忆）
+  setCurrentPersona(state.storagePersona);
 
   // A0. 天气定时刷新（30 分钟 TTL）
   await refreshWeatherIfStale(state);
@@ -1141,6 +1166,9 @@ export async function* processMessageStream(
 ): AsyncGenerator<StreamFragment> {
   const { persona, config, emotionState, guiltState, socialTact, session, silenceState, weatherPerception } = state;
 
+  // 多用户隔离：每轮显式切回本 state 的存储 persona（防止多用户交替时串记忆）
+  setCurrentPersona(state.storagePersona);
+
   // 安全兜底：危机信号（不是情感识别，是安全优先）
   const crisis = detectCrisis(userInput);
   if (crisis) console.log("[安全] 检测到危机信号：本轮强制回复并附加专业求助资源");
@@ -1364,6 +1392,9 @@ export async function processProactive(
   const logs: string[] = [];
   const { persona, config, emotionState, guiltState, socialTact, silenceState, session,
     causalChains, weatherPerception } = state;
+
+  // 多用户隔离：每轮显式切回本 state 的存储 persona
+  setCurrentPersona(state.storagePersona);
 
   // 状态维护
   await refreshWeatherIfStale(state);

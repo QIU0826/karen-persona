@@ -36,7 +36,13 @@ describe("exportUserData", () => {
     vector.setCurrentPersona("xiaoya");
     vector.insertEpisode("用户: 你好呀 | 回复: 在呢", "chat", 0.1);
 
-    const result = exportUserData("xiaoya", "小雅");
+    const result = exportUserData({
+      personaName: "小雅",
+      storagePersona: "xiaoya",
+      storageKey: "",
+      session,
+      initialCloseness: 3,
+    });
     expect(result.counts.messages).toBe(2);
     expect(result.counts.memories).toBe(1);
     expect(fs.existsSync(result.path)).toBe(true);

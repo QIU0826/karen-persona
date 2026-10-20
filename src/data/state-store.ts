@@ -66,10 +66,12 @@ export interface PersistedPersonaState {
   weather: { raw: WeatherInfo; fetchedAt: number } | null;
   lastGate: PersistedGateRecord | null;
   proactivePaused: boolean;
+  /** 多用户隔离：文件后缀（"" = 历史/主用户） */
+  storageKey?: string;
 }
 
-function stateFilePath(personaId: string): string {
-  return dataFile(`persona-state-${safeFileStem(personaId)}.json`);
+function stateFilePath(personaId: string, storageKey = ""): string {
+  return dataFile(`persona-state-${safeFileStem(personaId)}${storageKey}.json`);
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -251,12 +253,18 @@ function normalize(raw: unknown, personaId: string, initialCloseness: number): P
 }
 
 /** 加载状态；文件不存在返回 null；损坏时备份并返回 null */
-export function loadPersonaState(personaId: string, initialCloseness = 3): PersistedPersonaState | null {
-  const p = stateFilePath(personaId);
+export function loadPersonaState(
+  personaId: string,
+  initialCloseness = 3,
+  storageKey = "",
+): PersistedPersonaState | null {
+  const p = stateFilePath(personaId, storageKey);
   if (!fs.existsSync(p)) return null;
   try {
     const raw = JSON.parse(fs.readFileSync(p, "utf-8")) as unknown;
-    return normalize(raw, personaId, initialCloseness);
+    const state = normalize(raw, personaId, initialCloseness);
+    state.storageKey = storageKey;
+    return state;
   } catch (err) {
     const backup = `${p}.corrupt-${Date.now()}`;
     try {
@@ -273,7 +281,7 @@ export function loadPersonaState(personaId: string, initialCloseness = 3): Persi
 /** 原子保存状态（同步，几 KB，单条消息一次写可接受） */
 export function savePersonaState(state: PersistedPersonaState): void {
   state.savedAt = Date.now();
-  const p = stateFilePath(state.personaId);
+  const p = stateFilePath(state.personaId, state.storageKey ?? "");
   const tmp = `${p}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(state, null, 2), "utf-8");
   fs.renameSync(tmp, p);

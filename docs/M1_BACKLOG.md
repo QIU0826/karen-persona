@@ -93,6 +93,7 @@
 - **BUG-2 延迟队列持久化**：`src/data/pending-queue.ts` + 桥接恢复；实测重启后到点补发成功。
 - **IMP-1 图片描述增强**：30–60 字描述 + max_tokens 240，单测已更新。
 - **步骤 3 可观测最小闭环（已完成）**：`src/obs/logger.ts`（JSON lines/脱敏/TTY 可读）、`cost-tracker.ts`（SQLite `llm_usage`，DeepSeek 峰谷价）、`health-server.ts`（`/health` + `/cost`，仅 127.0.0.1:18081）；qq/chat 关键链路接结构化日志；PM2 改跑 dist。实测 `/health` 200、单次调用成本正确入账；30 文件 / 419 用例全绿。
+- **多用户隔离（已完成）**：owner=人设+用户+平台；主用户/CLI 沿用历史存储（旧数据零迁移），其他好友会话/状态文件后缀隔离、T2/T1 存储 persona_id 带 `@ownerSlug`；每轮显式切回存储 persona。E2E 双用户隔离实测通过；40 文件 / 485 用例。
 - **合规最小版（已完成）**：首次对话 AI 披露（AI 身份/数据去向/18+）、`/about`、危机信号强制回复+安全指引+求助资源；E2E 实测通过。测试 38 文件 / 477 用例。
 - **M1 治理与数据主权（已完成）**：`/why` 门控可解释（lastGate 持久化）、`/pause`/`/resume` 主动消息暂停、`/export` 导出会话+人格状态+T2 记忆（本地 JSON/600 权限）；QQ 与 CLI 共用命令层；测试 37 文件 / 471 用例。
 - **0 号依赖升级（已完成）**：better-sqlite3 11.10→13.0.3（N-API 预编译，无需 C++ 工具链）、engines >=22.12、移除 wechaty/node-cron 未使用依赖（包数 ~446→162）、CI 三平台矩阵；Node 22 下 462 用例全绿、桥接实测正常；vitest 5 暂缓。

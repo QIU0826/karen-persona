@@ -70,6 +70,7 @@ import { describeImage } from "../ai/vision.js";
 import { handleControlCommand } from "../commands/control.js";
 import { exportUserData } from "../data/user-export.js";
 import { buildFirstContactDisclosure } from "../persona/disclosure.js";
+import { ownerForQq } from "../data/owner.js";
 import { pickSticker, toStickerCqCode } from "../impulse/stickers.js";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -369,7 +370,7 @@ async function restorePendingReplies(sharedBase: SharedBase): Promise<void> {
       let state = userStates.get(userId);
       if (!state) {
         const persona = sharedBase.getPersona(userId);
-        state = await initConversation(persona, sharedBase.config);
+        state = await initConversation(persona, sharedBase.config, ownerForQq(userId));
         state.stickerMode = "qqface";
         userStates.set(userId, state);
       }
@@ -1151,7 +1152,7 @@ async function handlePrivateBatch(
     if (!userStates.has(userId)) {
       evictStaleUsers();
       const persona = sharedBase.getPersona(userId);
-      const st = await initConversation(persona, sharedBase.config);
+      const st = await initConversation(persona, sharedBase.config, ownerForQq(userId));
       st.stickerMode = "qqface";
       userStates.set(userId, st);
       if (sharedBase.config.ai_disclosure && st.session.messages.length === 0) {
@@ -1163,7 +1164,14 @@ async function handlePrivateBatch(
     const handled = await handleControlCommand(text, state, {
       reply: (reply) => sendPrivateMsg(userId, reply),
       persist: () => persistRuntimeState(state),
-      exportData: () => exportUserData(sharedBase.config.persona, state.persona.name),
+      exportData: () =>
+        exportUserData({
+          personaName: state.persona.name,
+          storagePersona: state.storagePersona,
+          storageKey: state.storageKey,
+          session: state.session,
+          initialCloseness: state.persona.relationship.closeness,
+        }),
     });
     if (!handled) {
       sendPrivateMsg(userId, "看不懂这个指令。/help 看看能做什么。");
@@ -1176,7 +1184,7 @@ async function handlePrivateBatch(
   if (!userStates.has(userId)) {
     evictStaleUsers();
     const persona = sharedBase.getPersona(userId);
-    const st = await initConversation(persona, sharedBase.config);
+    const st = await initConversation(persona, sharedBase.config, ownerForQq(userId));
     st.stickerMode = "qqface";
     userStates.set(userId, st);
     log.info("session.created", { user_id: userId, persona: persona.name });

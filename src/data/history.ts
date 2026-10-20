@@ -27,20 +27,22 @@ export interface ConversationSession {
     emotionVector: number; // -1 到 1，当前情绪偏移
     activeThreads: string[]; // 当前活跃的话题线索
   };
+  /** 多用户隔离：文件后缀（"" = 历史/主用户；"-qq-123" = 隔离用户） */
+  storageKey?: string;
 }
 
 /** 单会话最多保留的消息条数（滚动窗口，旧消息归档） */
 const MAX_MESSAGES = 200;
 
-function getSessionPath(personaId: string): string {
-  return dataFile(`${safeFileStem(personaId)}-session.json`);
+function getSessionPath(personaId: string, storageKey = ""): string {
+  return dataFile(`${safeFileStem(personaId)}${storageKey}-session.json`);
 }
 
-function getArchivePath(personaId: string, date: string): string {
-  return dataFile(`${safeFileStem(personaId)}-archive-${date}.json`);
+function getArchivePath(personaId: string, date: string, storageKey = ""): string {
+  return dataFile(`${safeFileStem(personaId)}${storageKey}-archive-${date}.json`);
 }
 
-function freshSession(personaId: string): ConversationSession {
+function freshSession(personaId: string, storageKey = ""): ConversationSession {
   const now = Date.now();
   return {
     personaId,
@@ -52,6 +54,7 @@ function freshSession(personaId: string): ConversationSession {
       emotionVector: 0,
       activeThreads: [],
     },
+    storageKey,
   };
 }
 
@@ -81,19 +84,25 @@ function normalizeSession(raw: unknown, personaId: string): ConversationSession 
       emotionVector: typeof obj.t3?.emotionVector === "number" ? obj.t3.emotionVector : 0,
       activeThreads: Array.isArray(obj.t3?.activeThreads) ? obj.t3.activeThreads : [],
     },
+    storageKey: typeof obj.storageKey === "string" ? obj.storageKey : "",
   };
 }
 
 /** 加载或创建会话（不存在则创建；损坏则备份后重建） */
-export function loadSession(personaId: string): ConversationSession {
+export function loadSession(personaId: string, storageKey = ""): ConversationSession {
   ensureDataDir();
 
-  const p = getSessionPath(personaId);
-  if (!fs.existsSync(p)) return freshSession(personaId);
+  const p = getSessionPath(personaId, storageKey);
+  if (!fs.existsSync(p)) {
+    // 主用户/CLI：历史文件不存在时直接新建历史会话；隔离用户：新建带后缀会话
+    return freshSession(personaId, storageKey);
+  }
 
   try {
     const raw = fs.readFileSync(p, "utf-8");
-    return normalizeSession(JSON.parse(raw), personaId);
+    const session = normalizeSession(JSON.parse(raw), personaId);
+    session.storageKey = storageKey;
+    return session;
   } catch (err) {
     const backup = `${p}.corrupt-${Date.now()}`;
     try {
@@ -110,7 +119,7 @@ export function loadSession(personaId: string): ConversationSession {
 /** 原子写入会话（同步，确保进程退出/崩溃时不丢最后一条消息） */
 export function saveSessionSync(session: ConversationSession): void {
   session.lastActiveAt = Date.now();
-  const p = getSessionPath(session.personaId);
+  const p = getSessionPath(session.personaId, session.storageKey ?? "");
   const tmp = `${p}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(session, null, 2), "utf-8");
   fs.renameSync(tmp, p);
@@ -137,16 +146,16 @@ export function addMessage(
   if (session.messages.length > MAX_MESSAGES) {
     const toArchive = session.messages.slice(0, session.messages.length - MAX_MESSAGES);
     session.messages = session.messages.slice(session.messages.length - MAX_MESSAGES);
-    archiveMessages(session.personaId, toArchive);
+    archiveMessages(session.personaId, toArchive, session.storageKey ?? "");
   }
 
   saveSessionSync(session);
 }
 
 /** 归档旧消息（尽力而为，失败不影响主流程） */
-function archiveMessages(personaId: string, messages: ChatMessage[]): void {
+function archiveMessages(personaId: string, messages: ChatMessage[], storageKey = ""): void {
   const date = new Date().toISOString().split("T")[0];
-  const archivePath = getArchivePath(personaId, date);
+  const archivePath = getArchivePath(personaId, date, storageKey);
   try {
     const existing: ChatMessage[] = fs.existsSync(archivePath)
       ? (JSON.parse(fs.readFileSync(archivePath, "utf-8")) as ChatMessage[])

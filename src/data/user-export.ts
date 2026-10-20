@@ -6,13 +6,27 @@
  */
 import fs from "node:fs";
 import { dataFile, safeFileStem } from "./paths.js";
-import { loadSession } from "./history.js";
+import type { ConversationSession } from "./history.js";
 import { loadPersonaState } from "./state-store.js";
 import { getVectorDb } from "./vector.js";
+import { ownerSlug } from "./owner.js";
 
 export interface UserExportResult {
   path: string;
   counts: { messages: number; memories: number; relationshipEvents: number };
+}
+
+export interface ExportInput {
+  /** persona.name（状态文件名用） */
+  personaName: string;
+  /** T2/T1 存储 persona_id（隔离用户带 @slug；主用户/CLI = 人设 id） */
+  storagePersona: string;
+  /** 会话/状态文件后缀（"" = 历史/主用户） */
+  storageKey: string;
+  /** 当前内存中的会话（含未落盘的最新消息） */
+  session: ConversationSession;
+  /** 人设初始亲密度（状态文件缺失时用于归一化） */
+  initialCloseness?: number;
 }
 
 interface ExportedEpisode {
@@ -27,9 +41,9 @@ interface ExportedEpisode {
   last_recalled_at: number | null;
 }
 
-export function exportUserData(personaId: string, personaName: string): UserExportResult {
-  const session = loadSession(personaName);
-  const personaState = loadPersonaState(personaName);
+export function exportUserData(input: ExportInput): UserExportResult {
+  const { personaName, storagePersona, storageKey, session } = input;
+  const personaState = loadPersonaState(personaName, input.initialCloseness ?? 3, storageKey);
 
   let episodes: ExportedEpisode[] = [];
   try {
@@ -38,9 +52,9 @@ export function exportUserData(personaId: string, personaName: string): UserExpo
       .prepare(
         `SELECT id, persona_id, content, source, strength, half_life_days,
                 emotional_weight, created_at, last_recalled_at
-         FROM t2_episodes WHERE persona_id IN (?, ?) ORDER BY id DESC`,
+         FROM t2_episodes WHERE persona_id = ? ORDER BY id DESC`,
       )
-      .all(personaId, personaName) as ExportedEpisode[];
+      .all(storagePersona) as ExportedEpisode[];
   } catch {
     // 数据库不可读时仍导出会话/状态；不阻断
     episodes = [];
@@ -48,14 +62,15 @@ export function exportUserData(personaId: string, personaName: string): UserExpo
 
   const payload = {
     exportedAt: new Date().toISOString(),
-    personaId,
+    personaId: storagePersona,
     personaName,
+    storageKey,
     session,
     personaState,
     t2Episodes: episodes,
   };
 
-  const filename = `export-${safeFileStem(personaName)}-${Date.now()}.json`;
+  const filename = `export-${safeFileStem(personaName)}-${ownerSlug(storagePersona)}-${Date.now()}.json`;
   const path = dataFile(filename);
   fs.writeFileSync(path, JSON.stringify(payload, null, 2), { mode: 0o600 });
 

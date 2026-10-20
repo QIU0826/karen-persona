@@ -30,6 +30,7 @@ import {
 import { handleControlCommand } from "./commands/control.js";
 import { exportUserData } from "./data/user-export.js";
 import { buildFirstContactDisclosure } from "./persona/disclosure.js";
+import { OWNER_CLI } from "./data/owner.js";
 import readline from "node:readline";
 
 /** 打印一轮结果（即时回复与延迟补回复共用） */
@@ -108,7 +109,7 @@ async function main() {
   }
 
   // 初始化会话状态（含天气感知 + 持久化的关系/情绪状态）
-  const state = await initConversation(persona, config);
+  const state = await initConversation(persona, config, OWNER_CLI);
   console.log(
     `[启动] 关系: ${state.relationshipState.closeness.toFixed(2)}/10（${closenessLabel(state.relationshipState.closeness)}）` +
       ` | 连续互动 ${state.relationshipState.interactionStreak} 天`,
@@ -121,7 +122,11 @@ async function main() {
   /** 读取最近一次落盘的人格状态（重启/多进程后也能看到最新演化）；失败不影响对话 */
   function readPersistedState(): PersistedPersonaState | null {
     try {
-      return loadPersonaState(state.persona.name, state.persona.relationship.closeness);
+      return loadPersonaState(
+        state.persona.name,
+        state.persona.relationship.closeness,
+        state.storageKey,
+      );
     } catch (err: unknown) {
       console.log(`[状态] 读取失败：${err instanceof Error ? err.message : String(err)}`);
       return null;
@@ -185,7 +190,14 @@ async function main() {
       const handled = await handleControlCommand(cmd, state, {
         reply: (text) => console.log(`\n${text}\n`),
         persist: () => persistRuntimeState(state),
-        exportData: () => exportUserData(config.persona, persona.name),
+        exportData: () =>
+          exportUserData({
+            personaName: persona.name,
+            storagePersona: state.storagePersona,
+            storageKey: state.storageKey,
+            session: state.session,
+            initialCloseness: state.persona.relationship.closeness,
+          }),
       });
       if (handled) continue;
       // 未识别指令继续走下面原有命令（/mood /weather /journal…）
