@@ -38,7 +38,8 @@
 - 跨平台 QQ 桥接方案 ✅ 文档化（`docs/QQ_BRIDGE_CROSS_PLATFORM.md` + `deploy/napcat-macos`/`napcat-windows` + `scripts/mock-onebot.mjs`；mock 全链路实测通过；macOS 原生 NapCat 未实机扫码验证）
 - 真机联调（2026-10-19 深夜）：NapCat 原生 macOS → Karen → DeepSeek 全链路跑通；图片识别/缓存/流式正常；已修复 BUG-1（关系误判）、BUG-2（延迟队列持久化）、IMP-1（图片描述过短），并新增免打扰配置；问题清单见 docs/M1_BACKLOG.md。
 - M1-7 记忆检索 P0 完成：n-gram + FTS5 BM25 RRF 混合、sqlite-vec 启用、语义 embedding 双列（需 Qwen Key 实跑）、真实库 schema v2 幂等迁移验证。测试数更新为 27 文件 / 386 用例。
-- 记忆评测 + 反重复 + 检索修复（2026-10-20）：新增可复现记忆金标集（20 条中文 case，离线 recall@k / facts 注入 / anti-forget，报告 `docs/MEMORY_EVAL_REPORT.md`）；修复 `searchEpisodesByFts` 的 FTS5 隐式 AND 问题（自然问句 FTS 命中 0/20 → 20/20，T2 recall@8 40%→85%）；新增跨轮反重复（`src/persona/anti-repetition.ts`，默认只注入开头词，真实 A/B 见 `docs/MEMORY_AI_TONE_AUDIT.md` §4.1）；补上流式主路径遗漏的用户事实注入；Web 控制台新增「用户事实」「记忆命中回放」只读面板。测试数更新为 59 文件 / 634 用例。
+- 记忆评测 + 反重复 + 检索修复（2026-10-20）：新增可复现记忆金标集（20 条中文 case，离线 recall@k / facts 注入 / anti-forget，报告 `docs/MEMORY_EVAL_REPORT.md`）；修复 `searchEpisodesByFts` 的 FTS5 隐式 AND 问题（自然问句 FTS 命中 0/20 → 20/20，T2 recall@8 40%→85%）；新增跨轮反重复（`src/persona/anti-repetition.ts`，默认只注入开头词，真实 A/B 见 `docs/MEMORY_AI_TONE_AUDIT.md` §4.1）；补上流式主路径遗漏的用户事实注入；Web 控制台新增「用户事实」「记忆命中回放」只读面板。测试数更新为 62 文件 / 649 用例。
+- M2-A 首次引导 2.0（2026-10-20）：setup 变为「第一段对话」并写入会话/facts/consent/onboarding 标记；知情+18+ 确认前置；已完成跳过/--force 重设；CLI/QQ 首次聊天不再重复披露/年龄门。测试 62 文件 / 649 用例。
 - 延迟补发 E2E + 跨库表缓存修复（2026-10-20）：免打扰延迟 → pending 落库 → 重启 bridge → 到点补发的端到端场景；cost-tracker/pending-queue 建表缓存改为按 DB 路径（修 no such table 警告）。测试 59 文件 / 634 用例。
 - 多用户 prompt 隔离修复（2026-10-20）：动态风格参考检索缺 persona_id 过滤导致第二用户 prompt 混入第一用户对话 → 强制按 persona 过滤 + 单测/E2E 回归；E2E 另增白名单静默忽略、CQ 码出站转义场景。测试 59 文件 / 631 用例。
 - mock-OneBot 桥接 E2E 扩展（2026-10-20）：新增 /about /age 命令、危机兜底（12356）、多用户隔离（两个 owner 的同意记录 + 两份 persona 记忆）+ 未确认年龄群聊拦截（负向断言）。测试 59 文件 / 629 用例。

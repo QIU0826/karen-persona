@@ -24,7 +24,13 @@ npm install
 
 > 如果 `npm install` 报 C++ 编译错误：安装 [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)（勾选「C++ 桌面开发工作负载」）后重试。
 
-## 2. 配置（两个文件都要复制）
+## 2. 配置（推荐用 `npm run setup`，或手动复制两个文件）
+
+> **推荐：`npm run setup`** —— 她会用「第一段对话」问你三个问题（怎么认识的 / 怎么称呼你 / 你在哪），
+> 并完成 AI 披露 + 18+ 确认。**这段对话会写进她的记忆**：之后 CLI/QQ 第一次聊天，她就已经记得你，
+> 也不会再重复问 18+。已完成过引导时直接运行会提示跳过，重设用 `npm run setup -- --force`。
+>
+> 想手动配置就按下面复制两个文件。
 
 ```bash
 cp .env.example .env
@@ -113,6 +119,9 @@ npm run qq
 ## 7. 开始聊天
 
 用你自己的 QQ 号给 Karen 的 QQ 号发消息。她会用 `config.yaml` 里配置的人设回复你。
+
+> 新用户/未完成引导的用户第一条消息会先收到「AI 披露 + 18+ 确认」（回复「我成年了」放行）；
+> 如果已经跑过 `npm run setup` 引导，则不会重复。
 
 - 群聊只有「@ 她」才会回，且要求你先和她私聊过（🚧 半成品）
 - 如果配了 `ALLOWED_USERS`，你的 QQ 号必须在白名单里，否则消息会被静默忽略

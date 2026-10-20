@@ -26,6 +26,8 @@ import {
   DEFAULT_ONE_BOT_WS_PORT,
   DEFAULT_ONE_BOT_WS_PATH,
 } from "./data/store.js";
+import { buildConfigPatch, normalizeTagsInput, shouldSkipSetup } from "./setup/flow.js";
+import { completeOnboarding, readOnboardingRecord } from "./setup/onboarding.js";
 
 const CONFIG_PATH = path.resolve("config.yaml");
 const DOTENV_PATH = path.resolve(".env");
@@ -112,6 +114,21 @@ function existingString(data: Record<string, unknown>, key: string, fallback: st
 // ── 主流程 ──────────────────────────────────────
 
 async function main() {
+  const force = process.argv.includes("--force");
+  const onboarding = readOnboardingRecord();
+  if (
+    shouldSkipSetup({
+      hasConfig: fs.existsSync(CONFIG_PATH),
+      hasOnboarding: onboarding !== null,
+      force,
+    })
+  ) {
+    console.log("✅ 已经完成过首次引导（她记得你们的第一段对话）。");
+    console.log("   重新配置请运行: npm run setup -- --force");
+    console.log("   直接开始聊:   npm run dev（CLI） / npm run qq（QQ）");
+    return;
+  }
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -211,16 +228,37 @@ async function main() {
 
   console.log(`\x1b[36m${herName}\x1b[0m: 我现在在${hometow}，你呢？`);
   const location = await ask(rl, "你: ");
-  const finalLocation = location || defaultLocation;
+  const userCity = location.trim();
+  const finalLocation = userCity || defaultLocation;
   console.log(`\x1b[36m${herName}\x1b[0m: ${finalLocation}啊，知道了。\n`);
   await sleep(400);
+
+  // ── Step 2.5: 知情确认（AI 披露 + 18+，写入 user_consent）──
+  console.log("── 知情确认（首次使用一次）──");
+  console.log("  1) 她是 AI 扮演的虚拟角色，不是真人；");
+  console.log("  2) 对话与图片会发送给 AI 服务（DeepSeek）用于生成回复；");
+  console.log("  3) 本服务面向 18 岁以上用户，未成年人请在监护人陪同下使用。");
+  const ageAnswer = await ask(rl, "你已年满 18 岁吗？(y/N): ");
+  const ageConfirmed = /^(y|yes|是|确认|1)$/i.test(ageAnswer.trim());
+  if (!ageConfirmed) {
+    console.log("\n本服务仅面向 18 岁以上用户，已停止设置。");
+    rl.close();
+    return;
+  }
+  const disclosureAnswer = await ask(rl, "确认已阅读以上说明并继续？(y/N): ");
+  const disclosureAcked = /^(y|yes|是|确认|1)$/i.test(disclosureAnswer.trim());
+  if (!disclosureAcked) {
+    console.log("\n未确认知情说明，已停止设置（不会写入任何配置）。");
+    rl.close();
+    return;
+  }
 
   // ── Step 3: 可选标签 ──
   console.log("── 可选：她的个性标签 ──");
   console.log("可选标签: 话痨 / 嘴硬心软 / 粘人 / 独立 / 浪漫主义 / 工作狂 / 闷骚");
   console.log("（多个标签用空格分隔，直接回车跳过）");
   const tagsInput = await ask(rl, "标签: ");
-  const tags = tagsInput ? tagsInput.split(/\s+/).filter(Boolean) : [];
+  const tags = normalizeTagsInput(tagsInput);
 
   if (tags.length > 0) {
     console.log(`\x1b[36m${herName}\x1b[0m: （看了眼标签）...行吧。\n`);
@@ -281,17 +319,16 @@ async function main() {
   const allowedUsers = parseAllowedUsers(allowedText);
 
   // ── Step 5: 生成 config.yaml（保留已有扩展字段）──
-  const config: Record<string, unknown> = { ...existing.data };
-  config.persona = personaId;
-  config.her_name = herName;
-  config.your_name = yourName;
-  config.location = finalLocation;
-  config.tags = tags;
-  config.one_bot_ws_port = port;
-  config.allowed_users = allowedUsers;
-  // 老配置文件可能没有这些键：补上默认值，方便用户手动改
-  if (config.message_frequency_limit === undefined) config.message_frequency_limit = 10;
-  if (config.log_level === undefined) config.log_level = "info";
+  const config = buildConfigPatch(existing.data, {
+    personaId,
+    herName,
+    howWeMet,
+    yourName,
+    location: userCity,
+    tags,
+    allowedUsers,
+    oneBotPort: port,
+  });
 
   const header = [
     "# Karen Persona — 由 Setup Wizard 生成，可随时手动编辑",
@@ -375,18 +412,37 @@ async function main() {
     }
   }
 
-  // ── Step 7: 完成 ──
+  // ── Step 7: 把第一段对话写进她的记忆（失败不阻塞启动）──
+  try {
+    const record = await completeOnboarding({
+      personaId,
+      herName,
+      howWeMet,
+      yourName,
+      location: userCity,
+      allowedUsers,
+      ageConfirmed: true,
+      disclosureAcked: true,
+    });
+    console.log(`✅ 她记住了你们的第一段对话${record.owners.length > 1 ? "（CLI 与 QQ 主用户都已写入）" : ""}。\n`);
+  } catch (err) {
+    console.warn(
+      `⚠️  第一段对话写入记忆失败（不影响启动）：${err instanceof Error ? err.message : String(err)}\n`,
+    );
+  }
+
+  // ── Step 8: 完成 ──
   console.log("\n╔══════════════════════════════════════╗");
   console.log("║           设置完成！                ║");
   console.log("╚══════════════════════════════════════╝\n");
 
-  console.log(`📱 会话记录、记忆和日记都存在你的电脑上（对话内容会发送给 DeepSeek，图片会发送给 Qwen）。`);
+  console.log(`📱 会话记录、记忆和日记都存在你的电脑上（对话与图片会发送给 DeepSeek；可选 Qwen 语义嵌入）。`);
   console.log(`👤 ${herName} 是一个有独立生活的人，不是你的助手。\n`);
 
   console.log(`启动方式:`);
   console.log(`  npm run dev       — 命令行和她聊天`);
   console.log(`  npm run qq        — QQ 桥接（需先启动 NapCatQQ）`);
-  console.log(`  npm run setup     — 重新设置\n`);
+  console.log(`  npm run setup -- --force — 重新设置（会重新走引导）\n`);
 
   console.log(`\x1b[36m${herName}\x1b[0m: 我先去忙了，你随时找我。\n`);
 
