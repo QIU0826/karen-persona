@@ -67,6 +67,8 @@ export function renderExpression(
   config: RenderConfig,
   state: RenderState,
 ): RenderedMessage {
+  // 模型偶尔输出连续空行；压缩成单个换行，避免发出空消息/碎片
+  content = content.replace(/\n{2,}/g, "\n").trim();
   let mode: ExpressionMode = "single";
   let kaomoji: string | undefined;
   let qqFace: string | undefined;
@@ -143,13 +145,21 @@ function pickKaomoji(
  * fragmentation > 1 → 每条更短、条数更多（焦虑/内耗时）
  * fragmentation < 1 → 每条更长、条数更少（开心/放松时）
  */
+/** 去掉消息末尾的软标点（逗号/顿号/分号），避免发出「……，」这种 AI 味碎片 */
+function stripTrailingSoft(text: string): string {
+  return text.replace(/[，,、;；:：\s]+$/g, "").trim();
+}
+
 function splitBurst(content: string, fragmentation: number = 1): string[] {
-  const lines = content.split(/\n+/).filter(l => l.trim().length > 0);
+  const lines = content
+    .split(/\n+/)
+    .map(stripTrailingSoft)
+    .filter((l) => l.length > 0);
 
   if (lines.length <= 1) {
     const parts = content.split(/(?<=[，。！？……！\.])/);
-    const burst = parts.filter((p) => p.trim().length > 0);
-    if (burst.length <= 1) return [content];
+    const burst = parts.map(stripTrailingSoft).filter((p) => p.length > 0);
+    if (burst.length <= 1) return [stripTrailingSoft(content) || content];
     // 碎片化高 → 保留更多小块
     const count = Math.min(MAX_BURST, Math.ceil(burst.length * fragmentation));
     return burst.slice(0, count);
@@ -159,14 +169,14 @@ function splitBurst(content: string, fragmentation: number = 1): string[] {
   if (fragmentation > 1.2) {
     const result: string[] = [];
     for (const line of lines) {
-      const subParts = line.split(/(?<=[，。！？……])/).filter(p => p.trim().length > 0);
+      const subParts = line.split(/(?<=[，。！？……])/).map(stripTrailingSoft).filter(p => p.length > 0);
       if (subParts.length > 1 && Math.random() < fragmentation - 1) {
         result.push(...subParts);
       } else {
-        result.push(line);
+        result.push(stripTrailingSoft(line));
       }
     }
-    return result.slice(0, MAX_BURST);
+    return result.filter((p) => p.length > 0).slice(0, MAX_BURST);
   }
 
   return lines.slice(0, MAX_BURST);

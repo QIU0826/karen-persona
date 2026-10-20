@@ -47,6 +47,7 @@ import { perceiveTime, buildMomentTag } from "../world/time-awareness.js";
 import { renderExpression } from "../impulse/renderer.js";
 import { trySharePhoto } from "../impulse/unsplash-trigger.js";
 import { resolveOwnerScope, OWNER_CLI } from "../data/owner.js";
+import { extractUserFactsAsync, getUserFactsContext } from "../data/user-facts.js";
 import {
   detectCrisis,
   crisisSafetyNote,
@@ -797,7 +798,7 @@ export async function processMessage(
   }
 
   // H. T2 记忆检索（M1-7：有 Qwen Key 走语义混合检索，无 Key/异常自动降级 n-gram+FTS）
-  const memories = await retrieveRelevantMemoriesAsync(userInput);
+  const memories = await retrieveRelevantMemoriesAsync(userInput, 8);
   const ragContext = buildRagContext(memories);
 
   // I. 社交分寸
@@ -927,19 +928,20 @@ export async function processMessage(
   // 结构化标签 + 风格参考 + RAG + 热点作为额外上下文
   const conflictNote = buildConflictNote(state);
   const crisisNote = crisis ? crisisSafetyNote() : "";
+  const factsContext = getUserFactsContext(state.owner);
   const fullSystem =
     systemPrompt +
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
     conflictNote +
     crisisNote +
+    factsContext +
     `\n${momentTag}`;
   const messages = buildChatMessages(session, fullSystem);
 
-  // M. AI 回复（短期上下文 + 长期 RAG 上下文，均通过 ChatOptions 注入）
-  const shortTermContext = buildShortTermContext(session);
+  // M. AI 回复（近期消息已在 messages 里，避免 shortTerm 重复注入；只注入长期 RAG）
   const complexity = classifyComplexity(userInput);
   if (complexity !== "normal") logs.push(`[路由] ${complexity}(${userInput.length}字)`);
-  const rawReply = await chat(messages, persona, { ragContext, shortTermContext, complexity });
+  const rawReply = await chat(messages, persona, { ragContext, complexity });
 
   // N. 表达渲染
   const rendered = renderExpression(rawReply, {
@@ -1071,6 +1073,8 @@ export async function processMessage(
   state.consecutiveSilences = 0;
   logs.push(...updateRelationshipAfterTurn(state, userInput, rawReply, complexity));
   persistRuntimeState(state);
+  // 后台抽取「确定记得」的用户事实（fire-and-forget，不阻塞回复）
+  extractUserFactsAsync(state.owner, userInput, rawReply);
   return {
     reply,
     logs,
@@ -1344,7 +1348,7 @@ export async function* processMessageStream(
     if (trendingContext) state.lastTrendingInject = streamNowTs;
   }
 
-  const memories = await retrieveRelevantMemoriesAsync(userInput);
+  const memories = await retrieveRelevantMemoriesAsync(userInput, 8);
   const ragContext = buildRagContext(memories);
   const shortTermContext = buildShortTermContext(session);
   const fullSystem =
@@ -1362,26 +1366,24 @@ export async function* processMessageStream(
   let sentReply = "";
   let buffer = "";
   const BREAKS = /[\n。！？…]/;
-  const SOFT_BREAKS = /[，,、]/;
+  /** 只清理句末软标点，避免发出「……，」碎片 */
+  const cleanFragment = (text: string): string => text.replace(/[，,、;；:：\s]+$/g, "").trim();
   let yieldedAny = false;
 
   const complexity = classifyComplexity(userInput);
 
   try {
     try {
-      const stream = chatStream(messages, persona, { ragContext, shortTermContext, complexity });
+      const stream = chatStream(messages, persona, { ragContext, complexity });
 
       for await (const token of stream) {
         fullReply += token;
         buffer += token;
 
-        // 遇到自然断点 → 立即发送
-        const shouldSend =
-          BREAKS.test(token) ||
-          (SOFT_BREAKS.test(token) && buffer.length > 12);
-
-        if (shouldSend) {
-          const frag = buffer.trim();
+        // 只在自然句末（换行/句号/问号/感叹/省略号）分条；
+        // 逗号不再分条，避免「，」结尾的 AI 味碎片
+        if (BREAKS.test(token)) {
+          const frag = cleanFragment(buffer);
           if (frag) {
             sentReply += frag;
             yieldedAny = true;
@@ -1392,17 +1394,17 @@ export async function* processMessageStream(
       }
 
       // 发送剩余内容
-      if (buffer.trim()) {
-        const frag = buffer.trim();
-        sentReply += frag;
+      const tail = cleanFragment(buffer);
+      if (tail) {
+        sentReply += tail;
         yieldedAny = true;
-        yield { text: frag };
+        yield { text: tail };
       }
     } catch (err) {
       // 流式失败：仅在尚未发送任何内容时降级为非流式，避免「半句 + 完整」重复发送
       if (!yieldedAny) {
         console.log("[流式] 失败，回落到非流式");
-        fullReply = await chat(messages, persona, { ragContext, shortTermContext });
+        fullReply = await chat(messages, persona, { ragContext });
         const lines = fullReply.split("\n").filter(Boolean);
         for (const line of lines) {
           const frag = line.trim();
@@ -1534,6 +1536,7 @@ export async function* processMessageStream(
       }
 
       triggerMonologue(state, userInput, persisted);
+      extractUserFactsAsync(state.owner, userInput, persisted);
       state.consecutiveSilences = 0;
       for (const line of updateRelationshipAfterTurn(state, userInput, persisted, complexity)) {
         console.log(line);
