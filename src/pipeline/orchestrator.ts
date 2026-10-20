@@ -32,6 +32,7 @@ import {
   pickDueInitiative,
   type DailyInitiativePlan,
 } from "../impulse/initiative-plan.js";
+import { buildInitiativeReplyHint } from "../impulse/initiative-reply.js";
 import {
   getInitiativePlan,
   markInitiativeReplied,
@@ -716,6 +717,11 @@ function noteRepetitionIfAny(
   }
 }
 
+/** 他在问"当下"（现在啥样/这会儿拍的/马上看看）→ 照片必须是今天的（v0.8.11） */
+function asksForPresentMoment(userText: string): boolean {
+  return /(现在|此刻|这会儿|这时候|马上|刚刚|此时此刻)/.test(userText ?? "");
+}
+
 /** 未化解的冲突：给她的下一条回复一个「还没缓过来」的处境，而不是当没事发生 */
 function buildConflictNote(state: ConversationState): string {
   const last = state.relationshipState.lastConflictAt;
@@ -1075,7 +1081,6 @@ function maybeRecordAnchor(state: ConversationState, userInput: string, reply: s
 // ── 意图式主动性（v0.8）─────────────────────
 
 /** 每天几点后可以生成"今天想找他聊什么"的计划 */
-const INITIATIVE_PLAN_HOUR = 7;
 
 /**
  * 确保今天有主动计划（没有就调一次 LLM 生成，失败下次心跳再试）。
@@ -1086,7 +1091,8 @@ export async function ensureDailyInitiativePlan(state: ConversationState): Promi
   try {
     const db = getVectorDb();
     const day = localDayKey(Date.now());
-    if (new Date().getHours() < INITIATIVE_PLAN_HOUR) return;
+    // v0.8.11：去掉了「7 点前不生成计划」的时段门槛——
+    // 深夜聊天（00:00–07:00）本来也需要"她今天想说的由头"，原门槛让夜聊永远没有主动话题。
     if (getInitiativePlan(db, state.storagePersona, state.owner, day)) return;
 
     const digests = listRecentDigests(db, state.storagePersona, state.owner, 3);
@@ -1123,6 +1129,23 @@ export async function ensureDailyInitiativePlan(state: ConversationState): Promi
   }
 }
 
+/** 正在生成中的「今日由头计划」key（同一人设/owner/天只生成一次） */
+const initiativePlanInflight = new Set<string>();
+
+/**
+ * v0.8.11：正常回复前顺手把「今日由头计划」准备好（fire-and-forget，不增加回复延迟）。
+ * 原来是只在心跳里生成 → 一天里前几轮对话根本没有由头可用，主动性自然偏弱。
+ */
+function kickInitiativePlan(state: ConversationState): void {
+  if (process.env.KAREN_INITIATIVE === "off") return;
+  const key = `${state.storagePersona}@${state.owner}@${localDayKey(Date.now())}`;
+  if (initiativePlanInflight.has(key)) return;
+  initiativePlanInflight.add(key);
+  void ensureDailyInitiativePlan(state)
+    .catch(() => undefined)
+    .finally(() => initiativePlanInflight.delete(key));
+}
+
 /** 读今天的计划（没有返回 null）。 */
 function loadTodayPlan(state: ConversationState): DailyInitiativePlan | null {
   if (process.env.KAREN_INITIATIVE === "off") return null;
@@ -1132,6 +1155,30 @@ function loadTodayPlan(state: ConversationState): DailyInitiativePlan | null {
     return row ? deserializePlan(row.plan_json) : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * v0.8.11：把今天「本来想跟他说的事」注入回复 prompt。
+ * 只在能自然接上时提（他不在提问、关系够近、非危机），否则不注入——
+ * 目的是解决评审说的"自己开新话题偏少"，而不是让她变成强行转话题。
+ */
+function buildInitiativeReplyNote(
+  state: ConversationState,
+  userText: string,
+  isCrisis: boolean,
+): string {
+  try {
+    const plan = loadTodayPlan(state);
+    return buildInitiativeReplyHint({
+      plan,
+      userText,
+      closeness: state.relationshipState.closeness,
+      messageCount: state.session.messages.length,
+      isCrisis,
+    });
+  } catch {
+    return "";
   }
 }
 
@@ -1522,6 +1569,7 @@ export async function processMessage(
   // 跨轮反重复：最近几条她自己的话（prompt 注入与回复后检测共用同一份）
   const recentReplies = extractRecentReplies(session.messages, DEFAULT_LONG_RANGE_REPLY_COUNT);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
+  kickInitiativePlan(state);
   // 用户点名要照片/表情包/语音：让她的语气和程序实际会发的动作对齐
   const mediaRequest = detectMediaRequest(userInput);
   const fullSystem =
@@ -1539,6 +1587,7 @@ export async function processMessage(
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
     buildTalkMoveInjection(state, userInput, crisis) +
+    buildInitiativeReplyNote(state, userInput, Boolean(crisis)) +
     `\n${momentTag}`;
   const messages = buildChatMessages(session, fullSystem);
 
@@ -1698,6 +1747,7 @@ export async function processMessage(
           // v0.9：相关性判定需要知道"她刚说了什么 / 他在聊什么"
           lastReply: rawReply,
           userText: userInput,
+          preferEra: asksForPresentMoment(userInput) ? "today" : undefined,
         });
     if (photo) {
       imageUrl = photo.imageUrl;
@@ -2006,6 +2056,7 @@ export async function* processMessageStream(
   // 跨轮反重复（与非流式对齐）
   const recentReplies = extractRecentReplies(session.messages, DEFAULT_LONG_RANGE_REPLY_COUNT);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
+  kickInitiativePlan(state);
   const mediaRequest = detectMediaRequest(userInput);
   // 相识守卫：用户问「怎么认识」且无依据 → 逐条过滤编造场景
   const meetingUngrounded =
@@ -2032,6 +2083,7 @@ export async function* processMessageStream(
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
     buildTalkMoveInjection(state, userInput, crisis) +
+    buildInitiativeReplyNote(state, userInput, Boolean(crisis)) +
     `\n${momentTag}`;
 
   // 构建消息列表
@@ -2160,6 +2212,7 @@ export async function* processMessageStream(
           preferredTags: detectPhotoSceneTags(userInput),
           lastReply: fullReply,
           userText: userInput,
+          preferEra: asksForPresentMoment(userInput) ? "today" : undefined,
         }).catch(() => null),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
       ]);
@@ -2682,6 +2735,7 @@ export async function processProactive(
   // 跨轮反重复：主动消息同样别和上一轮开口一样
   const recentReplies = extractRecentReplies(session.messages, DEFAULT_LONG_RANGE_REPLY_COUNT);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
+  kickInitiativePlan(state);
   // T1 快照 → 最近状态弧（主动消息也从最近的关系走势出发）
   const t1ArcContext = getT1ArcContext(state.storagePersona);
   if (t1ArcContext) logs.push("[T1] 注入最近状态弧");

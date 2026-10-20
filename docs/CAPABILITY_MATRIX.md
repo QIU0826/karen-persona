@@ -3,7 +3,7 @@
 > 目的：一眼看清**哪些是真做了、做到什么程度**。每一行都必须能在代码里找到对应，
 > 数字必须能复现（跑法写在「怎么复现」列）。不确定的地方写清楚弱项，不写成优点。
 >
-> 最后更新：2026-10-21（v0.8.10）。配套文档：[README](../README.md)（对外）、
+> 最后更新：2026-10-21（v0.8.11）。配套文档：[README](../README.md)（对外）、
 > [CLAUDE.md](../CLAUDE.md)（开发总控）、[PRODUCT_AUDIT.md](PRODUCT_AUDIT.md)（审计与路线图）。
 
 图例：✅ 可用 ｜ 🚧 有明确限制 ｜ ⛔ 受阻（代码就绪但依赖未到位）
@@ -51,7 +51,7 @@
 |---|---|---|---|---|
 | 亲密度成长 | `src/persona/relationship.ts` | ✅ | 结构性事件驱动、每日 +0.1 上限、只增不减、带原因与里程碑 | 数值本身不区分"哪种亲近"（下一行补） |
 | 五维关系 | `src/persona/relationship-dims.ts` | ✅ | 亲密/信任/张力/互惠/依赖，持久化 + 事件演化 + 张力随时间回落；注入 prompt 决定措辞倾向；`/relations` 可查 | 目前只影响措辞，不改门控（避免大范围联动风险） |
-| 意图式主动性 | `src/impulse/initiative-plan.ts`、`src/schedule/initiative-llm.ts` | ✅ | 每天 2–3 个由头（真实数据一次 **942ms**，如「裁员的事他到底怎么打算的」20–23 点）；按最近 10 次回复率校准 0–3 条 | 由头质量依赖日记忆；`KAREN_INITIATIVE=off` 可关 |
+| 意图式主动性 | `src/impulse/initiative-plan.ts`、`src/schedule/initiative-llm.ts`、`src/impulse/initiative-reply.ts` | ✅ | 每天 2–3 个由头（真实数据一次 **942ms**，如「裁员的事他到底怎么打算的」20–23 点）；按最近 10 次回复率校准 0–3 条 | 由头质量依赖日记忆；`KAREN_INITIATIVE=off` 可关 |
 | 四条主动链路 + 护栏 | `src/pipeline/orchestrator.ts` | ✅/🚧 | 生活流/补一句/冷场开话题/沉默保温；单日 4 条 + 间隔 30 分钟 + 连推 2 条收手；`/why` 可解释 | 深夜被门控延后的主动不会早上补发 |
 | 反思循环 | `src/evolution/reflection.ts` | ✅ | 觉察（同类信号 2 次 / 被点破 1 次）→否认（撑 6h）→被戳 2 次承认→整合期才真改一次；`/reflect` 可查；真实管线验证「第1轮察觉→第2轮嘴硬」 | 承认需要真实时间流逝（6h），短期内看不出完整弧线 |
 | 演化副作用可见化 | `src/evolution/journal-view.ts`、`/journal` `/timeline` `/herview` `/evolution` | ✅ | 日记/时间线/她眼中的你/变化都能查，数据来自持久化快照 | 部分演化模块（叙事重构）仍偏半成品 |
@@ -83,7 +83,7 @@
 
 | 项 | 状态 | 实测 |
 |---|---|---|
-| 单元/集成测试 | ✅ | **99 文件 / 1196 用例**（`npm test`） |
+| 单元/集成测试 | ✅ | **100 文件 / 1205 用例**（`npm test`） |
 | 类型检查 + lint | ✅ | `tsc --noEmit` 0 错误；`npm run lint`（未使用代码）0 违规 |
 | 覆盖率 | 🚧 | 行 59.21%（`npm run test:coverage`，CI 阈值守护） |
 | 离线评测守门 | ✅ | `npm run eval:offline`：facts≥95% / recall@8≥90% / 合并≥95% / anti-forget PASS / 锚点≥30 条；5 项全达标；CI 已接入 |

@@ -92,7 +92,7 @@ import { createLogger, configureLogger } from "../obs/logger.js";
 import { startHealthServer, type HealthServerHandle } from "../obs/health-server.js";
 import { startWebServer, type WebServerHandle } from "../web/server.js";
 import { isSpeechAvailable, synthesizeSpeech } from "../ai/tts.js";
-import { decideVoice, type VoiceSettings } from "../impulse/voice.js";
+import { decideVoice, shouldThrottleVoice, type VoiceSettings } from "../impulse/voice.js";
 import { detectMediaRequest } from "../impulse/media-request.js";
 import {
   collectSticker,
@@ -1509,6 +1509,11 @@ async function maybeSendVoice(
 ): Promise<void> {
   if (!config.voice_enabled) return;
   if (outcome.safetySent || outcome.interrupted) return;
+  // 同一轮/相邻轮不连发语音（点名要也至少隔 20s）
+  if (shouldThrottleVoice(userLastVoiceAt.get(userId), Date.now(), opts.requested === true)) {
+    log.info("voice.throttled", { user_id: userId });
+    return;
+  }
   // 同一轮已经发过照片/贴纸就不再补语音：真人不会连发三种形态
   // （但用户点名要语音时例外——他明确想听，就给一条）
   if (!opts.requested && (outcome.photoSent || opts.mediaSentThisTurn)) return;

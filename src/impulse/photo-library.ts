@@ -288,6 +288,11 @@ export interface PickPhotoInput {
   excludeIds?: string[];
   /** 最近已经用过的配文（避免「今天下班路上拍的」这类句子反复出现） */
   excludeCaptions?: string[];
+  /**
+   * 强制/优先的时间关系（v0.8.11）。
+   * 评审抓到「问'现在啥样'却发'昨天拍的雪'」——用户在问当下时，必须发今天的图。
+   */
+  preferEra?: PhotoEra;
   /** 可注入随机源（测试用；返回 0..1） */
   random?: () => number;
 }
@@ -335,10 +340,12 @@ export function pickPhotoShare(input: PickPhotoInput): PhotoShareChoice | null {
   const chosen = pickOne(deduped, random);
   const eras = chosen.eras;
 
-  // era 偏好：优先 today；否则 yesterday；past 只在可分享「以前」时按概率出现
+  // era 偏好：preferEra 命中就用它；否则 today > yesterday > past 按概率
   let era: PhotoEra;
   const roll = random();
-  if (eras.includes("today") && roll < 0.55) {
+  if (input.preferEra && eras.includes(input.preferEra)) {
+    era = input.preferEra;
+  } else if (eras.includes("today") && roll < 0.55) {
     era = "today";
   } else if (eras.includes("yesterday") && roll < 0.9) {
     era = "yesterday";

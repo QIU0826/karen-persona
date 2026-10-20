@@ -267,3 +267,17 @@ export function decideVoice(
   if (!line) return { speak: false, reason: "no_line" };
   return { speak: true, line, reason: "ok" };
 }
+
+/**
+ * 语音节流（v0.8.11）：21 轮回归里出现过「同一轮/相邻轮连发两条语音，内容还重复」——
+ * 真人不会在几秒内录两遍语音。点名要语音时允许更快，但也要求一个最小间隔。
+ */
+export function shouldThrottleVoice(
+  lastSentAt: number | undefined,
+  now: number,
+  requested: boolean,
+): boolean {
+  if (lastSentAt === undefined) return false;
+  const minGapMs = requested ? 20_000 : 0;
+  return now - lastSentAt < minGapMs;
+}

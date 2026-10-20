@@ -11,6 +11,7 @@ import {
   isInQuietHours,
   pickVoiceLine,
   resolveVoiceSettings,
+  shouldThrottleVoice,
   type VoiceContext,
   type VoiceSettings,
 } from "./voice.js";
@@ -273,5 +274,21 @@ describe("decideVoice", () => {
     } finally {
       randomSpy.mockRestore();
     }
+  });
+});
+
+describe("shouldThrottleVoice（v0.8.11 连发语音）", () => {
+  it("从没发过 → 不节流", () => {
+    expect(shouldThrottleVoice(undefined, 1000, false)).toBe(false);
+    expect(shouldThrottleVoice(undefined, 1000, true)).toBe(false);
+  });
+
+  it("点名要语音：20 秒内仍节流（真人不会几秒内录两遍）", () => {
+    expect(shouldThrottleVoice(0, 5_000, true)).toBe(true);
+    expect(shouldThrottleVoice(0, 25_000, true)).toBe(false);
+  });
+
+  it("非点名：由冷却逻辑处理，这里不额外拦截", () => {
+    expect(shouldThrottleVoice(0, 1_000, false)).toBe(false);
   });
 });

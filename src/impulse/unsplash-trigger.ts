@@ -183,6 +183,7 @@ async function tryGeneratedPhoto(
 function shareLocalPhoto(
   state: ConversationState,
   preferredTags?: string[],
+  preferEra?: "today" | "yesterday" | "past",
 ): PhotoShareResult | null {
   const personaKey = state.storagePersona ?? state.persona.name;
   const recentIds = recentLocalPhotoIds.get(personaKey) ?? [];
@@ -195,6 +196,7 @@ function shareLocalPhoto(
     ...(preferredTags && preferredTags.length > 0 ? { tags: preferredTags } : {}),
     excludeIds: recentIds,
     excludeCaptions: recentCaptions,
+    ...(preferEra ? { preferEra } : {}),
   });
   if (!choice) return null;
   const imageFile = photoFilePath(choice.photo);
@@ -236,6 +238,8 @@ export interface PhotoShareOptions {
   lastReply?: string;
   /** 用户这轮原话（判断是否纯问句/抽象话题） */
   userText?: string;
+  /** 强制时间关系：他在问"现在/此刻"时必须发今天的图 */
+  preferEra?: "today" | "yesterday" | "past";
   /** 对方在讲糟心事：这一轮不顺手发生活照（发呆/共情优先） */
   skipWhenTroubleTalk?: boolean;
 }
@@ -303,13 +307,13 @@ export async function trySharePhoto(
   const query = await generateQuery(lastReply, emotionDesc, ps.aesthetic, ps.vibeKeywords);
   if (!query) {
     log.warn("photo.query_failed");
-    return shareLocalPhoto(state);
+    return shareLocalPhoto(state, options.preferredTags, options.preferEra);
   }
 
   const imageUrl = await searchWithFallback(query);
   if (!imageUrl) {
     log.warn("photo.unsplash_empty", { query });
-    return shareLocalPhoto(state);
+    return shareLocalPhoto(state, options.preferredTags, options.preferEra);
   }
 
   const caption = MINIMAL_CAPTIONS[Math.floor(Math.random() * MINIMAL_CAPTIONS.length)];
