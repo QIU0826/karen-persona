@@ -38,6 +38,44 @@ export const DEFAULT_DUPLICATE_THRESHOLD = 0.6;
 /** 开头词长度：中文 2 个字就能看出"哈哈""其实""确实"这类口癖。 */
 const OPENER_LEN = 2;
 
+/**
+ * 「换汤不换药」的套话/固定句式（docs/MEMORY_AI_TONE_AUDIT.md §4.1：
+ * 词法复读降到 0 之后，套话命中仍有 0.333）。这些不是整句重复，而是句式复读，
+ * 用 bigram 相似度抓不到，需要按句式单独统计并在提示里点名。
+ */
+const FORMULAIC_PATTERNS: Array<{ label: string; regex: RegExp }> = [
+  { label: "是不是…", regex: /是不是/ },
+  { label: "要不要…", regex: /要不要/ },
+  { label: "有没有…", regex: /有没有/ },
+  { label: "我跟你说", regex: /我跟你说/ },
+  { label: "其实…", regex: /其实/ },
+  { label: "确实…", regex: /确实/ },
+  { label: "哈哈…", regex: /哈哈/ },
+  { label: "早点…", regex: /早点/ },
+  { label: "别太…", regex: /别太/ },
+];
+
+/**
+ * 找出最近几轮里**重复出现 ≥2 次的套话句式**（句式复读，不是整句重复）。
+ * 返回人类可读的句式标签（如「是不是…」）。
+ */
+export function extractRepeatedFormulaicPatterns(recentReplies: string[]): string[] {
+  const cleaned = recentReplies
+    .map((reply) => normalizeReplyText(reply))
+    .filter((reply) => reply.length >= 2)
+    .slice(-DEFAULT_RECENT_REPLY_COUNT);
+  if (cleaned.length < 2) return [];
+  const counts = new Map<string, number>();
+  for (const reply of cleaned) {
+    for (const pattern of FORMULAIC_PATTERNS) {
+      if (pattern.regex.test(reply)) counts.set(pattern.label, (counts.get(pattern.label) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count >= 2)
+    .map(([label]) => label);
+}
+
 export type RepetitionKind = "exact" | "prefix" | "similar" | "opener" | "none";
 
 export interface RepetitionResult {
@@ -138,6 +176,7 @@ export function buildAvoidRepeatNote(
   const repeatedOpeners = [...openerCount.entries()]
     .filter(([, n]) => n >= 2)
     .map(([opener]) => opener);
+  const repeatedPatterns = extractRepeatedFormulaicPatterns(cleaned);
 
   if (mode === "openers") {
     // 只给开头 3 个字，不把整句回放给模型（回放完整句子时小模型容易直接照抄）
@@ -145,6 +184,11 @@ export function buildAvoidRepeatNote(
     const lines = [`## 避免重复自己`];
     if (repeatedOpeners.length > 0) {
       lines.push(`「${repeatedOpeners.join("」「")}」这个开头你最近连着用了，这一轮不要再用。`);
+    }
+    if (repeatedPatterns.length > 0) {
+      lines.push(
+        `「${repeatedPatterns.join("」「")}」这种句式你最近连着用了，这一轮换成陈述句或别的问法。`,
+      );
     }
     lines.push(
       `你最近几轮的开头是「${openers.join("」「")}」。这一轮换一个完全不同的开头和说法；对方重复问同一件事时，换个角度回或直接点破他在复读，不要给上一轮一样的答案。`,
@@ -161,6 +205,11 @@ export function buildAvoidRepeatNote(
   ];
   if (repeatedOpeners.length > 0) {
     lines.push(`「${repeatedOpeners.join("」「")}」这个开头你已经连着用了，这一轮不要再用。`);
+  }
+  if (repeatedPatterns.length > 0) {
+    lines.push(
+      `「${repeatedPatterns.join("」「")}」这种句式你最近连着用了，这一轮换成陈述句或别的问法。`,
+    );
   }
   lines.push(
     `这一轮换个开头和句式，不要复用上面的短语、口头禅或整句；对方追问同一件事时，换一个角度回，不要复读上一轮。`,

@@ -40,7 +40,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
 | 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入已接线（双列，需 Qwen Key 实跑）；TTS/即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | ✅/🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF，FTS5 用 OR+BM25 IDF）→ DeepSeek 候选重排**（默认开启，非真向量；异常/超时降级）、sqlite-vec 启用、双列 embedding、schema v2/v3 幂等迁移、用户事实层、T1 状态弧、T3 压缩（40 条/隔天兜底 + `t3_compressed` 防重复）；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；**多用户隔离已实现**（owner=人设+用户+平台） |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 50 个测试文件 / 569 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入；**新增可复现记忆金标集**（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B 脚本（`src/eval/repetition-eval.ts`）；仍缺真实 QQ 集成测试与覆盖率；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 50 个测试文件 / 572 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入；**新增可复现记忆金标集**（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B 脚本（`src/eval/repetition-eval.ts`）；仍缺真实 QQ 集成测试与覆盖率；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -64,7 +64,7 @@ npm run setup      # 交互式配置向导
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + ubuntu/macOS/Windows 三平台矩阵 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 已收紧为 `>=22.12`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm test` 50 文件 / 569 用例通过（审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm test` 50 文件 / 572 用例通过（审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -94,6 +94,7 @@ npm run setup      # 交互式配置向导
 - **T1 状态弧 + T3 压缩调参（2026-10-20）**：新增 `src/data/t1-injection.ts`——T1 快照每轮写入但此前完全没进 prompt；现把最近 8 条压成「最近几轮的状态」（亲密度/情绪/负债趋势，不引用对话正文），reply/stream/proactive 三条路径注入；T3 压缩阈值 80→40，新增「≥20 条且距上次摘要 ≥1 天」时间兜底 + `KAREN_T3_DRY_RUN=1` 干跑；真实数据跑通一次（40 条旧片段 → 1 条摘要，线上 t3_summary 从 0 → 1）。测试 49 文件 / 560 用例。
 - **检索增强：DeepSeek 候选重排（2026-10-20）**：DeepSeek 无 embeddings 接口，先用现有 Key 做文本层增强——`src/data/retrieval-boost.ts` 对初步召回的 top12 记忆做一次 Flash 相关性重排（默认开启，失败/超时/关闭开关自动降级原顺序；开关 `KAREN_SEMANTIC_BOOST=off`）。20 条金标实测 T2 recall@1/3/8 = 55%/80%/85% → **95%/95%/95%**；平均 ~664ms、~¥0.00025/轮。查询改写无额外收益反而降精度（不采用）。报告 [docs/SEMANTIC_BOOST_EVAL.md](docs/SEMANTIC_BOOST_EVAL.md)；真语义向量（Qwen/本地 embedding）仍可选。
 - **记忆时间感 + 事实变更历史（2026-10-20）**：新增 `src/data/relative-time.ts`，T2 检索结果带 `createdAt/timeLabel`，RAG 注入 `- [3天前] …`（她才能自然说「你上次/三天前说」；Web 记忆命中回放同步显示时间徽标）；`user_facts` 新增 `user_fact_history`——换工作/换城市等值变化保留旧值（每 key 20 条），最近 180 天变更注入显示「（之前是：X）」；修掉评测同进程切库时 user_facts 建表缓存导致的缺表问题（缓存按 DB 路径）。测试 50 文件 / 569 用例。
+- **句式复读提醒（2026-10-20）**：`anti-repetition.ts` 增加套话句式统计（是不是/要不要/有没有/我跟你说/其实/确实/哈哈/早点/别太），最近 3 条里同句式 ≥2 次就在提示里点名「换成陈述句或别的问法」。9 次真实 A/B 未测出稳定效果（小样本噪声大），仅作低成本提示保留、不算卖点；同时确认 openers 模式 9 次运行零复读对、full 模式 2/9 次出现复读，默认维持 openers。测试 50 文件 / 572 用例。
 - **问题记录**：真机联调问题与修复清单见 [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md)。
 
 ### 已知问题（M0 之后继续修）
@@ -103,7 +104,7 @@ npm run setup      # 交互式配置向导
 - 群聊与私聊共用一个用户 state（同一 QQ 用户在群/私聊的上下文共享），如需严格分开可后续加 platform 维度
 - 主动消息：M0 已加单日上限 4 条、两次最小间隔 30 分钟、连续沉默 3 次强制回复；仍无免打扰/暂停开关（M1-4）
 - 真语义向量检索需配置 Qwen Key（`QWEN_VL_API_KEY`）或本地 embedding 才能生效；当前无 Key 时为 n-gram + FTS5 BM25 + DeepSeek 候选重排（非真向量）；阈值待真实 Key + 标注集标定
-- 记忆仍缺：语义级重复检测（词法反重复已做）、T3 摘要质量抽检与超 20 条 facts 上限压测；真语义向量需 Qwen Key/本地 embedding（见 docs/MEMORY_AI_TONE_AUDIT.md §6）
+- 记忆仍缺：语义级重复的**改写**（句式检测/提醒已有，但 9 次 A/B 未测出稳定效果）、T3 摘要质量抽检与超 20 条 facts 上限压测；真语义向量需 Qwen Key/本地 embedding（见 docs/MEMORY_AI_TONE_AUDIT.md §6）
 - 用户事实抽取是旁路 LLM 调用，未计入成本统计（`cost_today` 为下限）
 - 主动消息/夜间补发仍需真机长跑验证
 - 成本统计仅覆盖 chat/chatStream 主路径；旁路 LLM（独白/T3/视觉等）未计入，`cost_today` 是下限

@@ -10,6 +10,7 @@ import {
   buildAvoidRepeatNote,
   detectRepetition,
   extractRecentReplies,
+  extractRepeatedFormulaicPatterns,
   normalizeReplyText,
 } from "./anti-repetition.js";
 
@@ -98,6 +99,35 @@ describe("buildAvoidRepeatNote", () => {
     const note = buildAvoidRepeatNote([long], "full");
     expect(note).toContain("…");
     expect(note.length).toBeLessThan(260);
+  });
+});
+
+describe("extractRepeatedFormulaicPatterns（句式复读）", () => {
+  it("同一套话句式出现 ≥2 次才点名", () => {
+    expect(
+      extractRepeatedFormulaicPatterns(["是不是最近太累了", "是不是没睡好啊", "行吧"]),
+    ).toEqual(["是不是…"]);
+    expect(extractRepeatedFormulaicPatterns(["是不是最近太累了", "我睡了"])).toEqual([]);
+  });
+
+  it("多个句式同时重复都能识别", () => {
+    const patterns = extractRepeatedFormulaicPatterns([
+      "其实我觉得还好 是不是没睡好",
+      "其实还行 要不要先休息",
+      "是不是要早点睡",
+    ]);
+    expect(patterns).toContain("是不是…");
+    expect(patterns).toContain("其实…");
+  });
+
+  it("openers 提示块点名重复句式", () => {
+    const note = buildAvoidRepeatNote([
+      "是不是最近太累了",
+      "是不是没睡好啊",
+      "行吧",
+    ]);
+    expect(note).toContain("「是不是…」这种句式你最近连着用了");
+    expect(note).toContain("换成陈述句或别的问法");
   });
 });
 
