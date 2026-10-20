@@ -1536,7 +1536,7 @@ export function renderReport(result: LongrunResult, existingReport?: string | nu
   lines.push(tableRow(["相邻回复相似度 平均/最高", `${m.repetition.avgScore} / ${m.repetition.maxScore}`]));
   lines.push(tableRow(["复读对（相邻两条）", m.repetition.duplicatePairs]));
   lines.push(
-    tableRow(["**复读对（长程，10 轮窗口）**", m.repetition.longRangeDuplicatePairs]),
+    tableRow(["**复读对（长程，50 轮窗口）**", m.repetition.longRangeDuplicatePairs]),
   );
   lines.push(tableRow(["以问句收尾的回复", m.repetition.questionReplies]));
   lines.push(tableRow(["套话句式命中", m.repetition.formulaicHits]));

@@ -99,6 +99,7 @@ import {
   DEFAULT_LONG_RANGE_REPLY_COUNT,
   detectRepetition,
   extractRecentReplies,
+  findExactRepeatInHistory,
 } from "../persona/anti-repetition.js";
 import { mockWeather, fetchWeather, perceiveWeather, clearWeatherCache, type WeatherPerception } from "../world/weather.js";
 import { getTrendingTopics, matchTrendingTopics, buildTrendingContext } from "../world/trending-fetcher.js";
@@ -714,6 +715,11 @@ function noteRepetitionIfAny(
   const repetition = detectRepetition(reply, recentReplies);
   if (repetition.duplicate) {
     push(`[重复] 与最近回复相似 ${repetition.score.toFixed(2)}(${repetition.kind})`);
+  }
+  // v0.8.12：全历史逐字重复（真机第 8 轮 vs 第 38 轮那种）——任何"最近 N 轮"窗口都抓不到
+  const exact = findExactRepeatInHistory(reply, recentReplies);
+  if (exact.repeated) {
+    push(`[重复] 与 ${exact.turnAgo} 轮前逐字重复`);
   }
 }
 

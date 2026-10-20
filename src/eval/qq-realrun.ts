@@ -337,8 +337,11 @@ export function buildRealRunReport(
   if (turns.length > 0 && !snapshot.usage.some((row) => row.created_at >= sinceMs)) {
     flags.push("有对话但没有成本记录（usage 未落库）");
   }
-  if (turns.length >= 3 && snapshot.facts.length === 0) {
-    flags.push("多轮对话但未抽取到用户事实");
+  // v0.8.12：只在「用户确实自述过事实」时才报警。
+  // 真机 58 轮里用户只说"你干嘛/喔/带伞干嘛"，本来就没有可抽取的事实——
+  // 旧逻辑一律报「未抽取到用户事实」，制造了假警报。
+  if (turns.length >= 3 && snapshot.facts.length === 0 && hasSelfDisclosure(turns)) {
+    flags.push("用户自述过事实但未抽取到（事实抽取可能失效）");
   }
 
   return {
@@ -424,4 +427,12 @@ export function formatRealRunReportMarkdown(report: RealRunReport): string {
   }
   lines.push("");
   return lines.join("\n");
+}
+
+/** 用户是否在对话里自述过「关于自己的稳定事实」（用于判断该不该报事实抽取告警）。 */
+export function hasSelfDisclosure(turns: Array<{ user?: string }>): boolean {
+  const text = turns.map((turn) => turn.user ?? "").join("\n");
+  return /(我叫|我姓|我今年|我住在|我在.{1,12}(工作|上班|做)|我是.{1,10}(工程师|设计师|产品|运营|学生|老师|医生)|我养了|我家(有|养)|我的(猫|狗|宠物)|我喜欢|我最近在做|我下?(周|个月)要|我老家|我女朋友|我男朋友|我老婆|我老公)/.test(
+    text,
+  );
 }

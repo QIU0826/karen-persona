@@ -67,7 +67,7 @@ export interface RepetitionMetrics {
   turns: number;
   /** 相邻回复的复读对数（detectRepetition 判定 duplicate） */
   duplicatePairs: number;
-  /** 长程复读对（与更早的回复比，10 轮窗口；不含单纯开头词重复） */
+  /** 长程复读对（与更早的回复比，50 轮窗口；真机出现过 30 轮间距的逐字重复） */
   longRangeDuplicatePairs: number;
   /** 相邻回复开头词（前 2 字）重复的次数 */
   openerRepeats: number;
@@ -114,7 +114,7 @@ export function summarizeRepetition(arm: string, replies: string[]): RepetitionM
   // 真实评审抓到过隔 8 轮的原样复读，旧指标（只看相邻）永远是 0。
   let longRangeDuplicatePairs = 0;
   for (let i = 1; i < replies.length; i++) {
-    const earlier = replies.slice(Math.max(0, i - 10), i);
+    const earlier = replies.slice(Math.max(0, i - 50), i);
     const result = detectRepetition(replies[i], earlier);
     if (result.duplicate && result.kind !== "opener") longRangeDuplicatePairs++;
   }

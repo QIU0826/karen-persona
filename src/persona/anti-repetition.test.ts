@@ -12,6 +12,7 @@ import {
   detectRepetition,
   extractRecentReplies,
   extractRepeatedFormulaicPatterns,
+  findExactRepeatInHistory,
   normalizeReplyText,
 } from "./anti-repetition.js";
 
@@ -234,5 +235,26 @@ describe("长程复读（v0.8.10 回归驱动）", () => {
     ];
     const result = detectRepetition("晚上吃点什么好呢", earlier);
     expect(result.duplicate).toBe(false);
+  });
+});
+
+describe("findExactRepeatInHistory（真机 58 轮数据驱动）", () => {
+  it("30 轮前的逐字重复也能抓到（真机第 8 轮 vs 第 38 轮）", () => {
+    const history = Array.from({ length: 29 }, (_, i) => `第${i}轮说的话不一样内容${i}`);
+    history[7] = "你说累我就想问一句 是不是又没好好吃饭";
+    const result = findExactRepeatInHistory("你说累我就想问一句，是不是又没好好吃饭", history);
+    expect(result.repeated).toBe(true);
+    expect(result.turnAgo).toBe(22); // 21 条之后，往回数 22 条
+  });
+
+  it("只是相似但不一样 → 不算（不做相似度误判）", () => {
+    const history = ["你说累我就想问一句 是不是又没好好吃饭"];
+    const result = findExactRepeatInHistory("你说累 是不是又没好好吃饭啊", history);
+    expect(result.repeated).toBe(false);
+  });
+
+  it("太短的回复（<6 字）不判定，避免把「嗯嗯」「好的」误报", () => {
+    const history = ["嗯嗯", "真的啊"];
+    expect(findExactRepeatInHistory("嗯嗯", history).repeated).toBe(false);
   });
 });

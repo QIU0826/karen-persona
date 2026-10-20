@@ -322,3 +322,32 @@ export function isWithinTurnDuplicate(fragment: string, sentFragments: string[])
   if (!fragment.trim() || sentFragments.length === 0) return false;
   return detectRepetition(fragment, sentFragments, 0.8).duplicate;
 }
+
+/**
+ * 全历史「逐字重复」检测（v0.8.12）。
+ *
+ * 真机数据（58 轮真实 QQ 对话）里发现：第 8 轮和第 38 轮一字不差地重复了
+ * 「你说累我就想问一句 是不是又没好好吃饭」——相距 30 轮，**任何"最近 N 轮"窗口都抓不到**。
+ * 这种重复最伤真人感（用户会觉得她根本没在对话），所以单独做一次全历史精确比对：
+ * 不调模型、只做归一化字符串比较，成本可忽略。
+ *
+ * 只报「完全一样」（归一化后相等），不做相似度——避免把正常复用语气词误判成复读。
+ */
+export function findExactRepeatInHistory(
+  reply: string,
+  history: string[],
+): { repeated: boolean; turnAgo: number } {
+  // 比「逐字一样」更宽松一点：忽略所有标点/空白（「，」和「,」不算差异）
+  const squash = (text: string): string =>
+    normalizeReplyText(text).replace(/[^\p{Script=Han}A-Za-z0-9]/gu, "");
+  const target = squash(reply);
+  if (target.length < 6) return { repeated: false, turnAgo: 0 };
+  let turnAgo = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    turnAgo += 1;
+    if (squash(history[i] ?? "") === target) {
+      return { repeated: true, turnAgo };
+    }
+  }
+  return { repeated: false, turnAgo: 0 };
+}
