@@ -39,7 +39,12 @@ export const KNOWN_MODELS: ModelInfo[] = [
   { id: "indextts2", purpose: "tts", sizeGb: 3.5, note: "零样本语音克隆（v0.9）" },
 ];
 
-function dirSize(dir: string): number {
+/**
+ * 统计目录体积。
+ * HF 缓存用硬链接（blobs/ 与 snapshots/ 指向同一 inode），必须按 inode 去重，
+ * 否则同一份 2.2GB 模型会被算成 4.4GB（实测差异很大）。
+ */
+function dirSize(dir: string, seen: Set<number> = new Set<number>()): number {
   let total = 0;
   const walk = (p: string): void => {
     let entries: fs.Dirent[];
@@ -53,7 +58,10 @@ function dirSize(dir: string): number {
       if (entry.isDirectory()) walk(full);
       else if (entry.isFile()) {
         try {
-          total += fs.statSync(full).size;
+          const st = fs.statSync(full);
+          if (seen.has(st.ino)) continue;
+          seen.add(st.ino);
+          total += st.size;
         } catch {
           /* 忽略读不到的文件 */
         }
@@ -82,12 +90,11 @@ function listStatus(): void {
     console.log("目录是空的。");
     return;
   }
-  let total = 0;
   const rows: Array<{ name: string; size: number }> = [];
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
-    const size = entry.isDirectory() ? dirSize(full) : fs.statSync(full).size;
-    total += size;
+    // 每行单独统计（显示该目录真实体积；硬链接在行间会重复，属正常）
+    const size = entry.isDirectory() ? dirSize(full) : 0;
     rows.push({ name: entry.name, size });
   }
   rows.sort((a, b) => b.size - a.size);
@@ -95,7 +102,9 @@ function listStatus(): void {
     const known = KNOWN_MODELS.find((m) => row.name.toLowerCase().includes(m.id.toLowerCase()));
     console.log(`- ${row.name.padEnd(40)} ${fmtGb(row.size).padStart(9)}  ${known ? known.note : ""}`);
   }
-  console.log(`\n合计：${fmtGb(total)}`);
+  // 合计按 inode 去重（HF 缓存 blobs/ 与 snapshots/ 是硬链接，直接相加会翻倍）
+  const total = dirSize(dir);
+  console.log(`\n合计（硬链接去重）：${fmtGb(total)}`);
   const disk = fs.statfsSync(dir);
   console.log(`所在磁盘剩余：${fmtGb(disk.bavail * disk.bsize)}`);
 }

@@ -20,7 +20,7 @@ from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-DEFAULT_MODEL = os.environ.get("KAREN_EMBED_MODEL", "BAAI/bge-m3")
+DEFAULT_MODEL = os.environ.get("KAREN_EMBED_MODEL", "Qwen/Qwen3-Embedding-0.6B")
 DEFAULT_PORT = int(os.environ.get("KAREN_EMBED_PORT", "18083"))
 MODELS_DIR = Path(
     os.environ.get(
@@ -28,8 +28,14 @@ MODELS_DIR = Path(
         str(Path.home() / "Library" / "Application Support" / "karen" / "models"),
     )
 )
-# 0 表示用模型默认维度
-FORCE_DIM = int(os.environ.get("KAREN_EMBED_DIM", "0"))
+# Qwen3-Embedding 官方建议：检索 query 侧加任务指令，document 侧不加（差距明显）
+QUERY_INSTRUCT = os.environ.get(
+    "KAREN_EMBED_QUERY_INSTRUCT",
+    "Instruct: 给定一段聊天里的话，找出与之相关的人、事、承诺或情绪\nQuery: ",
+)
+# 输出维度：Qwen3-Embedding 支持 MRL 截断，768 维可直接复用现有 t2_vec(FLOAT[768])，零 schema 迁移。
+# 设为 0 表示用模型默认维度（1024）。
+FORCE_DIM = int(os.environ.get("KAREN_EMBED_DIM", "768"))
 
 app = FastAPI(title="karen-local-embed", version="0.1.0")
 
@@ -40,6 +46,8 @@ _dim: Optional[int] = None
 
 class EmbedRequest(BaseModel):
     texts: List[str] = Field(default_factory=list)
+    # query：检索查询（会自动加任务指令）；document：入库文本（不加）
+    mode: str = "document"
 
 
 class EmbedResponse(BaseModel):
@@ -120,6 +128,8 @@ def embed(req: EmbedRequest) -> EmbedResponse:
     if not req.texts:
         return EmbedResponse(vectors=[], dim=_dim or 0)
     texts = [t[:2000] for t in req.texts]
+    if req.mode == "query" and QUERY_INSTRUCT:
+        texts = [f"{QUERY_INSTRUCT}{t}" for t in texts]
     try:
         embedder = _get_embedder()
         vectors = [list(map(float, v)) for v in embedder.embed(texts)]
