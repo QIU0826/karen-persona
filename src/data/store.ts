@@ -58,6 +58,12 @@ export interface AppConfig {
   photo_share_min_closeness?: number;
   photo_share_probability?: number;
   photo_share_cooldown_minutes?: number;
+  /**
+   * 群聊是否允许她发生活照（默认 false，隐私保守）：
+   * 群聊是多人语境，默认只发文字/QQ 表情/贴纸；显式开启后才把
+   * processMessage 的主动发图结果发到群里。
+   */
+  group_photo_enabled?: boolean;
 }
 
 /** 配置错误。消息面向用户，可直接打印。 */
@@ -414,6 +420,12 @@ export function loadConfig(): AppConfig {
     ? parseOptionalNumber(photoCooldownPicked.value, photoCooldownPicked.source, 0, 1440)
     : undefined;
 
+  // 群聊发图：默认关闭（隐私保守），config.yaml / GROUP_PHOTO=true 显式开启
+  const groupPhotoPicked = pickOption(raw, "group_photo_enabled", "GROUP_PHOTO");
+  const groupPhotoEnabled = groupPhotoPicked
+    ? parseBooleanOption(groupPhotoPicked.value, groupPhotoPicked.source)
+    : false;
+
   return {
     persona,
     her_name: herName,
@@ -439,6 +451,7 @@ export function loadConfig(): AppConfig {
     photo_share_min_closeness: photoShareMinCloseness,
     photo_share_probability: photoShareProbability,
     photo_share_cooldown_minutes: photoShareCooldownMinutes,
+    group_photo_enabled: groupPhotoEnabled,
     ai_disclosure: aiDisclosure,
   };
 }

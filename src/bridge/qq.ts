@@ -72,6 +72,7 @@ import { exportUserData } from "../data/user-export.js";
 import { buildFirstContactDisclosure } from "../persona/disclosure.js";
 import { ownerForQq } from "../data/owner.js";
 import { pickSticker, toStickerCqCode } from "../impulse/stickers.js";
+import { buildGroupReplyPlan } from "./group-reply.js";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import { createLogger, configureLogger } from "../obs/logger.js";
@@ -179,6 +180,8 @@ const messageDedup = new MessageIdDedup(DEDUP_CAPACITY);
 const userDeferredTimers = new Map<number, { timer: ReturnType<typeof setTimeout>; pendingId: number }>();
 /** 上次发贴纸的时间（每用户冷却） */
 const userLastStickerAt = new Map<number, number>();
+/** 群聊贴纸冷却：key = `${groupId}:${userId}`（同一个人在私聊/群里互不影响） */
+const groupLastStickerAt = new Map<string, number>();
 
 // 静默忽略的非白名单账号（只统计数量，日志不落 QQ 号）
 let ignoredNonWhitelistedMessages = 0;
@@ -428,13 +431,16 @@ async function deliverDeferredGroupReply(ctx: DeferredGroupContext): Promise<voi
     const result = await processMessage(ctx.state, ctx.text, {
       bypassGate: true,
       skipUserPersist: true,
+      skipPhoto: !ctx.state.config.group_photo_enabled,
     });
     for (const line of result.logs) console.log(`  ${line}`);
     if (result.deferred) {
       log.warn("gate.group_deferred_still_gated", { group_id: ctx.groupId });
       return;
     }
-    const sent = await sendGroupReplies(ctx.groupId, ctx.userId, ctx.userName, result);
+    const sent = await sendGroupReplies(ctx.groupId, ctx.userId, ctx.userName, result, {
+      photoEnabled: ctx.state.config.group_photo_enabled === true,
+    });
     log.info("gate.group_deferred_done", { group_id: ctx.groupId, sent });
   } catch (err) {
     log.error("gate.group_deferred_failed", { group_id: ctx.groupId, error: errMessage(err) });
@@ -919,36 +925,40 @@ interface OutboundPhoto {
  * 发送主动分享的图片：先发配文、再发图片（本地文件读 base64 / URL 下载后 base64）。
  * 失败静默降级，不影响文字回复；日志不落正文。
  */
+/** 读取/下载出站图片为 base64（本地文件优先；失败返回 null）。 */
+async function readOutboundPhotoBase64(
+  photo: { file?: string; url?: string },
+): Promise<{ base64: string; source: string } | null> {
+  if (photo.file) {
+    const buffer = fs.readFileSync(photo.file);
+    if (buffer.length > 0 && buffer.length <= MAX_OUTBOUND_PHOTO_BYTES) {
+      return { base64: buffer.toString("base64"), source: "local" };
+    }
+    return null;
+  }
+  if (photo.url) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(photo.url, { signal: controller.signal });
+      if (response.ok) {
+        const buffer = Buffer.from(await response.arrayBuffer());
+        if (buffer.length > 0 && buffer.length <= MAX_OUTBOUND_PHOTO_BYTES) {
+          return { base64: buffer.toString("base64"), source: "url" };
+        }
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return null;
+}
+
 async function sendPhotoToUser(userId: number, photo: OutboundPhoto): Promise<void> {
   try {
-    let base64: string | null = null;
-    let source = "unknown";
-
-    if (photo.file) {
-      const buffer = fs.readFileSync(photo.file);
-      if (buffer.length > 0 && buffer.length <= MAX_OUTBOUND_PHOTO_BYTES) {
-        base64 = buffer.toString("base64");
-        source = "local";
-      }
-    } else if (photo.url) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10_000);
-      try {
-        const response = await fetch(photo.url, { signal: controller.signal });
-        if (response.ok) {
-          const buffer = Buffer.from(await response.arrayBuffer());
-          if (buffer.length > 0 && buffer.length <= MAX_OUTBOUND_PHOTO_BYTES) {
-            base64 = buffer.toString("base64");
-            source = "url";
-          }
-        }
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-
-    if (!base64) {
-      log.warn("photo.outbound_failed", { user_id: userId, source });
+    const resolved = await readOutboundPhotoBase64(photo);
+    if (!resolved) {
+      log.warn("photo.outbound_failed", { user_id: userId, source: photo.file ? "local" : "url" });
       return;
     }
 
@@ -956,10 +966,39 @@ async function sendPhotoToUser(userId: number, photo: OutboundPhoto): Promise<vo
       sendPrivateMsg(userId, photo.caption);
       await sleep(700);
     }
-    sendPrivateMsg(userId, asCqCode(`[CQ:image,file=base64://${base64}]`));
-    log.info("photo.sent", { user_id: userId, source, bytes: Math.round((base64.length * 3) / 4) });
+    sendPrivateMsg(userId, asCqCode(`[CQ:image,file=base64://${resolved.base64}]`));
+    log.info("photo.sent", {
+      user_id: userId,
+      source: resolved.source,
+      bytes: Math.round((resolved.base64.length * 3) / 4),
+      target: "private",
+    });
   } catch (err: unknown) {
     log.warn("photo.send_error", { user_id: userId, error: errMessage(err) });
+  }
+}
+
+/** 群聊发图（仅 group_photo_enabled=true 时调用）：先配文再图片，与私聊一致。 */
+async function sendPhotoToGroup(groupId: number, photo: OutboundPhoto): Promise<void> {
+  try {
+    const resolved = await readOutboundPhotoBase64(photo);
+    if (!resolved) {
+      log.warn("photo.outbound_failed", { group_id: groupId, source: photo.file ? "local" : "url" });
+      return;
+    }
+    if (photo.caption) {
+      sendGroupMsg(groupId, photo.caption);
+      await sleep(700);
+    }
+    sendGroupMsg(groupId, asCqCode(`[CQ:image,file=base64://${resolved.base64}]`));
+    log.info("photo.sent", {
+      group_id: groupId,
+      source: resolved.source,
+      bytes: Math.round((resolved.base64.length * 3) / 4),
+      target: "group",
+    });
+  } catch (err: unknown) {
+    log.warn("photo.send_error", { group_id: groupId, error: errMessage(err) });
   }
 }
 
@@ -1043,20 +1082,30 @@ async function streamPrivateReply(params: {
   return { sentCount, interrupted: false };
 }
 
+/** 贴纸发送目标：私聊给某人，或群聊里回应某人（同一套贴纸/情绪逻辑） */
+type StickerTarget =
+  | { kind: "private"; userId: number }
+  | { kind: "group"; groupId: number; userId: number };
+
 /**
  * 文字回复后，按情绪/时段「顺手」发一个本地贴纸。
- * - 冷却 5 分钟；收到对方表情时更愿意回一个；
+ * - 私聊/群聊共用选择逻辑；冷却按目标分别计算（私聊 5 分钟，群聊按 群+人 5 分钟）；
+ * - 收到对方表情时更愿意回一个；
  * - 冲突未化解时不发；资源/发送失败静默降级。
  */
 function maybeSendSticker(
-  userId: number,
+  target: StickerTarget,
   state: ConversationState,
   inboundSticker: boolean,
 ): void {
   if (process.env.STICKER_ENABLED === "0") return;
 
   const now = Date.now();
-  const last = userLastStickerAt.get(userId) ?? 0;
+  const groupKey = target.kind === "group" ? `${target.groupId}:${target.userId}` : "";
+  const last =
+    target.kind === "private"
+      ? (userLastStickerAt.get(target.userId) ?? 0)
+      : (groupLastStickerAt.get(groupKey) ?? 0);
   if (now - last < STICKER_COOLDOWN_MS) return;
 
   const conflictAt = state.relationshipState.lastConflictAt;
@@ -1075,9 +1124,27 @@ function maybeSendSticker(
   const cq = toStickerCqCode(sticker);
   if (!cq) return;
 
-  userLastStickerAt.set(userId, now);
-  sendPrivateMsg(userId, asCqCode(cq));
-  log.info("sticker.sent", { user_id: userId, sticker: sticker.id, reply_to_sticker: inboundSticker });
+  if (target.kind === "private") {
+    userLastStickerAt.set(target.userId, now);
+    sendPrivateMsg(target.userId, asCqCode(cq));
+    log.info("sticker.sent", {
+      user_id: target.userId,
+      sticker: sticker.id,
+      reply_to_sticker: inboundSticker,
+      target: "private",
+    });
+    return;
+  }
+
+  groupLastStickerAt.set(groupKey, now);
+  sendGroupMsg(target.groupId, asCqCode(cq));
+  log.info("sticker.sent", {
+    group_id: target.groupId,
+    user_id: target.userId,
+    sticker: sticker.id,
+    reply_to_sticker: inboundSticker,
+    target: "group",
+  });
 }
 
 async function handlePrivateBatch(
@@ -1220,7 +1287,7 @@ async function handlePrivateBatch(
         outcome.deferredDelayMs,
       );
     } else if (outcome.sentCount > 0) {
-      maybeSendSticker(userId, state, inboundSticker);
+      maybeSendSticker({ kind: "private", userId }, state, inboundSticker);
     }
   } catch (err: unknown) {
     log.error("reply.failed", { user_id: userId, error: errMessage(err) });
@@ -1237,19 +1304,23 @@ async function handlePrivateBatch(
 
 /**
  * 发送群聊回复（多条随机间隔，模拟打字）。
+ *
+ * 出站内容由 `buildGroupReplyPlan` 统一编排：文字气泡 → QQ 表情 → （可选）照片+配文。
+ * 照片默认不发群（隐私保守），只有 `group_photo_enabled: true` 才会出现。
  */
 async function sendGroupReplies(
   groupId: number,
   userId: number,
   userName: string,
   result: PipelineResult,
+  options: { photoEnabled?: boolean } = {},
 ): Promise<number> {
-  if (!result.reply && !result.qqFace) return 0;
+  const plan = buildGroupReplyPlan(result, { photoEnabled: options.photoEnabled === true });
+  if (plan.textLines.length === 0 && !plan.qqFaceCq && !plan.photo) return 0;
 
   let sent = 0;
-  const lines = result.reply.split("\n").map(line => line.trim()).filter(Boolean);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (let i = 0; i < plan.textLines.length; i++) {
+    const line = plan.textLines[i];
     const delayMs = line.length <= 3 ? 600 + Math.random() * 800 :
                     line.length <= 15 ? 1000 + Math.random() * 1500 :
                     1500 + Math.random() * 2500;
@@ -1261,9 +1332,16 @@ async function sendGroupReplies(
   }
 
   // QQ 表情
-  if (result.qqFace) {
+  if (plan.qqFaceCq) {
     await sleep(500 + Math.random() * 600);
-    sendGroupMsg(groupId, asCqCode(result.qqFace));
+    sendGroupMsg(groupId, asCqCode(plan.qqFaceCq));
+    sent++;
+  }
+
+  // 主动分享的照片（默认关闭；仅团体发图开启时）
+  if (plan.photo) {
+    await sleep(800 + Math.random() * 800);
+    await sendPhotoToGroup(groupId, plan.photo);
     sent++;
   }
 
@@ -1303,8 +1381,9 @@ async function handleGroupMessage(
   const userName = sanitizeLogValue(event.sender?.card || event.sender?.nickname || String(userId));
   log.info("group.mentioned", { group_id: groupId, user_id: userId });
 
-  // 图片识别
+  // 图片/表情识别（群聊里收到表情时也会更愿意回贴纸）
   const media = detectMedia(event as unknown as PrivateMessageEvent);
+  const inboundSticker = media?.type === "face" || media?.type === "mface";
   let finalText = text;
   if (media?.type === "image" && media.data?.url) {
     const desc = await describeImage(media.data.url);
@@ -1319,7 +1398,10 @@ async function handleGroupMessage(
 
   try {
     // P0 修复：await + catch，畸形事件/LLM 失败不再产生 unhandled rejection
-    const result = await processMessage(state, finalText);
+    // 群聊默认 skipPhoto：多人群里不发她的生活照（config.group_photo_enabled 才开）
+    const result = await processMessage(state, finalText, {
+      skipPhoto: !state.config.group_photo_enabled,
+    });
     for (const line of result.logs) console.log(`  ${line}`);
 
     // 消息门判定晚点回
@@ -1332,8 +1414,13 @@ async function handleGroupMessage(
     }
     if (result.silenced) return;
 
-    // 不发 Unsplash 照片到群里——那是私聊专属
-    await sendGroupReplies(groupId, userId, userName, result);
+    // 出站：文字 → QQ 表情 →（可选）照片；之后再按情绪/时段顺手一个贴纸
+    const sent = await sendGroupReplies(groupId, userId, userName, result, {
+      photoEnabled: state.config.group_photo_enabled === true,
+    });
+    if (sent > 0) {
+      maybeSendSticker({ kind: "group", groupId, userId }, state, inboundSticker);
+    }
   } catch (err: unknown) {
     log.error("group.failed", { group_id: groupId, user_id: userId, error: errMessage(err) });
   }

@@ -145,6 +145,39 @@ describe("M1-1/M1-2 重启恢复与关系成长", () => {
   });
 });
 
+describe("群聊发图开关（skipPhoto）", () => {
+  it("默认会触发主动发图；skipPhoto=true 时跳过（群聊默认行为）", async () => {
+    const { loadPersona } = await import("../persona/loader.js");
+    const { initConversation, processMessage } = await import("./orchestrator.js");
+    const photoConfig = (): import("../data/store.js").AppConfig => ({
+      persona: "xiaoya",
+      her_name: "小雅",
+      your_name: "你",
+      location: "上海",
+      tags: [],
+      message_frequency_limit: 10,
+      log_level: "info",
+      // 测试期覆盖：必定发图、无门槛、无冷却
+      photo_share_probability: 1,
+      photo_share_min_closeness: 0,
+      photo_share_cooldown_minutes: 0,
+    });
+
+    const persona = await loadPersona("xiaoya");
+    const state = await initConversation(persona, photoConfig());
+    const withPhoto = await processMessage(state, "今天天气不错出去走走", { bypassGate: true });
+    expect(withPhoto.imageFile ?? withPhoto.imageUrl).toBeTruthy();
+
+    const persona2 = await loadPersona("xiaoya");
+    const state2 = await initConversation(persona2, photoConfig());
+    const noPhoto = await processMessage(state2, "今天天气不错出去走走", {
+      bypassGate: true,
+      skipPhoto: true,
+    });
+    expect(noPhoto.imageFile ?? noPhoto.imageUrl).toBeUndefined();
+  });
+});
+
 describe("跨轮反重复与用户事实注入", () => {
   const makeConfig = (): import("../data/store.js").AppConfig => ({
     persona: "xiaoya",

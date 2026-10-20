@@ -254,6 +254,8 @@ export interface ProcessOptions {
   bypassGate?: boolean;
   /** 跳过用户消息落库（延迟补回复时原消息已落库） */
   skipUserPersist?: boolean;
+  /** 跳过主动发图（群聊默认不发生活照：省一次图片决策/资源读写） */
+  skipPhoto?: boolean;
 }
 
 // ── 初始化 ────────────────────────────────────
@@ -1098,7 +1100,8 @@ export async function processMessage(
   let imageFile: string | undefined;
   let imageCaption: string | undefined;
   try {
-    const photo = await trySharePhoto(state, rawReply);
+    // 群聊默认 skipPhoto：多人群里不发她的生活照（隐私保守，group_photo_enabled 才开）
+    const photo = opts.skipPhoto ? null : await trySharePhoto(state, rawReply);
     if (photo) {
       imageUrl = photo.imageUrl;
       imageFile = photo.imageFile;
