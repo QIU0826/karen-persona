@@ -101,3 +101,31 @@ describe("pickMeetingFallback", () => {
     expect(variants.size).toBeGreaterThan(1);
   });
 });
+
+describe("stripFabricatedMeeting：模糊词 + 具体场所也算编造（v0.8.9 真机回归）", () => {
+  it("「好像是咖啡店吧」——加了模糊词仍然是断言具体场所，要删", () => {
+    const result = stripFabricatedMeeting("我想想 好像是咖啡店吧 具体的我也记不太清了", true);
+    expect(result.changed).toBe(true);
+    expect(result.text).not.toContain("咖啡店");
+  });
+
+  it("酒吧/书店/餐厅/电影院 等场所同样处理", () => {
+    for (const venue of ["酒吧", "书店", "餐厅", "电影院", "健身房"]) {
+      const result = stripFabricatedMeeting(`好像是${venue}吧，记不太清了`, true);
+      expect(result.text, `${venue} 应被删除`).not.toContain(venue);
+    }
+  });
+
+  it("含糊到没有具体场所时不动（「记不清了，你提醒我」是真人式回应）", () => {
+    const answer = "记不清了，你提醒我一下？";
+    const result = stripFabricatedMeeting(answer, true);
+    expect(result.changed).toBe(false);
+    expect(result.text).toBe(answer);
+  });
+
+  it("有依据时（用户自己说过）不删除（避免误伤真实回忆）", () => {
+    // 这里只测 strip 本身：它只删「场景断言」，依据判断在调用方用 hasMeetingGrounding
+    const result = stripFabricatedMeeting("就是我们第一次见面那家咖啡店啊", true);
+    expect(result.text).not.toContain("咖啡店");
+  });
+});

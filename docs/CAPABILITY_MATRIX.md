@@ -89,6 +89,7 @@
 | 评测守门的自检 | ✅ | 10 条单测证明"该失败时会失败"（含 anti-forget 未跑也算失败） |
 | 文档一致性 | ✅ | 7 条单测：README 的 `npm run` 脚本、斜杠命令、docs 链接必须真实存在 |
 | 桥接 E2E | ✅ | mock-OneBot 冒充 NapCat + fake DeepSeek，覆盖披露/年龄门/私聊/图片/群聊/危机/多用户隔离 |
+| 全链路回归（21 轮 mock） | ✅ | 见 [LONGRUN_V08_ANALYSIS.md](LONGRUN_V08_ANALYSIS.md)：0 错误 / 记忆探针 5/5 / 编造 0 / 多媒体 7+2+4+9 |
 | 真实 QQ 长跑 | 🚧 | 已跑通（首轮 2 回合，¥0.0057；模拟 30 轮记忆 6/6、复读对 0）；仍需更多真机样本 |
 | CI | ✅ | ubuntu/macOS/Windows 三平台 + Linux 覆盖率 + 离线评测守门 |
 

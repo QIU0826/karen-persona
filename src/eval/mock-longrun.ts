@@ -24,6 +24,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import OpenAI from "openai";
+import Database from "better-sqlite3";
 import { WebSocket } from "ws";
 import { withThinking } from "../ai/chat.js";
 import { computeCostCny } from "../obs/cost-tracker.js";
@@ -438,6 +439,122 @@ export interface LongrunTurnResult {
   beat: ScenarioBeat;
 }
 
+/**
+ * v0.5–v0.8 新机制的运行时状态快照（长跑结束时读临时 DB / 状态 JSON）。
+ * 目的：验证「向量检索 / 锚点 / 日记忆 / 意图式主动 / 五维关系 / 反思 / 表情包收集」
+ * 在一条完整链路里真的会被触发，而不只是单测通过。
+ */
+export interface RuntimeStateSnapshot {
+  /** 锚点：数量与类型（触发过才 >0） */
+  anchors: { count: number; kinds: string[] };
+  /** 日记忆条数、周汇总条数 */
+  digests: { daily: number; weekly: number };
+  /** 用户事实条数 */
+  facts: number;
+  /** 收集到的表情包数量（默认采集关，通常 0） */
+  stickers: number;
+  /** 主动性：今天计划的由头数 + 已发出次数 */
+  initiative: { planItems: number; sent: number };
+  /** 关系：亲密度 + 五维 + 阶段 */
+  relationship: { closeness: number; dims: Record<string, number> | null; phase: string | null };
+  /** 反思阶段（觉察/嘴硬/认了/慢慢改/none） */
+  reflection: { phase: string; topic: string | null };
+  /** 主动消息计数与最近门控原因（可解释性） */
+  proactive: { sentToday: number; lastGateReason: string | null };
+  /** 读取失败时的原因（不中断报告） */
+  error?: string;
+}
+
+/** 从临时 data 目录读运行时状态（只读，失败返回带 error 的空快照）。 */
+export function collectRuntimeState(dataDir: string): RuntimeStateSnapshot {
+  const empty: RuntimeStateSnapshot = {
+    anchors: { count: 0, kinds: [] },
+    digests: { daily: 0, weekly: 0 },
+    facts: 0,
+    stickers: 0,
+    initiative: { planItems: 0, sent: 0 },
+    relationship: { closeness: 0, dims: null, phase: null },
+    reflection: { phase: "none", topic: null },
+    proactive: { sentToday: 0, lastGateReason: null },
+  };
+  try {
+    const dbPath = path.join(dataDir, "memory.sqlite");
+    if (fs.existsSync(dbPath)) {
+      const db = new Database(dbPath, { readonly: true });
+      try {
+        const countOf = (sql: string): number => {
+          try {
+            const row = db.prepare(sql).get() as { c?: number } | undefined;
+            return Number(row?.c ?? 0);
+          } catch {
+            return 0;
+          }
+        };
+        empty.anchors.count = countOf("SELECT COUNT(*) AS c FROM memory_anchors");
+        try {
+          const kinds = db
+            .prepare("SELECT DISTINCT kind FROM memory_anchors")
+            .all() as Array<{ kind: string }>;
+          empty.anchors.kinds = kinds.map((k) => k.kind);
+        } catch {
+          // 老 schema 没有 kind 列
+        }
+        empty.digests.daily = countOf("SELECT COUNT(*) AS c FROM daily_digests");
+        empty.digests.weekly = countOf("SELECT COUNT(*) AS c FROM weekly_rollups");
+        empty.stickers = countOf("SELECT COUNT(*) AS c FROM sticker_library");
+        empty.facts = countOf("SELECT COUNT(*) AS c FROM user_facts");
+        try {
+          const plan = db
+            .prepare("SELECT plan_json FROM initiative_plans ORDER BY day DESC LIMIT 1")
+            .get() as { plan_json?: string } | undefined;
+          if (plan?.plan_json) {
+            const parsed = JSON.parse(plan.plan_json) as { items?: unknown[] };
+            empty.initiative.planItems = Array.isArray(parsed.items) ? parsed.items.length : 0;
+          }
+        } catch {
+          // 没有计划表/没有计划
+        }
+        empty.initiative.sent = countOf("SELECT COUNT(*) AS c FROM initiative_stats");
+      } finally {
+        db.close();
+      }
+    }
+
+    // 人格状态 JSON：五维 / 反思 / 主动计数
+    const stateFile = fs
+      .readdirSync(dataDir)
+      .find((f) => f.startsWith("persona-state-") && f.endsWith(".json"));
+    if (stateFile) {
+      const raw = JSON.parse(fs.readFileSync(path.join(dataDir, stateFile), "utf-8")) as Record<
+        string,
+        unknown
+      >;
+      const rel = (raw.relationship ?? {}) as Record<string, unknown>;
+      empty.relationship.closeness = Number(rel.closeness ?? 0);
+      const dims = rel.dims as Record<string, number> | undefined;
+      if (dims && typeof dims === "object") {
+        empty.relationship.dims = {
+          intimacy: Number(dims.intimacy ?? 0),
+          trust: Number(dims.trust ?? 0),
+          tension: Number(dims.tension ?? 0),
+          reciprocity: Number(dims.reciprocity ?? 0),
+          dependency: Number(dims.dependency ?? 0),
+        };
+      }
+      const refl = (raw.reflection ?? {}) as Record<string, unknown>;
+      empty.reflection.phase = String(refl.phase ?? "none");
+      empty.reflection.topic = typeof refl.topic === "string" ? refl.topic : null;
+      const counters = (raw.counters ?? {}) as Record<string, unknown>;
+      empty.proactive.sentToday = Number(counters.proactiveCountToday ?? 0);
+      const gate = raw.lastGate as Record<string, unknown> | undefined;
+      empty.proactive.lastGateReason = typeof gate?.reason === "string" ? gate.reason : null;
+    }
+    return empty;
+  } catch (err) {
+    return { ...empty, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export interface LongrunResult {
   ok: boolean;
   tag: string;
@@ -462,6 +579,8 @@ export interface LongrunResult {
   setup: { ok: boolean; detail: string; turns: number };
   turns: LongrunTurn[];
   metrics: LongrunMetrics;
+  /** v0.5–v0.8 新机制的运行时状态（锚点/日记忆/主动/关系/反思）；老测试 fixture 可不传 */
+  runtimeState?: RuntimeStateSnapshot;
   probes: ProbeOutcome[];
   fabrication: FabricationCheck | null;
   cost: {
@@ -1360,6 +1479,53 @@ export function renderReport(result: LongrunResult, existingReport?: string | nu
     lines.push("（本轮未包含编造检测）");
   }
   lines.push("");
+
+  // ── 4b. 新机制运行时状态（v0.5–v0.8）─────────────────
+  {
+    const rs = result.runtimeState;
+    if (!rs) {
+      lines.push("## 4b. 新机制运行时状态（v0.5–v0.8，读自临时库/状态文件）");
+      lines.push("");
+      lines.push("> 本次运行未采集（旧版 fixture / 未传入 runtimeState）。");
+      lines.push("");
+    } else {
+      lines.push("## 4b. 新机制运行时状态（v0.5–v0.8，读自临时库/状态文件）");
+      lines.push("");
+      if (rs.error) {
+        lines.push(`> ⚠️ 读取状态失败：${rs.error}（不影响其它指标）`);
+      } else {
+        const dims = rs.relationship.dims;
+        lines.push("| 机制 | 是否触发 | 证据 |");
+        lines.push("| --- | --- | --- |");
+        lines.push(
+          `| 锚点记忆 | ${rs.anchors.count > 0 ? "✅" : "—（21 轮闲聊里没有值得长期记的事件）"} | ${rs.anchors.count} 条${rs.anchors.kinds.length ? `（${rs.anchors.kinds.join("/")}）` : ""} |`,
+        );
+        lines.push(
+          `| 日记忆 / 周汇总 | ${rs.digests.daily + rs.digests.weekly > 0 ? "✅" : "—（需跨天/心跳才生成）"} | 日 ${rs.digests.daily} 条 / 周 ${rs.digests.weekly} 条 |`,
+        );
+        lines.push(`| 用户事实 | ${rs.facts > 0 ? "✅" : "—"} | ${rs.facts} 条 |`);
+        lines.push(
+          `| 表情包收集 | ${rs.stickers > 0 ? "✅" : "—（采集开关默认关）"} | ${rs.stickers} 张 |`,
+        );
+        lines.push(
+          `| 意图式主动 | ${rs.initiative.planItems > 0 ? "✅" : "—（需心跳生成计划）"} | 今日由头 ${rs.initiative.planItems} 个 / 已发 ${rs.initiative.sent} 次 |`,
+        );
+        lines.push(
+          `| 五维关系 | ${dims ? "✅" : "—"} | 亲密度 ${rs.relationship.closeness.toFixed(2)}${dims ? `；亲密 ${dims.intimacy} / 信任 ${dims.trust} / 张力 ${dims.tension} / 互惠 ${dims.reciprocity} / 依赖 ${dims.dependency}` : ""} |`,
+        );
+        lines.push(
+          `| 反思循环 | ${rs.reflection.phase !== "none" ? "✅" : "—（触发需被点破或同类信号反复）"} | 阶段 ${rs.reflection.phase}${rs.reflection.topic ? `（${rs.reflection.topic}）` : ""} |`,
+        );
+        lines.push(
+          `| 主动计数/门控 | — | 今日已发 ${rs.proactive.sentToday}；最近门控原因 ${rs.proactive.lastGateReason ?? "无"} |`,
+        );
+        lines.push("");
+        lines.push(
+          "> 说明：「—」不是失败——这些机制依赖跨天心跳、越界/冲突事件或显式开关，21 轮纯闲聊本就不一定触发；本表的价值是**把「有没有接线」变成可观察**，而不是强求每次都触发。",
+        );
+      }
+    }
+  }
 
   lines.push("## 5. 重复度与产品红线");
   lines.push("");
@@ -2645,6 +2811,7 @@ export async function runLongrun(partial: RunLongrunOptions): Promise<LongrunRes
     const health = await fetchBridgeHealth(workspace.healthPort);
     const transcript = buildTranscript(turns);
     const metrics = computeMetrics(turns);
+    const runtimeState = collectRuntimeState(workspace.dataDir);
     const probes = evaluateProbes(turns, beats);
     const fabrication = detectFabrication(turns, beats);
     const bridgeErrors = collectBridgeErrorSummary(bridge);
@@ -2678,6 +2845,7 @@ export async function runLongrun(partial: RunLongrunOptions): Promise<LongrunRes
       setup,
       turns,
       metrics,
+      runtimeState,
       probes,
       fabrication,
       cost: {

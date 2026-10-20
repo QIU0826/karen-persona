@@ -32,6 +32,14 @@ const GROUNDING_PATTERN =
 const SCENE_CLAIM_PATTERN =
   /(吧台|柜台|收银台|门口|地铁口|公司楼下|下雨|雨天|淋雨|撑伞|借.{0,2}伞|伞|递给你|请你喝|点了[^。！？\n]{0,6}杯|每周|每天都来|天天来|老来|常来|老是来|老是坐|坐.{0,2}吧台|第一次见你|第一次来店里|那次你|那天你|后来就熟了)/;
 
+/**
+ * 具体场所名词：即使加了「好像/大概」这类模糊词，仍然是**断言了一个具体场景**。
+ * v0.9（真机回归发现）：她说「好像是咖啡店吧 具体记不太清」——模糊词掩盖了编造，
+ * 上一版词表只覆盖「吧台/店里」，漏了咖啡店/酒吧/书店这类场所名。
+ */
+const VENUE_CLAIM_PATTERN =
+  /(咖啡店|咖啡馆|咖啡厅|奶茶店|酒吧|书店|餐厅|饭店|食堂|小馆|夜宵摊|大排档|便利店|超市|商场|电影院|剧院|健身房|图书馆|自习室|公园|操场|球场|体育馆|展览|展会|演唱会|音乐节|车站|机场|地铁站|写字楼|学校门口|校门口|宿舍楼下|公司附近|公司旁边)/;
+
 /** 没有依据时的兜底回应（真人也会说「记不清了，你提醒我」） */
 const MEETING_FALLBACKS: readonly string[] = [
   "嗯……这事儿我还真说不上来。你提醒我一下？",
@@ -90,7 +98,7 @@ export function stripFabricatedMeeting(
   const keptLines: string[] = [];
   for (const line of source.split("\n")) {
     const clauses = line.split(/(?<=[，,。！？!?；;…])/);
-    const kept = clauses.filter((clause) => !SCENE_CLAIM_PATTERN.test(clause));
+    const kept = clauses.filter((clause) => !(SCENE_CLAIM_PATTERN.test(clause) || VENUE_CLAIM_PATTERN.test(clause)));
     const joined = kept
       .join("")
       .replace(/^[，,。！？!?；;…\s]+/, "")
