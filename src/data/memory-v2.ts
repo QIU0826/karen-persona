@@ -127,6 +127,8 @@ export function ensureMemoryV2Schema(db: Database): void {
   addColumnIfMissing(db, "user_facts", "status", "TEXT DEFAULT 'pending'");
   addColumnIfMissing(db, "user_facts", "source_quote", "TEXT");
   addColumnIfMissing(db, "user_facts", "confirmed_at", "INTEGER");
+  // 质疑留痕：同一条事实最近问过一次就别反复问（v0.5）
+  addColumnIfMissing(db, "user_facts", "challenged_at", "INTEGER");
   addColumnIfMissing(db, "t2_episodes", "salience", "REAL DEFAULT 0.5");
   addColumnIfMissing(db, "t2_episodes", "heat", "REAL DEFAULT 0");
   addColumnIfMissing(db, "t2_episodes", "anchor_id", "INTEGER");

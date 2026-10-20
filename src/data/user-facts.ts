@@ -15,6 +15,7 @@
  */
 import OpenAI from "openai";
 import { getVectorDb } from "./vector.js";
+import { ensureMemoryV2Schema } from "./memory-v2.js";
 import { dbPath } from "./paths.js";
 import { getChatModel } from "../ai/router.js";
 import { withThinking } from "../ai/chat.js";
@@ -29,7 +30,14 @@ export type FactCategory =
   | "relationship"
   | "other";
 
+/** 事实状态：pending=待确认；confirmed=已确认；disputed=与既有说法冲突，待澄清 */
+export type FactStatus = "pending" | "confirmed" | "disputed";
+
 export interface UserFact {
+  /** v0.5：待确认 / 已确认 / 有冲突 */
+  status?: FactStatus;
+  confidence?: number;
+  challenged_at?: number | null;
   ownerId: string;
   key: string;
   value: string;
@@ -99,6 +107,9 @@ function ensureTable(): void {
     CREATE INDEX IF NOT EXISTS idx_fact_history_owner_key
       ON user_fact_history(owner_id, fact_key, changed_at DESC);
   `);
+  // v0.5：补 status/confidence/challenged_at 等列（幂等）。放在这里是为了兼容
+  // "user_facts 先于 vector.migrate 建表" 的路径（测试/CLI 直连时就是这种顺序）。
+  ensureMemoryV2Schema(getVectorDb());
   tableReadyForPath = currentPath;
 }
 
@@ -174,10 +185,157 @@ export function upsertUserFacts(ownerId: string, facts: ExtractedFact[]): number
         trimHistory.run(ownerId, f.key, ownerId, f.key);
       }
       stmt.run(ownerId, f.key, f.value, f.category, now);
+      // v0.5 状态机：首次记下 → pending；值变了 → disputed（等她自己问一句）；
+      // 同一值再说一次 → confirmed（复述即确认）
+      const status: FactStatus = !previous
+        ? "pending"
+        : previous.fact_value !== f.value
+          ? "disputed"
+          : "confirmed";
+      const confidence = status === "confirmed" ? 0.9 : status === "disputed" ? 0.4 : 0.6;
+      db.prepare(
+        `UPDATE user_facts SET status = ?, confidence = ?, confirmed_at = ?
+         WHERE owner_id = ? AND fact_key = ?`,
+      ).run(
+        status,
+        confidence,
+        status === "confirmed" ? now : null,
+        ownerId,
+        f.key,
+      );
     }
   });
   tx(facts);
   return facts.length;
+}
+
+/**
+ * 需要她主动确认一下的事实（v0.5）：与既有说法冲突、且最近 2 天没问过。
+ *
+ * 真人听到「我搬去成都了」而记得对方在杭州，会顺口确认一句，而不是默默接受或默默怀疑。
+ */
+export function getFactsNeedingConfirmation(
+  ownerId: string,
+  now = Date.now(),
+  coolDownMs = 2 * 24 * 60 * 60 * 1000,
+): Array<UserFact & { previous?: string }> {
+  try {
+    ensureTable();
+    const db = getVectorDb();
+    const rows = db
+      .prepare(
+        `SELECT * FROM user_facts
+         WHERE owner_id = ? AND COALESCE(status,'pending') = 'disputed'
+           AND (challenged_at IS NULL OR challenged_at < ?)
+         ORDER BY updated_at DESC LIMIT 3`,
+      )
+      .all(ownerId, now - coolDownMs) as Array<{
+      fact_key: string;
+      fact_value: string;
+      category: string;
+      updated_at: number;
+      status?: string;
+      confidence?: number;
+    }>;
+    // 附上上一个值，便于她说"你之前说…"
+    const history = db.prepare(
+      `SELECT old_value FROM user_fact_history
+       WHERE owner_id = ? AND fact_key = ?
+       ORDER BY changed_at DESC, id DESC LIMIT 1`,
+    );
+    return rows.map((row) => {
+      const prev = history.get(ownerId, row.fact_key) as { old_value: string } | undefined;
+      const fact: UserFact & { previous?: string } = {
+        ownerId,
+        key: row.fact_key,
+        value: row.fact_value,
+        category: (VALID_CATEGORIES.has(row.category as FactCategory)
+          ? row.category
+          : "other") as FactCategory,
+        updatedAt: row.updated_at,
+        status: (row.status as FactStatus) ?? "pending",
+        confidence: row.confidence ?? 0.6,
+        previous: prev?.old_value,
+      };
+      return fact;
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** 把这些事实标记为「已经问过」，避免连续追问。 */
+export function markFactsChallenged(ownerId: string, keys: string[], now = Date.now()): void {
+  if (keys.length === 0) return;
+  try {
+    const stmt = getVectorDb().prepare(
+      `UPDATE user_facts SET challenged_at = ? WHERE owner_id = ? AND fact_key = ?`,
+    );
+    for (const key of keys) stmt.run(now, ownerId, key);
+  } catch {
+    // 忽略
+  }
+}
+
+/** 用户确认某条事实（/fact ok <key>）。 */
+export function confirmFact(ownerId: string, key: string, now = Date.now()): boolean {
+  try {
+    const info = getVectorDb()
+      .prepare(
+        `UPDATE user_facts SET status = 'confirmed', confidence = 0.95, confirmed_at = ?
+         WHERE owner_id = ? AND fact_key = ?`,
+      )
+      .run(now, ownerId, key);
+    return info.changes > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 用户否认某条事实（/fact no <key>）：恢复上一个值并标记确认。
+ * 没有历史值时直接删除这条事实。
+ */
+export function rejectFact(ownerId: string, key: string, now = Date.now()): boolean {
+  try {
+    const db = getVectorDb();
+    const prev = db
+      .prepare(
+        `SELECT old_value FROM user_fact_history
+         WHERE owner_id = ? AND fact_key = ?
+         ORDER BY changed_at DESC, id DESC LIMIT 1`,
+      )
+      .get(ownerId, key) as { old_value: string } | undefined;
+    if (prev) {
+      db.prepare(
+        `UPDATE user_facts SET fact_value = ?, status = 'confirmed', confidence = 0.9,
+           confirmed_at = ?, updated_at = ? WHERE owner_id = ? AND fact_key = ?`,
+      ).run(prev.old_value, now, now, ownerId, key);
+      db.prepare(
+        `INSERT INTO user_fact_history (owner_id, fact_key, old_value, changed_at) VALUES (?, ?, ?, ?)`,
+      ).run(ownerId, key, "(被否认)", now);
+      return true;
+    }
+    const info = db
+      .prepare(`DELETE FROM user_facts WHERE owner_id = ? AND fact_key = ?`)
+      .run(ownerId, key);
+    return info.changes > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** 事实质疑注入：把"与既有说法冲突"的事写成一句温柔确认提示。 */
+export function buildFactConflictNote(
+  conflicts: Array<UserFact & { previous?: string }>,
+): string {
+  if (conflicts.length === 0) return "";
+  const lines = conflicts.map((c) =>
+    c.previous
+      ? `- 「${CATEGORY_LABELS[c.category] ?? "信息"}」他现在说「${c.value}」，但你记得之前是「${c.previous}」`
+      : `- 「${CATEGORY_LABELS[c.category] ?? "信息"}」他现在说「${c.value}」，你有点不确定`,
+  );
+  return `\n## 需要确认一下的事\n${lines.join("\n")}\n（不用刻意审问，顺着一句话带过就行，比如"诶你不是在杭州吗"。确认一次就够，别反复问。）\n`;
 }
 
 /** 读取某 owner 的全部事实（按分类/时间排序）。 */
@@ -185,7 +343,8 @@ export function listUserFacts(ownerId: string): UserFact[] {
   ensureTable();
   const rows = getVectorDb()
     .prepare(
-      `SELECT owner_id, fact_key, fact_value, category, updated_at
+      `SELECT owner_id, fact_key, fact_value, category, updated_at,
+              COALESCE(status,'pending') AS status, confidence, challenged_at
        FROM user_facts WHERE owner_id = ? ORDER BY updated_at DESC`,
     )
     .all(ownerId) as Array<{
@@ -194,6 +353,9 @@ export function listUserFacts(ownerId: string): UserFact[] {
     fact_value: string;
     category: string;
     updated_at: number;
+    status?: string;
+    confidence?: number;
+    challenged_at?: number | null;
   }>;
   return rows.map((r) => ({
     ownerId: r.owner_id,
@@ -201,6 +363,9 @@ export function listUserFacts(ownerId: string): UserFact[] {
     value: r.fact_value,
     category: (VALID_CATEGORIES.has(r.category as FactCategory) ? r.category : "other") as FactCategory,
     updatedAt: r.updated_at,
+    status: (r.status as FactStatus) ?? "pending",
+    confidence: r.confidence ?? 0.6,
+    challenged_at: r.challenged_at ?? null,
   }));
 }
 

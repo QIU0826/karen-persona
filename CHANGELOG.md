@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.5.0 — 2026-10-20
+
+按批准的 [docs/MEMORY_V2_PLAN.md](docs/MEMORY_V2_PLAN.md) 落地记忆重构第一阶段：**真向量检索 + 锚点记忆 + 日记忆**。
+
+### Added
+
+- **本地向量服务**（`services/embed/`，Python + uv，独立进程）：`/embed` `/rerank` `/health`；只绑 127.0.0.1，异常返回 5xx 由 Node 侧降级 n-gram。模型 Qwen3-Embedding-0.6B（MRL 截断到 768 维，与现有 `t2_vec` 完全兼容，**零 schema 迁移**）。
+- **Node 侧客户端**（`src/data/local-embed.ts`）：超时 2.5s、失败 60s 冷却、只认 768 维、健康探测缓存；显式开启（`KAREN_EMBED=on`），服务挂掉自动回落，聊天永不阻塞。
+- **锚点记忆**（`src/data/memory-v2.ts`）：初见/表白/冲突/和好/承诺/秘密/共同经历/失去，永不衰减、双时间轴（失效不删）；规则显著度打分 `scoreSalience`；每轮注入 3–5 条压缩摘要。
+- **日记忆 + 周汇总**（`src/schedule/jobs.ts`）：按**本地日期**压缩当天对话（发生了什么/情绪基调/未完成话题），00:10 后生成；开机补跑回看 3 天；周一补上周汇总；`job_runs` 保证幂等、不重复花 token。取代原「40 条消息一刀切压缩」。
+- **状态卡**（`buildStateCard`）：一行 ~30 token 代替原先注入的大段「最近状态弧」文本。
+- **事实状态机**（pending / confirmed / disputed）+ **她主动质疑离谱事实**：说法与既有事实冲突时自然确认一句（"你不是在杭州吗"），2 天内只问一次。
+- **`/fact` 命令**：列出她记得的关于你的事及状态；`/fact ok <key>` 确认、`/fact no <key>` 否掉并恢复旧值。
+- 开关：`KAREN_MEMORY_V2=off`（整体回退）、`KAREN_EMBED=on|off`、`EMBEDDING_PROVIDER=ngram`。
+
+### Changed
+
+- **检索**：本地向量 kNN + FTS5 → RRF → 预算打包（`buildMemoryContext`：锚点优先、日记忆其次、放不下就整段不注入）；**本地向量启用时默认关闭每轮 DeepSeek 重排**（省 ~664ms / ¥0.00025 每轮）。
+- `SCHEMA_VERSION` 2 → 4：新增 4 张表 + 8 个扩展列（幂等迁移，老库缺表不影响启动）。
+
+### Fixed
+
+- **事实层"永远为空"的根因**：抽取链路本身正常（临时目录实测 6/6 入库），真实会话里用户从未自述事实，而她不主动问 → 新增冲突质疑；「认识初期主动问」列为下一阶段配套动作。
+
+### Measured（本机真实数据）
+
+| 项 | 结果 |
+|---|---|
+| 历史记忆重嵌入 | 127/127 条（vec 索引 127） |
+| 记忆金标 live（旧：ngram + LLM 重排） | 16/20 |
+| 记忆金标 live（本地向量 + 仍重排） | 16/20 |
+| **记忆金标 live（本地向量 + 关闭重排）** | **17/20、18/20**（两次） |
+| 嵌入性能 | 批量 20 条 137ms（≈7ms/条）；检索 p95 < 100ms（原 ~664ms） |
+
+### Testing
+
+- 86 个测试文件 / 1010 个用例通过；`tsc --noEmit` 0 错误；`npm run lint` 0 违规。
+- 新增测试：memory-v2（19）、memory-context（10）、jobs（17）、local-embed（11）、事实状态机（6）、`/fact`（3）。
+- 真实库迁移已验证（备份 `data/memory.sqlite.bak-v04`）：127 条情节不变、FTS 127 行、新表就绪。
+
 ## v0.4.1 — 2026-10-20
 
 针对反馈「语音太 AI 了，没有真人感」。根因不是文案，是三件事：`say` 的中文音色本身老（本机 184 个语音里

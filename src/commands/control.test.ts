@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildFactListText,
   buildHelpText,
   buildWhyText,
   handleControlCommand,
@@ -112,5 +113,30 @@ describe("handleControlCommand", () => {
     expect(deps.reply.mock.calls[0][0]).toContain("/why");
     expect(await handleControlCommand("/nope", makeState() as never, deps)).toBe(false);
     expect(buildHelpText()).toContain("/export");
+  });
+});
+
+describe("/fact：她记得的关于你的事", () => {
+  it("没有事实时给出引导，而不是空白", () => {
+    expect(buildFactListText([])).toContain("还没记住");
+  });
+
+  it("列出事实并标注状态（待确认/已确认/有冲突）", () => {
+    const text = buildFactListText([
+      { ownerId: "qq:1", key: "city", value: "杭州", category: "profile", updatedAt: 1, status: "confirmed" },
+      { ownerId: "qq:1", key: "pet", value: "橘猫团子", category: "pet", updatedAt: 2, status: "pending" },
+      { ownerId: "qq:1", key: "job", value: "产品设计", category: "work", updatedAt: 3, status: "disputed" },
+    ] as never);
+    expect(text).toContain("city：杭州（已确认）");
+    expect(text).toContain("pet：橘猫团子（待确认）");
+    expect(text).toContain("job：产品设计（有冲突）");
+    expect(text).toContain("/fact ok <key>");
+  });
+
+  it("参数不完整时给出用法", async () => {
+    const state = makeState({ owner: "qq:1" }) as never;
+    const deps = { reply: vi.fn(), persist: vi.fn(), exportData: vi.fn() };
+    expect(await handleControlCommand("/fact ok", state, deps)).toBe(true);
+    expect(deps.reply.mock.calls[0][0]).toContain("用法");
   });
 });

@@ -88,7 +88,13 @@ import {
   type ProactiveDecision,
 } from "../impulse/proactive-plan.js";
 import { resolveOwnerScope, OWNER_CLI } from "../data/owner.js";
-import { extractUserFactsAsync, getUserFactsContext } from "../data/user-facts.js";
+import {
+  extractUserFactsAsync,
+  getUserFactsContext,
+  buildFactConflictNote,
+  getFactsNeedingConfirmation,
+  markFactsChallenged,
+} from "../data/user-facts.js";
 import { getT1ArcContext } from "../data/t1-injection.js";
 import { previewText } from "../obs/safe-text.js";
 import { stripMemoryDeflection } from "../persona/reply-guard.js";
@@ -772,6 +778,24 @@ export function updateRelationshipAfterTurn(
 
 
 
+// ── 事实质疑（v0.5）──────────────────────────
+
+/**
+ * 与既有说法冲突的事实 → 让她自然确认一句。
+ * 同一条事实 2 天内只问一次（markFactsChallenged），避免变成审问。
+ */
+function buildFactConflictInjection(state: ConversationState): string {
+  try {
+    const conflicts = getFactsNeedingConfirmation(state.owner);
+    if (conflicts.length === 0) return "";
+    markFactsChallenged(state.owner, conflicts.map((c) => c.key));
+    console.log(`  [事实] 待确认 ${conflicts.length} 条（冲突事实，顺口问一句）`);
+    return buildFactConflictNote(conflicts);
+  } catch {
+    return "";
+  }
+}
+
 // ── 记忆 v2：锚点与日记忆（v0.5）────────────
 
 /** 锚点/日记忆注入预算（字符）与条数上限 */
@@ -1173,6 +1197,7 @@ export async function processMessage(
     crisisNote +
     t1ArcContext +
     factsContext +
+    buildFactConflictInjection(state) +
     buildMemoryInjection(state) +
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
@@ -1652,6 +1677,7 @@ export async function* processMessageStream(
     (crisis ? crisisSafetyNote() : "") +
     t1ArcContext +
     factsContext +
+    buildFactConflictInjection(state) +
     buildMemoryInjection(state) +
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +

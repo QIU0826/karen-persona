@@ -206,3 +206,70 @@ describe("事实接地校验（防止从角色回复/推断里提取）", () => 
     expect(filtered.map((fact) => fact.key)).toEqual(["plan"]);
   });
 });
+
+describe("事实状态机（v0.5：pending / confirmed / disputed）", () => {
+  it("首次记下是 pending，同一说法再说一次变 confirmed", async () => {
+    const f = await import("./user-facts.js");
+    f.upsertUserFacts("state:1", [{ key: "city", value: "杭州", category: "profile" }]);
+    remaining: {
+      const row = f.listUserFacts("state:1").find((x) => x.key === "city")!;
+      expect((row as unknown as { status: string }).status).toBe("pending");
+    }
+    f.upsertUserFacts("state:1", [{ key: "city", value: "杭州", category: "profile" }]);
+    const row = f.listUserFacts("state:1").find((x) => x.key === "city")!;
+    expect((row as unknown as { status: string }).status).toBe("confirmed");
+  });
+
+  it("说法变了 → disputed，并保留旧值历史", async () => {
+    const f = await import("./user-facts.js");
+    f.upsertUserFacts("state:2", [{ key: "city", value: "杭州", category: "profile" }]);
+    f.upsertUserFacts("state:2", [{ key: "city", value: "成都", category: "profile" }]);
+    const row = f.listUserFacts("state:2").find((x) => x.key === "city")!;
+    expect(row.value).toBe("成都");
+    expect((row as unknown as { status: string }).status).toBe("disputed");
+    expect(
+      f.listFactHistory("state:2").some((h) => (h as unknown as { oldValue: string }).oldValue === "杭州"),
+    ).toBe(true);
+  });
+
+  it("冲突事实会进入待确认列表，并带上旧值", async () => {
+    const f = await import("./user-facts.js");
+    f.upsertUserFacts("state:3", [{ key: "city", value: "杭州", category: "profile" }]);
+    f.upsertUserFacts("state:3", [{ key: "city", value: "成都", category: "profile" }]);
+    const pending = f.getFactsNeedingConfirmation("state:3");
+    expect(pending).toHaveLength(1);
+    expect(pending[0].key).toBe("city");
+    expect(pending[0].previous).toBe("杭州");
+  });
+
+  it("标记已问过之后，冷却期内不再问", async () => {
+    const f = await import("./user-facts.js");
+    f.upsertUserFacts("state:4", [{ key: "city", value: "杭州", category: "profile" }]);
+    f.upsertUserFacts("state:4", [{ key: "city", value: "成都", category: "profile" }]);
+    f.markFactsChallenged("state:4", ["city"]);
+    expect(f.getFactsNeedingConfirmation("state:4")).toHaveLength(0);
+  });
+
+  it("确认后不再是 disputed；否认后恢复旧值", async () => {
+    const f = await import("./user-facts.js");
+    f.upsertUserFacts("state:5", [{ key: "city", value: "杭州", category: "profile" }]);
+    f.upsertUserFacts("state:5", [{ key: "city", value: "成都", category: "profile" }]);
+    expect(f.confirmFact("state:5", "city")).toBe(true);
+    expect(f.getFactsNeedingConfirmation("state:5")).toHaveLength(0);
+
+    f.upsertUserFacts("state:5", [{ key: "city", value: "重庆", category: "profile" }]);
+    expect(f.rejectFact("state:5", "city")).toBe(true);
+    const row = f.listUserFacts("state:5").find((x) => x.key === "city")!;
+    expect(row.value).toBe("成都");
+  });
+
+  it("冲突提示文案包含新旧说法", async () => {
+    const f = await import("./user-facts.js");
+    f.upsertUserFacts("state:6", [{ key: "city", value: "杭州", category: "profile" }]);
+    f.upsertUserFacts("state:6", [{ key: "city", value: "成都", category: "profile" }]);
+    const note = f.buildFactConflictNote(f.getFactsNeedingConfirmation("state:6"));
+    expect(note).toContain("成都");
+    expect(note).toContain("杭州");
+    expect(f.buildFactConflictNote([])).toBe("");
+  });
+});

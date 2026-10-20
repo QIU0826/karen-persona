@@ -13,6 +13,12 @@ import {
 } from "../pipeline/orchestrator.js";
 import { buildAboutText } from "../persona/disclosure.js";
 import { getConsent } from "../data/consent.js";
+import {
+  confirmFact,
+  listUserFacts,
+  rejectFact,
+  type UserFact,
+} from "../data/user-facts.js";
 import { deleteEpisode, searchEpisodesByKeyword } from "../data/vector.js";
 
 export interface ExportSummary {
@@ -87,6 +93,31 @@ export function buildWhyText(state: ConversationState): string {
   return lines.join("\n");
 }
 
+const FACT_STATUS_LABEL: Record<string, string> = {
+  pending: "待确认",
+  confirmed: "已确认",
+  disputed: "有冲突",
+};
+
+/** /fact：列出她"记得的关于你的事"，并标注状态。 */
+export function buildFactListText(facts: UserFact[]): string {
+  if (facts.length === 0) {
+    return "她还没记住关于你的具体事情。多聊聊你自己（工作/城市/宠物/计划），她会慢慢记下来。";
+  }
+  const lines = facts
+    .slice(0, 20)
+    .map((f) => {
+      const status = (f as unknown as { status?: string }).status ?? "pending";
+      return `- ${f.key}：${f.value}（${FACT_STATUS_LABEL[status] ?? status}）`;
+    });
+  return [
+    "【她记得的关于你的事】",
+    ...lines,
+    "",
+    "确认/否认：/fact ok <key> 或 /fact no <key>",
+  ].join("\n");
+}
+
 export function buildPauseText(paused: boolean): string {
   return paused
     ? "已暂停主动消息（她不会突然找你，但你发消息她仍会回）。发送 /resume 恢复。"
@@ -103,6 +134,7 @@ export function buildHelpText(): string {
     "/resume: 恢复主动消息",
     "/export: 导出你们的对话与记忆备份（JSON）",
     "/about: AI 披露、数据去向、年龄与安全说明",
+    "/fact: 查看她记得的关于你的事（可确认/否掉）",
     "/age: 查看年龄确认状态",
     "/help: 这条帮助",
   ].join("\n");
@@ -238,6 +270,27 @@ export async function handleControlCommand(
       } else {
         deps.reply("【年龄确认】尚未确认：继续聊之前回复「我成年了」。");
       }
+      return true;
+    }
+    case "fact": {
+      const owner = state.owner;
+      const [action, key] = (cmd.arg ?? "").split(/\s+/).filter(Boolean);
+      if (!action) {
+        deps.reply(buildFactListText(listUserFacts(owner)));
+        return true;
+      }
+      if ((action === "ok" || action === "no") && key) {
+        const changed = action === "ok" ? confirmFact(owner, key) : rejectFact(owner, key);
+        deps.reply(
+          changed
+            ? action === "ok"
+              ? `已确认「${key}」，她会记住。`
+              : `已否掉「${key}」，她不会再提这个说法。`
+            : `没有找到「${key}」这条事实，发送 /fact 查看列表。`,
+        );
+        return true;
+      }
+      deps.reply("用法：/fact（列出）｜/fact ok <key>（确认）｜/fact no <key>（否掉）");
       return true;
     }
     case "help":
