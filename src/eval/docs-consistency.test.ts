@@ -148,3 +148,32 @@ describe("版本号一致性（v0.8.13 补的护栏）", () => {
     );
   });
 });
+
+describe("验证手册（docs/VERIFICATION_PLAYBOOK.md，v0.8.20）", () => {
+  const PLAYBOOK = path.join(ROOT, "docs", "VERIFICATION_PLAYBOOK.md");
+
+  it("文件存在，且六层验证与模板章节齐全", () => {
+    expect(fs.existsSync(PLAYBOOK)).toBe(true);
+    const md = fs.readFileSync(PLAYBOOK, "utf-8");
+    for (const section of ["## 1. 六层验证", "## 2. 已交付的验证工具", "## 3. 真实链路冒烟写作模板", "## 4. 新增/修改功能时的验证清单", "## 5. Bug 目录"]) {
+      expect(md, `缺少章节：${section}`).toContain(section);
+    }
+  });
+
+  it("文档第 2 节列出的每个 npm 脚本都真实存在（防止手册写了不存在的工具）", () => {
+    const md = fs.readFileSync(PLAYBOOK, "utf-8");
+    const scripts = new Set<string>();
+    for (const match of md.matchAll(/npm run ([a-z][\w:-]*)/g)) scripts.add(match[1]);
+    expect(scripts.size).toBeGreaterThanOrEqual(8);
+    const missing = [...scripts].filter((name) => !(name in PKG.scripts));
+    expect(missing, `验证手册提到但 package.json 没有：${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("文档引用的 smoke 脚本文件都真实存在", () => {
+    const md = fs.readFileSync(PLAYBOOK, "utf-8");
+    const refs = new Set<string>();
+    for (const match of md.matchAll(/`(scripts\/[\w.-]+)`/g)) refs.add(match[1]);
+    const missing = [...refs].filter((rel) => !fs.existsSync(path.join(ROOT, rel)));
+    expect(missing, `验证手册引用了不存在的脚本：${missing.join(", ")}`).toEqual([]);
+  });
+});

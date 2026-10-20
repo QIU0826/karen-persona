@@ -562,7 +562,9 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
       expect(stickerRows[0]!.mime).toContain("image/png");
       expect(stickerRows[0]!.bytes).toBeGreaterThan(0);
 
-      // 4c) 点名要表情包 → 从**收集来的库**里发（v0.8.19 修复：原来只有 22% 概率）
+      // 4c) 点名要表情包 → 必须从**收集来的库**里发（v0.8.19 修复：原来只有 22% 概率）
+      //    注意：桥接是独立进程，vi.spyOn 控制不了它的随机数——它可能顺手再发一张内置贴纸
+      //    （这是合法行为），所以这里专门等「包含收集图 base64 的那条」，而不是"第一条图"。
       {
         const Database = (await import("better-sqlite3")).default;
         const db = new Database(path.join(dataDir, "memory.sqlite"));
@@ -574,18 +576,23 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
         const collectedBase64 = fs.readFileSync(row!.file).toString("base64");
 
         const beforeSticker = actions.length;
-        randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.99);
         client.send(privateEvent("发个表情包", 40));
-        const stickerAction = await client.waitFor(
-          (action, index) =>
-            index >= beforeSticker &&
-            action.action === "send_private_msg" &&
-            messageText(action).includes("[CQ:image,file=base64://"),
-        );
-        randomSpy.mockRestore();
-        randomSpy = null;
-        // 发出去的必须是「收集来的那张」，而不是内置贴纸
-        expect(messageText(stickerAction)).toContain(collectedBase64.slice(0, 64));
+        let matched: string | null = null;
+        for (let attempt = 0; attempt < 50; attempt++) {
+          const found = actions
+            .slice(beforeSticker)
+            .map((action) => messageText(action))
+            .find((text) => text.includes(collectedBase64.slice(0, 64)));
+          if (found) {
+            matched = found;
+            break;
+          }
+          await wait(150);
+        }
+        expect(
+          matched,
+          `没有从收集库里发（应当出现包含收集图 base64 的消息；bridge 尾部：${bridgeOutputTail.slice(-500)}）`,
+        ).toBeTruthy();
       }
 
       // 5) 群聊 @ → 群回复
