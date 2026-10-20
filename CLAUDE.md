@@ -40,7 +40,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
 | 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入已接线（双列，需 Qwen Key 实跑）；TTS/即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | ✅/🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF，FTS5 用 OR+BM25 IDF）→ DeepSeek 候选重排**（默认开启，非真向量；异常/超时降级）、sqlite-vec 启用、双列 embedding、schema v2/v3 幂等迁移、用户事实层、T1 状态弧、T3 压缩（40 条/隔天兜底 + `t3_compressed` 防重复）；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；**多用户隔离已实现**（owner=人设+用户+平台） |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 50 个测试文件 / 582 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入；**新增可复现记忆金标集**（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B 脚本（`src/eval/repetition-eval.ts`）；仍缺真实 QQ 集成测试与覆盖率；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 51 个测试文件 / 582 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入；**新增可复现记忆金标集**（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B 脚本（`src/eval/repetition-eval.ts`）；仍缺真实 QQ 集成测试与覆盖率；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -64,7 +64,7 @@ npm run setup      # 交互式配置向导
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + ubuntu/macOS/Windows 三平台矩阵 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 已收紧为 `>=22.12`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm test` 50 文件 / 582 用例通过（审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm test` 51 文件 / 582 用例通过（审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -96,7 +96,7 @@ npm run setup      # 交互式配置向导
 - **记忆时间感 + 事实变更历史（2026-10-20）**：新增 `src/data/relative-time.ts`，T2 检索结果带 `createdAt/timeLabel`，RAG 注入 `- [3天前] …`（她才能自然说「你上次/三天前说」；Web 记忆命中回放同步显示时间徽标）；`user_facts` 新增 `user_fact_history`——换工作/换城市等值变化保留旧值（每 key 20 条），最近 180 天变更注入显示「（之前是：X）」；修掉评测同进程切库时 user_facts 建表缓存导致的缺表问题（缓存按 DB 路径）。测试 50 文件 / 569 用例。
 - **句式复读提醒（2026-10-20）**：`anti-repetition.ts` 增加套话句式统计（是不是/要不要/有没有/我跟你说/其实/确实/哈哈/早点/别太），最近 3 条里同句式 ≥2 次就在提示里点名「换成陈述句或别的问法」。9 次真实 A/B 未测出稳定效果（小样本噪声大），仅作低成本提示保留、不算卖点；同时确认 openers 模式 9 次运行零复读对、full 模式 2/9 次出现复读，默认维持 openers。测试 50 文件 / 572 用例。
 - **T3 摘要质量 + facts 上限（2026-10-20）**：T3 压缩 prompt 加固（保留具体事实/未完成话题/禁止编造片段外内容），`buildT3SummaryPrompts` 纯函数 + 单测；40 条临时数据真实压缩抽检：3 句、人名/公司/项目/宠物/偏好/未完成计划全部保留、无编造。`selectFactsForPrompt` 改为分类配额 + 时间回填（profile4/work3/pet3/relationship3/plan3/preference2/other2），29 条事实压测注入 20 行、核心分类不被挤掉。测试 50 文件 / 576 用例。
-- **群聊贴纸/发图（2026-10-20）**：新增 `src/bridge/group-reply.ts` 出站计划（纯函数+单测）：群聊回复 = 文字气泡 → QQ 表情 →（可选）照片；群聊也接本地贴纸（收到表情更愿意回，按「群+人」5 分钟冷却）；生活照默认不发群，`group_photo_enabled: true` 才开（config.yaml 或 `GROUP_PHOTO=true`）；`processMessage` 新增 `skipPhoto` 开关，群聊默认跳过发图决策。测试 50 文件 / 582 用例。
+- **群聊贴纸/发图（2026-10-20）**：新增 `src/bridge/group-reply.ts` 出站计划（纯函数+单测）：群聊回复 = 文字气泡 → QQ 表情 →（可选）照片；群聊也接本地贴纸（收到表情更愿意回，按「群+人」5 分钟冷却）；生活照默认不发群，`group_photo_enabled: true` 才开（config.yaml 或 `GROUP_PHOTO=true`）；`processMessage` 新增 `skipPhoto` 开关，群聊默认跳过发图决策。测试 51 文件 / 582 用例。
 - **问题记录**：真机联调问题与修复清单见 [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md)。
 
 ### 已知问题（M0 之后继续修）

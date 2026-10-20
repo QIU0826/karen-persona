@@ -209,7 +209,7 @@ npm run dev
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
-| 类型检查 + 单元测试 | ✅ | `npm run typecheck`、`npm test`（50 文件 / 582 用例） |
+| 类型检查 + 单元测试 | ✅ | `npm run typecheck`、`npm test`（51 文件 / 582 用例） |
 | 结构化日志 | ✅ | 默认脱敏（消息只记长度/摘要）；TTY 可读，非 TTY JSON lines |
 | 健康检查 | ✅ | `GET http://127.0.0.1:18081/health`（仅本机；返回 ws/db/pending/成本/最近错误） |
 | 成本统计 | ✅ | `GET /cost` 7 日摘要；DeepSeek 峰谷价 + 缓存命中；仅主聊天路径（旁路未计入） |

@@ -96,7 +96,7 @@
 - **群聊贴纸**：`maybeSendSticker` 支持 private/group 两种目标；群聊按「群+人」5 分钟冷却，收到对方表情时概率更高；冲突未化解不发。
 - **群聊发照片（默认关闭）**：`group_photo_enabled: true`（config.yaml 或 `GROUP_PHOTO=true`）才把主动发图结果发到群里；默认只发文字/表情/贴纸（多人语境隐私保守）。
 - **省成本**：`processMessage` 新增 `skipPhoto`，群聊默认跳过发图决策（不值得为必被丢弃的图跑生成/搜索）；1 条单测验证「默认有图 / skipPhoto 无图」。
-- **测试**：全仓 50 文件 / 582 用例，tsc 0。
+- **测试**：全仓 51 文件 / 582 用例，tsc 0。
 
 ### ✅ 已完成（2026-10-20 T3 质量抽检 + facts 上限）
 
