@@ -9,7 +9,7 @@
 
 QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、情绪、记忆和社交圈的人」，而不是一个问答助手。
 
-当前阶段：**v0.8.6 已发布（2026-10-20）——**评测进 CI**：`npm run eval:offline` 真跑 40 条记忆金标 + 30 条锚点金标并卡阈值（facts≥95% / recall@8≥90% / 合并≥95% / anti-forget PASS），补上"指标掉但单测全绿"的缺口；守门自带 10 条单测验证"该失败时会失败"；v0.8.5 ——锚点复筛回归护栏：30 条人工金标（该记 17 / 不该记 13），四次独立跑 **精确率 100%**（从不误建）、召回 82–100%、kind 79–94%；v0.8.4 ——锚点二次筛选（每天把边界记忆交 LLM 判断值不值得长期记，幂等、候选<2 跳过、失败不影响其它任务）；真实库实测 12 条候选全判"不值得记"、0 误建，建锚点路径由单测覆盖；v0.8.3 ——表述层修复：让她说到记得的事时**说出具体实体**（「晚风信箱月底上线」而不是「月底上线」），40 条金标 live 从 85–92.5% 提到 **95–100%**（每版三次）；v0.8.2 ——记忆金标集扩到 40 条（离线 facts 100% / recall@8 97.5% / 合并 100%）；v0.8.1 ——**反思循环**（觉察→否认→承认→整合：察觉需 2 次信号、被点破 1 次即察觉、嘴硬撑 6 小时、被戳 2 次才承认、承认后真的改一次）接进持久化与两条管线，`/reflect` 可看；v0.8.0 ——主动性与关系接进主流程：五维关系（亲密/信任/张力/互惠/依赖，持久化+注入+`/relations`）+ 意图式主动性（每日由头计划→到点挑选→按回复率校准频率，`KAREN_INITIATIVE=off` 可关）；v0.7.0 ——本机生图链路（diffusers+MPS 服务、提示词构造、30 天自动清理、失败回退图库、约 20% 照片生成）；**模型下载被 HF 网络阻塞，开关默认 off**；v0.6.0 ——拟人化交互：打字节奏模拟器（人设×情绪×深夜×忙碌）、消息意图族（打错字/说重了/重发/犹豫）、表情包持续收集（从聊天里自动攒库，出站可选优先用）、以及「她主动了解你」（解决事实层没原料）；v0.5.0 ——记忆重构第一阶段：本地真向量检索（Qwen3-Embedding-0.6B，768 维零迁移，127 条历史记忆重嵌入，检索 p95 ~664ms→<100ms）+ 锚点记忆 + 日记忆/周汇总调度 + 状态卡 + 事实状态机与冲突质疑（`/fact`）；本地向量启用时默认关掉每轮 LLM 重排（金标 16→17–18/20）；v0.4.1 ——针对「语音太 AI」加了语气润色（按情绪/作息调语速音高、分句语调轮廓、句中停顿、偶尔语气词）、音色可配、试听脚本与 [docs/VOICE_QUALITY.md](docs/VOICE_QUALITY.md)（含微软 Edge 神经语音 403 的实测结论）；v0.4.0 ——把「她主动找你」从一条链路拆成四条（生活流分享 / 没人接话补一句 / 冷场开话题 / 沉默保温），每次心跳记录「为什么发/为什么不发」并可 `/why` 查看；新增连推收手、深夜打字变慢、`proactive_channels` 链路开关与离线模拟脚本（docs/PROACTIVE_CHANNELS.md）；另做了一次 Prompt 预算审计（docs/PROMPT_BUDGET.md，实测对话轮 prompt p50 2241 tokens、系统提示词 3591 字符）。**历史：v0.3.3——「说话动作」提示（A/B 未测出收益）+ 气泡/重复/照片治理 + 同类项目调研；历史：v0.3.2——v0.3.0「更像真人」（语音消息、打错字撤回、打字节奏、被点名要媒体会真给、宣传页重做）+ v0.3.1 修复 15 轮真实验证暴露的 P0/P1/P2（编造相识场景、多媒体内容错位、情绪承接、嘲讽话术、图片跨轮复用）+ v0.3.2 图库扩充（7→15 张、配文池 42→约 110 条，针对「多媒体 2/5、配文重复」）**。M0 地基已修复完成（新装可用、不丢消息、安全加固、文档真话）；M1 核心体验闭环主要项已完成（状态持久化、关系成长、演化可见化、多用户隔离、双管线对齐、检索增强）；M2-A 首次引导 2.0、M2-B 人设包 v2、M2-C 多用户只读 Web + 导出、M2-D 真实长跑工具已实施；发布检查见 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（已 push main + tag v0.2.0）。M1/M2 路线见审计报告第 5 节。
+当前阶段：**v0.8.7 已发布（2026-10-20）——README 文档真话 pass（修掉"亲密度不会被修改""真语义向量未开启"等过期宣称，命令表/测试数/隐私表全部对齐）+ 文档一致性测试（README 的 npm 脚本与斜杠命令必须真实存在）；v0.8.6 ——**评测进 CI**：`npm run eval:offline` 真跑 40 条记忆金标 + 30 条锚点金标并卡阈值（facts≥95% / recall@8≥90% / 合并≥95% / anti-forget PASS），补上"指标掉但单测全绿"的缺口；守门自带 10 条单测验证"该失败时会失败"；v0.8.5 ——锚点复筛回归护栏：30 条人工金标（该记 17 / 不该记 13），四次独立跑 **精确率 100%**（从不误建）、召回 82–100%、kind 79–94%；v0.8.4 ——锚点二次筛选（每天把边界记忆交 LLM 判断值不值得长期记，幂等、候选<2 跳过、失败不影响其它任务）；真实库实测 12 条候选全判"不值得记"、0 误建，建锚点路径由单测覆盖；v0.8.3 ——表述层修复：让她说到记得的事时**说出具体实体**（「晚风信箱月底上线」而不是「月底上线」），40 条金标 live 从 85–92.5% 提到 **95–100%**（每版三次）；v0.8.2 ——记忆金标集扩到 40 条（离线 facts 100% / recall@8 97.5% / 合并 100%）；v0.8.1 ——**反思循环**（觉察→否认→承认→整合：察觉需 2 次信号、被点破 1 次即察觉、嘴硬撑 6 小时、被戳 2 次才承认、承认后真的改一次）接进持久化与两条管线，`/reflect` 可看；v0.8.0 ——主动性与关系接进主流程：五维关系（亲密/信任/张力/互惠/依赖，持久化+注入+`/relations`）+ 意图式主动性（每日由头计划→到点挑选→按回复率校准频率，`KAREN_INITIATIVE=off` 可关）；v0.7.0 ——本机生图链路（diffusers+MPS 服务、提示词构造、30 天自动清理、失败回退图库、约 20% 照片生成）；**模型下载被 HF 网络阻塞，开关默认 off**；v0.6.0 ——拟人化交互：打字节奏模拟器（人设×情绪×深夜×忙碌）、消息意图族（打错字/说重了/重发/犹豫）、表情包持续收集（从聊天里自动攒库，出站可选优先用）、以及「她主动了解你」（解决事实层没原料）；v0.5.0 ——记忆重构第一阶段：本地真向量检索（Qwen3-Embedding-0.6B，768 维零迁移，127 条历史记忆重嵌入，检索 p95 ~664ms→<100ms）+ 锚点记忆 + 日记忆/周汇总调度 + 状态卡 + 事实状态机与冲突质疑（`/fact`）；本地向量启用时默认关掉每轮 LLM 重排（金标 16→17–18/20）；v0.4.1 ——针对「语音太 AI」加了语气润色（按情绪/作息调语速音高、分句语调轮廓、句中停顿、偶尔语气词）、音色可配、试听脚本与 [docs/VOICE_QUALITY.md](docs/VOICE_QUALITY.md)（含微软 Edge 神经语音 403 的实测结论）；v0.4.0 ——把「她主动找你」从一条链路拆成四条（生活流分享 / 没人接话补一句 / 冷场开话题 / 沉默保温），每次心跳记录「为什么发/为什么不发」并可 `/why` 查看；新增连推收手、深夜打字变慢、`proactive_channels` 链路开关与离线模拟脚本（docs/PROACTIVE_CHANNELS.md）；另做了一次 Prompt 预算审计（docs/PROMPT_BUDGET.md，实测对话轮 prompt p50 2241 tokens、系统提示词 3591 字符）。**历史：v0.3.3——「说话动作」提示（A/B 未测出收益）+ 气泡/重复/照片治理 + 同类项目调研；历史：v0.3.2——v0.3.0「更像真人」（语音消息、打错字撤回、打字节奏、被点名要媒体会真给、宣传页重做）+ v0.3.1 修复 15 轮真实验证暴露的 P0/P1/P2（编造相识场景、多媒体内容错位、情绪承接、嘲讽话术、图片跨轮复用）+ v0.3.2 图库扩充（7→15 张、配文池 42→约 110 条，针对「多媒体 2/5、配文重复」）**。M0 地基已修复完成（新装可用、不丢消息、安全加固、文档真话）；M1 核心体验闭环主要项已完成（状态持久化、关系成长、演化可见化、多用户隔离、双管线对齐、检索增强）；M2-A 首次引导 2.0、M2-B 人设包 v2、M2-C 多用户只读 Web + 导出、M2-D 真实长跑工具已实施；发布检查见 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（已 push main + tag v0.2.0）。M1/M2 路线见审计报告第 5 节。
 
 ## 技术栈（如实）
 
@@ -17,7 +17,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 - **对话模型**：DeepSeek V4.1 `deepseek-flash` / `deepseek-v4-pro`，按复杂度规则路由（真实主路径；`deepseek-v4-flash` 是仍可调用的旧别名）
 - **图片识别**：DeepSeek Flash 多模态（真实，用同一个 DEEPSEEK_API_KEY；先下载图片转 base64，兼容 NapCat 私有 URL；`detail=high`，截图逐字转述 ≤200 字）
 - **思考模式**：默认关闭（`thinking:{type:"disabled"}`）；不关闭时 reasoning 会吃掉 max_tokens 导致空回复（2026-10 实测修复）
-- **语义嵌入**：Qwen `text-embedding-v3` 已接入写入/检索（双列不混比）；**需配置 Qwen Key 才启用**，无 Key 自动降级为字符 n-gram + FTS5 BM25 混合；**检索层默认加一次 DeepSeek 候选重排**（非真向量，可 `KAREN_SEMANTIC_BOOST=off` 关闭）
+- **语义嵌入**：**默认本地真向量**——`services/embed`（Qwen3-Embedding-0.6B ONNX，768 维，`npm run embed:start`），历史记忆已全部重嵌入，检索 p95 <100ms；`KAREN_EMBED=on` 开启，服务不可用自动降级字符 n-gram + FTS5 BM25。云端 Qwen `text-embedding-v3` 仍可选（需 Qwen Key）。**检索层默认关掉每轮 DeepSeek 候选重排**（本地向量下实测更好且省 ~664ms，`KAREN_SEMANTIC_BOOST=on` 可强制开）
 - **向量库**：`sqlite-vec` 已启用（`t2_vec`：cosine + persona/source/model metadata），并与 FTS5 中文 BM25 做 RRF 混合检索；JSON n-gram 作为降级路径
 - **存储**：better-sqlite3 13.0.3（T1/T2 记忆，内置跨平台预编译）+ 会话 JSON + 人设 JSON/YAML
 - **外部世界**：OpenWeatherMap（真实天气，可选）、时间感知（结构化标签）；网络热点是硬编码话题池
@@ -25,7 +25,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 - **工程**：GitHub Actions CI（ubuntu/macOS/Windows 三平台矩阵：`npm ci` → typecheck → lint → test；Linux 额外覆盖率基线）、`npm run doctor` 环境体检、结构化日志 + `/health` + 成本统计、Dockerfile（node:22-slim/非 root）、PM2（跑 dist 需先 build）
 - **语音（v0.3.0 新增，v0.4.1 加语气润色）**：macOS 系统 TTS（`say -v Tingting`）→ 24kHz WAV → **SILK**（`silk-wasm` 纯 wasm，无原生构建）→ OneBot `[CQ:record]` 语音条；决策层 `src/impulse/voice.ts`（概率/亲密度/免打扰/冷却/危机语境），合成层 `src/ai/tts.ts`；**仅 macOS 真正发声**，其它平台自动降级为文字
 - **撤回（v0.3.0 新增）**：OneBot `delete_msg` 受控撤回（只允许本进程 15s 内发出的消息 + 全局 5s 限频），用于「打错字→撤回→改对」
-- **不存在的**：语音 ASR（用户发来的语音仍是 `[语音]` 占位）、图片生成（即梦）、真实语义向量需 Qwen Key；Web 控制台为只读 MVP
+- **不存在的/未完成**：语音 ASR（用户发来的语音仍是 `[语音]` 占位）、语音零样本克隆（音色仍偏 AI）、**本机生图（代码就绪但模型未下载，`KAREN_IMAGE_GEN=off`）**、微信桥接；Web 控制台为只读 MVP
 
 ## 架构（十个域）与当前状态
 
@@ -40,9 +40,9 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 5 | 演化引擎 `src/evolution` | 🚧/✅ | **v0.8.1 反思循环已接主路径**（觉察/否认/承认/整合，状态持久化、`/reflect`、承认后真的改一次）；基线漂移/因果链/叙事重构/进化日志代码存在，多数已接流式路径但部分仍是半成品 |
 | 6 | 冲动引擎 `src/impulse` | ✅/🚧 | 消息门可用；延迟回复已在 M0 落库+补发；**主动消息四条链路（v0.4.0）+ 决策留痕**；**v0.8 意图式主动（每日由头计划/到点挑选/回复率校准）+ 五维关系**；**语音 v0.4.1 语气润色**；**消息意图族 v0.6**；媒体请求识别可用；沉默弧线/tone 链仅有限生效 |
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
-| 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入已接线（双列，需 Qwen Key 实跑）；**TTS 已落地**（macOS say→SILK，`src/ai/tts.ts`）、即梦 🗺 |
-| 9 | 记忆与数据 `src/data` | ✅/🚧 | **v0.5 记忆 v2**：本地向量（services/embed + local-embed.ts，768 维）、锚点记忆（memory-v2.ts，**v0.8.4 起加日度 LLM 二次筛选**）、日记忆/周汇总调度（schedule/jobs.ts）、状态卡、事实状态机与冲突质疑；SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF，FTS5 用 OR+BM25 IDF）→ DeepSeek 候选重排**（默认开启，非真向量；异常/超时降级）、sqlite-vec 启用、双列 embedding、schema v2/v3 幂等迁移、用户事实层、T1 状态弧、T3 压缩（40 条/隔天兜底 + `t3_compressed` 防重复）；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；**多用户隔离已实现**（owner=人设+用户+平台） |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 97 个测试文件 / 1167 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入（typecheck/lint/test/覆盖率/**离线评测守门**）；**新增 mock-OneBot 桥接端到端测试**（真实 bridge 子进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊/命令/危机/多用户隔离，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）、可复现记忆金标集（40 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B（`src/eval/repetition-eval.ts`）、**锚点复筛评测**（30 条金标 + `scripts/anchor-eval.ts`，报告 docs/ANCHOR_EVAL_REPORT.md）；真实 QQ/NapCat 端到端仍需真机；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入已接线（默认本地 Qwen3-Embedding-0.6B，云端可选）；**TTS 已落地**（macOS say→SILK，`src/ai/tts.ts`）、即梦 🗺 |
+| 9 | 记忆与数据 `src/data` | ✅/🚧 | **v0.5 记忆 v2**：本地向量（services/embed + local-embed.ts，768 维）、锚点记忆（memory-v2.ts，**v0.8.4 起加日度 LLM 二次筛选**）、日记忆/周汇总调度（schedule/jobs.ts）、状态卡、事实状态机与冲突质疑；SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0（已被 v0.5 本地向量取代）：**本地 768 维向量 + FTS5 BM25（RRF）**，DeepSeek 候选重排在本地向量下**默认关**（更准且省 ~664ms）、sqlite-vec 启用、双列 embedding、schema v2/v3 幂等迁移、用户事实层、T1 状态弧、T3 压缩（40 条/隔天兜底 + `t3_compressed` 防重复）；**语义 embedding 默认走本地 768 维向量**（`services/embed`；服务不可用自动降级）；延迟补发队列已持久化；**多用户隔离已实现**（owner=人设+用户+平台） |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 98 个测试文件 / 1174 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入（typecheck/lint/test/覆盖率/**离线评测守门**）；**新增 mock-OneBot 桥接端到端测试**（真实 bridge 子进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊/命令/危机/多用户隔离，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）、可复现记忆金标集（40 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B（`src/eval/repetition-eval.ts`）、**锚点复筛评测**（30 条金标 + `scripts/anchor-eval.ts`，报告 docs/ANCHOR_EVAL_REPORT.md）；真实 QQ/NapCat 端到端仍需真机；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -68,7 +68,7 @@ npm run eval:live      # 真实模型评测（约 ¥0.02，手动跑）
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + ubuntu/macOS/Windows 三平台矩阵 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 已收紧为 `>=22.12`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm run lint` 0 违规；`npm test` 当前 97 文件 / 1167 用例通过（M0 审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm run lint` 0 违规；`npm test` 当前 98 文件 / 1174 用例通过（M0 审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -152,7 +152,7 @@ npm run eval:live      # 真实模型评测（约 ¥0.02，手动跑）
 - 主动消息：四条链路 + 单日上限 4 条 + 间隔 30 分钟 + 连推 2 条收手；`/pause`/`/resume`、免打扰时段、`/why` 决策原因已可用；**深夜被消息门延迟的主动冲动不会在早上重发**；仍不能按用户自定义频率
 - 语义检索：**v0.5 已默认本地向量**（Qwen3-Embedding-0.6B，`KAREN_EMBED=on`，服务见 `services/embed/`）；服务不可用时自动降级 n-gram + 仍可选的 DeepSeek 重排。遥测：检索 p95 <100ms；金标（40 条）live 加表述规则后 95–100%（无规则 85–92.5%），离线 recall@8 97.5%；**同代码单次波动可达 7+ 个点，只报区间**
 - 记忆 v2 待补：静态 prompt 精简（**已评估：当前 2298 字符≈1400 tokens，且静态块有缓存，压缩收益 <5%，判定不做**）；锚点复筛的"该记而漏记"率需真实数据积累后回看
-- 记忆仍缺：语义级重复的**改写**（句式检测/提醒已有，但 9 次 A/B 未测出稳定效果）；真实长期数据的 T3 摘要质量需按周抽检；真语义向量需 Qwen Key/本地 embedding（见 docs/MEMORY_AI_TONE_AUDIT.md §6）
+- 记忆仍缺：语义级重复的**改写**（句式检测/提醒已有，但 9 次 A/B 未测出稳定效果）；真实长期数据的 T3 摘要质量需按周抽检；本地向量已默认启用；剩余改进见 docs/MEMORY_AI_TONE_AUDIT.md §6
 - 旁路 LLM 调用（事实抽取/独白/T3/herView/日志/叙事/视觉/配图搜索词）已统一经 `ai/aux-usage.ts` 计入 `llm_usage`，`/cost` 有按用途拆分
 - 真实 QQ 长跑首轮已跑通（2 个完整回合、成本约 ¥0.0057）；另用本地模拟用户 + 真实模型跑过 30 轮（记忆 6/6、复读对 0、错误 0、平均延迟 2047ms、成本 ¥0.147）。已修复「快速追问被误延迟」；AI 披露按用户偏好默认关闭（显式开启才补发）。仍需更多**真实 QQ**样本才算长期稳定
 - 成本统计为估算：峰谷价按工作日/周末近似（节假日可能高估），provider 不返回 usage 的调用不记录（不估算）
@@ -206,7 +206,7 @@ npm run eval:live      # 真实模型评测（约 ¥0.02，手动跑）
 ## 开发约定（AI 协作代理必读）
 
 1. **文档真话**：任何对外文档（README/QUICKSTART/CLAUDE）新增功能宣称前，先在代码里找到对应实现；找不到就写「半成品/规划中」。数字必须可复现（测试数取 `npm test` 输出）。禁止引用无法复现的历史指标（99/100、Recall 99.4%、63.2%、8ms、覆盖率 80%+）。
-2. **隐私表述**：本地存储 ≠ 数据不出本机。对话与图片都发 DeepSeek、天气发 OpenWeatherMap、图库 query 发 Unsplash；语义嵌入若启用会发 Qwen（当前未接主路径）；不要写「数据不上传」。
+2. **隐私表述**：本地存储 ≠ 数据不出本机。对话与图片都发 DeepSeek、天气发 OpenWeatherMap、图库 query 发 Unsplash；语义嵌入默认本机（不出网），仅显式配 Qwen Key 才上云；不要写「数据不上传」。
 3. **改动边界**：`data/`、`.env`、`config.yaml` 是运行时文件，不进仓库；不要手改 lock 文件；不提交密钥。
 4. **测试**：新增逻辑配套 vitest 单测；提交前 `npm run typecheck && npm test`。测试被 tsconfig 排除，类型问题需单独跑 typecheck。
 5. **不要基于死代码/未接线模块写宣称**：`router/*`、`data/state.ts`、`world/info-sphere.ts`、`impulse/trigger.ts`、`t2_vec`、`node-cron`、`downloadImageAsBase64`、`CategoryRAG`、`persona.md` 等。

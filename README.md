@@ -6,7 +6,8 @@
 
 > ⚠️ **免责声明**：本项目仅用于个人回忆与情感疗愈，不用于骚扰、跟踪或侵犯他人隐私。**她是 AI，不是真人**。QQ 桥接依赖非官方协议（NapCatQQ），存在封号与协议变更风险，请使用小号并自行承担后果。
 
-> **项目状态（2026-10）**：M0「地基修复」完成（新装可启动、延迟消息不丢、QQ 桥接安全加固、LLM 异常兜底、文档真话）；M1 核心体验闭环已完成主要项（情绪/负债/关系/演化状态持久化、亲密度成长与里程碑、CLI 可看日记/时间线/她眼中的你、多用户隔离、双管线对齐、记忆检索 DeepSeek 候选重排 20 条金标 recall@1 55%→95%）；M2 产品化已交付 **首次引导 2.0**（setup 变成她记得的第一段对话）、**人设包 v2**（manifest/素材/记忆种子/CLI）、**本地 Web 控制台多用户只读视图 + 单用户 JSON 导出**、**真实 QQ 长跑观察工具**。图片识别走 DeepSeek Flash（不需要 Qwen-VL Key）；真语义向量（需 Qwen Key 或本地模型）仍未开启。本文所有功能宣称都以当前代码为准：未完成的能力明确标成「半成品 / 规划中」，不会把设计目标写成已实现。完整功能清单与路线图见 **[docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md)**。
+> **项目状态（2026-10，v0.8.6）**：M0 地基修复完成（新装可启动、延迟消息不丢、桥接安全加固、LLM 异常兜底、文档真话）；M1 核心体验闭环主要项完成（状态持久化、关系成长、演化可见化、多用户隔离、双管线对齐）；M2 产品化交付 **首次引导 2.0**、**人设包 v2**、**本地 Web 控制台（只读）**、**真实 QQ 长跑观察**。近期（v0.5–v0.8.6）主线是**记忆重构 + 拟人化**：本地真向量（Qwen3-Embedding-0.6B，768 维，检索 p95 <100ms）、锚点记忆与日度 LLM 复筛、日记忆/周汇总、事实状态机与冲突质疑、五维关系、意图式主动（每日由头 + 按回复率校准）、反思循环（觉察→否认→承认→整合）、打字节奏/消息意图族、表情包持续收集、**评测进 CI**（记忆 40 条 + 锚点 30 条，卡阈值）。图片识别走 DeepSeek Flash（不需要 Qwen-VL Key）。已知未完成：本机生图（代码就绪、模型未下载）、语音音色仍偏 AI、语音 ASR、微信桥接。本文所有功能宣称都以当前代码为准：未完成的能力明确标成「半成品 / 规划中」。
+完整功能清单与路线图见 **[docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md)**。
 >
 > **v0.3.1 已发布**（2026-10-20）：GitHub `main` 分支 + tag（v0.3.0 是「更像真人」：语音消息、打错字撤回、被点名要媒体会真给、宣传页重做；v0.3.1 修掉 15 轮真实验证暴露的两个 P0——**编造「怎么认识的」** 与 **多媒体内容和请求错位**，以及情绪承接/嘲讽话术/图片复用等 P1-P2）。
 >
@@ -25,7 +26,7 @@
 | 不是永久配合，有自己的底线 | 🚧 有 L1 弹性规则与内疚/偿还机制，但「规则被突破」目前主要影响内部状态，用户能观察到的行为差异有限 |
 | 六层人设结构，层与层之间可以冲突 | ✅ schema、校验器、Prompt 装配已实现；🚧 部分字段（如 `hardRules`、`world.goals`）还没有进入 Prompt，详见审计报告 2.3 |
 | 有自己的生活，会主动找你 | 🚧 15 分钟心跳，四条独立链路（生活流分享 / 没人接话补一句 / 冷场开话题 / 沉默保温），单日上限 4 条、两次最小间隔 30 分钟、对方不回时一天最多 2 条；`/pause` 可暂停、`quiet_hours_*` 免打扰生效、`/why` 可解释「她为什么没找你」 |
-| 三层记忆 + 遗忘曲线 | 🚧/✅ T2 存储/衰减/写入可用；检索 = 字符 n-gram + FTS5 BM25 **+ DeepSeek 候选重排**（非真向量；真语义需 Qwen Key/本地模型）；用户事实层兜底稳定事实；T3 长期摘要已跑通（40 条/隔天兜底）|
+| 三层记忆 + 遗忘曲线 | ✅ T2 存储/衰减可用；检索 = **本地 768 维向量 + FTS5 BM25**（RRF，p95 <100ms，服务不可用自动降级 n-gram）；另有**锚点层**（重要事件永不衰减，日度 LLM 复筛）、**日记忆/周汇总**、**用户事实层 + 冲突状态机**；40 条金标离线 recall@8 97.5%、合并 100% |
 | 她会慢慢变化 | ✅/🚧 情绪/负债/漂移/关系/叙事/herView 已持久化（重启不归零）；亲密度随结构性事件成长并有里程碑；`/journal`、`/timeline`、`/herview` 可见；部分演化模块仍未接 QQ 主路径 |
 | 数据存储在本地 | ✅ 记忆、会话、人设、配置都保存在你自己的电脑上；⚠️ 但对话/记忆片段/图片会发送给 DeepSeek（对话与后台摘要、图片识别、检索重排），天气发 OpenWeatherMap，语义嵌入若启用发 DashScope——详见[隐私与安全](#隐私与安全) |
 | 不用括号、不像 AI 助手 | ✅ 「铁律」+ 流式碎片回复可用；部分场景仍有瑕疵（括号、语气一致性） |
@@ -75,7 +76,8 @@ DEEPSEEK_API_KEY=sk-xxxxxxxx          # 必填。platform.deepseek.com → API K
 
 ```env
 # 图片识别已内置在 DeepSeek Flash 中，无需额外 Key（可选覆盖 DEEPSEEK_VISION_MODEL）
-# QWEN_VL_API_KEY=sk-xxxxxxxx          # 仅语义嵌入（可选，规划中），不用于图片识别
+# 语义嵌入默认用本地服务（npm run embed:start），无需云 Key；
+# QWEN_VL_API_KEY=sk-xxxxxxxx          # 可选：改用 Qwen 云端嵌入（不用于图片识别）
 OPENWEATHER_API_KEY=xxxxxxxx          # 真实天气。openweathermap.org/api
 UNSPLASH_ACCESS_KEY=xxxxxxxx          # 主动发图。unsplash.com/developers
 ```
@@ -153,7 +155,7 @@ npm run dev
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
-| CLI 终端对话 | ✅ | `npm run dev`；命令：`/stats` `/mood` `/weather` `/journal` `/timeline` `/herview` `/evolution` `/quit` |
+| CLI 终端对话 | ✅ | `npm run dev`；命令：`/stats` `/mood` `/weather` `/journal` `/timeline` `/herview` `/evolution` `/fact` `/relations` `/reflect` `/forget` `/pause` `/resume` `/why` `/export` `/about` `/age` `/quit` |
 | QQ 私聊流式回复 | ✅ | NapCatQQ / OneBot 11；标点断句、0.2–0.8s 间隔、400ms 消息合并、中断检测 |
 | 消息复杂度路由 | ✅ | 规则分级 simple/normal/complex → `deepseek-v4-flash` / `deepseek-v4-pro` |
 | 引用消息 / QQ 表情 | ✅ | 引用原文回查、qqface CQ 码发送 |
@@ -162,7 +164,7 @@ npm run dev
 | 主动发图 | ✅ | 亲密度/情绪/概率门控；照片带「拍摄时间/故事」——今天/昨天/以前，早上可发「昨天的晚霞」；亲密度 ≥4 才会分享「以前的生活」；有 `UNSPLASH_ACCESS_KEY` 走 Unsplash 搜索，无 Key 用**15 张本地图库 + 约 110 条配文**兜底，并会按他提到的场景挑图（晚霞/雨/咖啡/猫/山/湖/花…） |
 | 本地 Web 控制台 | ✅ | `http://127.0.0.1:18082/`：聊天/记忆/关系时间线/状态成本四视图；只读、仅本机、可选 `web_token`；支持多用户只读切换（`/api/owners` + `web_all_owners: true`，默认关）与单用户 JSON 导出（`/api/export`，含会话/状态/T2 记忆） |
 | 宣传页（promo） | ✅ | `http://127.0.0.1:18082/promo/`：重做后的滚动式落地页——首屏人物 + 一句话主张 + 双 CTA，分区「她的日常 / 消息形态 / 主动性 / 记忆 / 隐私」，用纯 HTML/CSS 聊天 mockup 展示照片、表情包、3″ 语音、撤回与正在输入；后半页还有一条跟随滚动的角色氛围背景（桌面视频 / 移动端静态图），单文件零构建、移动端适配，详见 [promo/README.md](promo/README.md) |
-| 治理命令 | ✅ | QQ/CLI 可用：`/why`（解释上一轮门控）、`/pause`/`/resume`（暂停/恢复主动消息）、`/forget 关键词 [--yes]`（按关键词删除 T2 记忆，先预览再确认）、`/export`（导出对话+记忆 JSON）、`/about`（数据说明）、`/age`（年龄确认状态）、`/stats`、`/help` |
+| 治理命令 | ✅ | QQ/CLI 可用：`/why`（解释上一轮门控）、`/pause`/`/resume`（暂停/恢复主动消息）、`/forget 关键词 [--yes]`（按关键词删除 T2 记忆，先预览再确认）、`/export`（导出对话+记忆 JSON）、`/about`（数据说明）、`/age`（年龄确认状态）、`/fact`（她记得的关于你的事，可 `ok`/`no` 确认或否掉）、`/relations`（五维关系现状）、`/reflect`（她的反思弧线：察觉/嘴硬/认了/慢慢改）、`/stats`、`/help` |
 | 合规（年龄门/危机兜底/AI 披露可选） | ✅ | **年龄门**要求 QQ 用户先确认「我成年了」才进入对话（`/age` 查看，`age_gate_enabled` 可关；自我声明，非身份证校验）；危机信号强制回复并附专业求助资源（12356/010-82951332/110/120）；AI 披露能力保留但**默认关闭**（个人自用不在聊天里插入披露；公开发布/商用可在 `config.yaml` 显式 `ai_disclosure: true`） |
 | 群聊 @ 回复 | 🚧 | 仅「@ 她 + 对方和她私聊过」才回复；不 @ 不回、不引用，与私聊共享状态；支持 QQ 表情/本地贴纸（收到表情更愿意回）；生活照默认不发群，`group_photo_enabled: true` 才开 |
 | 微信桥接 | 🗺 | 无依赖占位桩，`npm run wechat` 会明确提示走 QQ |
@@ -177,14 +179,19 @@ npm run dev
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
-| T2 情节记忆存储 + 艾宾浩斯衰减 | ✅ | SQLite（better-sqlite3）；衰减目前在启动时执行一次 |
-| 混合检索（n-gram + FTS5 BM25） | ✅ | RRF 融合、中文 2 字词可命中（FTS5 OR + BM25 IDF）、阈值/去重/来源过滤；结果带相对时间标签（今天/昨天/3天前） |
-| 检索增强（DeepSeek 候选重排） | ✅ | 对 top12 候选做一次 Flash 相关性重排；20 条金标 recall@1 55%→95%；失败/超时/关闭开关自动降级原顺序 |
+| T2 情节记忆存储 + 艾宾浩斯衰减 | ✅ | SQLite（better-sqlite3）；衰减在启动时执行一次 |
+| **本地真向量检索** | ✅ | 本机跑 Qwen3-Embedding-0.6B（`services/embed`，768 维，零迁移），历史记忆已全部重嵌入；检索 p95 从 ~664ms 降到 **<100ms**；服务不可用时自动降级 n-gram |
+| 混合检索（向量 + FTS5 BM25） | ✅ | RRF 融合、中文 2 字词可命中（FTS5 OR + BM25 IDF）、阈值/去重/来源过滤；结果带相对时间标签（今天/昨天/3天前） |
+| 语义重排（DeepSeek 候选重排） | ✅ | 对 top12 候选做一次 Flash 相关性重排；**本地向量启用时默认关掉**（实测 16→17–18/20 更好且省 ~664ms/轮），`KAREN_SEMANTIC_BOOST=on` 可强制开 |
 | sqlite-vec 向量索引 | ✅ | vec0（cosine + persona/source/model metadata），写入/删除/归档同步；不可用时回退 JS 余弦 |
-| 语义嵌入（Qwen text-embedding-v3） | 🚧 | 代码已接通写入/检索（双列不混比），但**需要 Qwen Key 才能实跑**；无 Key 自动降级 n-gram + FTS5 + 重排 |
-| 用户事实记忆（SQLite） | ✅ | 后台抽取稳定事实，按 owner 隔离，每轮注入；值变化保留旧值（换工作/换城市显示「之前是…」）；与检索层互补 |
+| **锚点记忆（长期不忘）** | ✅ | 相识/表白/冲突/和好/承诺/秘密/共同经历/失去等事件，永不衰减、双时间轴（否认只标记不删）；自动入库阈值 0.75，**每天再用 LLM 复筛**边界记忆（该记/不该记） |
+| **日记忆 + 周汇总** | ✅ | 每天一条「发生了什么/情绪/未完成话题」+ 每周汇总；由心跳触发、按天幂等，靠日记忆取代「40 条一刀切」的压缩 |
+| 用户事实记忆（SQLite） | ✅ | 后台抽取稳定事实，按 owner 隔离，每轮注入；值变化保留旧值（换工作/换城市显示「之前是…」）；**带状态机**：pending/confirmed/**disputed**（说法冲突时她会顺口确认一句，2 天内只问一次） |
+| 认识初期主动了解 | ✅ | 亲密度 <5 时会顺口问工作/城市/宠物/名字/计划（每 4 轮最多一次、问过的不重复），解决"事实层没原料" |
 | T3 长期摘要 | ✅/🚧 | 阈值 40 条或「≥20 条且隔天」兜底；`t3_compressed` 防重复压缩；prompt 保留事实/未完成话题/禁止编造（40 条真实压缩抽检通过；长期数据仍需按周抽检） |
-| 记忆查看 / 导出 | ✅/🚧 | `/export` 导出 JSON；Web 控制台可只读查看/搜索/命中回放；删除/编辑仍无入口 |
+| 记忆查看 / 导出 | ✅/🚧 | `/export` 导出 JSON；Web 控制台可只读查看/搜索/命中回放；`/forget` 可按关键词删除；批量编辑仍无入口 |
+| 记忆评测（可复现） | ✅ | 40 条中文金标：离线 facts 100% / recall@8 97.5% / 合并 100%；真实模型 95–100%（加"说出具体实体"规则后）；`npm run eval:memory` |
+| 锚点复筛评测 | ✅ | 30 条人工金标（该记 17 / 不该记 13）；四次跑**精确率 100%**（从不误建）、召回 82–100%；`npm run eval:anchor` |
 
 ### 人设与演化
 
@@ -196,32 +203,36 @@ npm run dev
 | 人设包 v2（安装/分发） | ✅ | `manifest.json` + `persona.json` + 可选素材/记忆种子；`npm run persona:pack:validate/install/list`；结构/引擎兼容校验、覆盖备份、种子默认不写库；规范见 [docs/PERSONA_PACK.md](docs/PERSONA_PACK.md) |
 | 人设字段进入 Prompt | 🚧 | 不足一半的字段真正影响对话（审计 2.3） |
 | 不同好友不同人设 | 🚧 | 配置链路可用；M1 起多用户隔离（主用户兼容历史数据，其他好友的会话/状态/记忆隔离）；同一人设下的不同好友不会串记忆 |
-| 演化（基线漂移 / 因果链 / 叙事重构 / herView） | 🚧 | 模块存在，但多数未接入 QQ 主路径、状态不持久化；重启归零 |
-| 亲密度 / 关系成长 | 🗺 | `relationship.closeness` 当前不会被运行时修改 |
+| 演化（基线漂移 / 因果链 / 叙事重构 / herView） | 🚧/✅ | 已接主路径：因果链闯入、叙事弧、herView 更新、进化日志；状态随 `persona-state` 持久化（重启不归零） |
+| 亲密度 / 关系成长 | ✅ | 由结构性事件驱动（深聊、连续互动、主动分享生活），每日 +0.1 上限、只增不减、带原因与里程碑；`/stats` 可查，`/timeline` 看关系事件 |
+| **五维关系（亲密/信任/张力/互惠/依赖）** | ✅ | v0.8 起接主流程：事件驱动演化、张力随时间回落、注入 prompt 决定"话少不主动/愿意开玩笑"等倾向；`/relations` 可查 |
+| **反思循环（觉察→否认→承认→整合）** | ✅ | v0.8.1：察觉需同类信号 2 次（他直接点破 1 次即察觉）→ 先嘴硬（撑 6 小时）→ 被戳 2 次才承认 → 整合期才真的改一次（情绪基线回落）；`/reflect` 可查 |
 
 ### 主动性与外部感知
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
+| **意图式主动性** | ✅ | 每天生成 2–3 个「今天想找他聊什么」的由头（来自日记忆的未完成话题 + 她生活里的事），按时间窗/免打扰/单日上限/最小间隔判定；**按他最近 10 次回复率校准每天条数**（不回→0 条、热络→3 条）；`KAREN_INITIATIVE=off` 可关 |
 | 主动消息（15 分钟心跳） | ✅/🚧 | 四条链路独立可关（`proactive_channels`）：生活流分享（因果链/天气/情绪/时段）、没人接话补一句（20 分钟~3 小时）、冷场开话题（3~72 小时）、沉默保温（>72h，一轮失联只一次）；护栏 = 单日 4 条 + 间隔 30 分钟 + 连推 2 条收手；`/pause` `/resume`、免打扰时段、`/why` 决策原因都可查，详见 [docs/PROACTIVE_CHANNELS.md](docs/PROACTIVE_CHANNELS.md) |
 | 真实天气（OpenWeatherMap） | ✅ | 需 `OPENWEATHER_API_KEY`；无 Key 时降级 mock |
 | 时间感知 | ✅ | 结构化时刻标签注入 Prompt |
 | 网络热点 | 🚧 | 本地硬编码话题池，无真实抓取 |
 | 图片识别 | ✅ | 由 DeepSeek Flash 多模态完成（无需 Qwen-VL）；本地下载转 base64 兼容 NapCat 私有 URL；`detail=high` 保留分辨率；截图/文字类逐字转述（≤200 字），照片/插画 40–80 字描述 |
 | 主动发图（Unsplash / 本地图库） | ✅/🚧 | 私聊会发（有 `UNSPLASH_ACCESS_KEY` 走 Unsplash，无 Key 用本地图库；按他提到的场景挑图）；群聊默认不发，`group_photo_enabled: true` 才开 |
-| 图片生成（即梦）/ 表情包 | 🗺 | 未实现（仅有 Key 占位） |
+| **表情包持续收集** | ✅/🚧 | 从你的聊天里自动下载表情包入库（去重、库容 500、单文件≤2MB、一键清空）；出站可优先用收集来的（需 `KAREN_STICKER_USE=on`，默认关先观察） |
+| 本机生图 | 🚧 | 代码与测试完成、约 20% 照片可走生成（失败回退图库），但**模型未下载成功**（HF 网络间歇中断），故开关默认 `KAREN_IMAGE_GEN=off`；补模型见 [docs/IMAGE_GEN.md](docs/IMAGE_GEN.md) |
 
 ### 工程与运维
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
 | 首次引导 2.0 | ✅ | `npm run setup` 是「第一段对话」：写入会话 + `user_facts`（名字/城市/认识方式）+ 18+ 确认，并生成 `data/onboarding.json` 标记；CLI/QQ 首次聊天不再重复 18+ 确认（AI 披露默认关闭）；`npm run setup -- --force` 重设 |
-| 类型检查 + lint + 单测 + mock-OneBot 端到端 + 覆盖率基线 | ✅ | `npm run typecheck`（0 错误）、`npm run lint`（tsc 未使用代码检查，0 违规）、`npm test`（76 文件 / 856 用例，含 `npm run test:e2e` 桥接 E2E、setup E2E、人设包、多用户 Web、真实长跑观察、TTS 真实链路、相识编造守卫）、`npm run test:coverage`（行覆盖 56.0%，阈值守护） |
+| 类型检查 + lint + 单测 + 端到端 + 覆盖率 + 评测守门 | ✅ | `npm run typecheck`（0 错误）、`npm run lint`（tsc 未使用代码检查，0 违规）、`npm test`（**98 文件 / 1174 用例**，含 mock-OneBot 桥接 E2E、setup E2E、人设包、多用户 Web、TTS 真实链路、相识编造守卫）、`npm run test:coverage`（行覆盖 56.0%，阈值守护）、`npm run eval:offline`（记忆 40 条 + 锚点 30 条，卡阈值，CI 跑） |
 | 结构化日志 | ✅ | 默认脱敏（消息只记长度/摘要，正文 `[redacted N chars]`；`LOG_CONTENT=1` 才输出 40 字预览）；TTY 可读，非 TTY JSON lines |
 | 健康检查 | ✅ | `GET http://127.0.0.1:18081/health`（仅本机；返回 ws/db/pending/成本/最近错误） |
 | 成本统计 | ✅ | `GET /cost` 7 日摘要；DeepSeek 峰谷价 + 缓存命中；主对话与旁路 LLM（事实抽取/独白/T3/视觉等）均按 `kind` 记账，Web 控制台可按模型/按用途查看 |
 | PM2 守护 | ✅ | 改跑 `dist/bridge/qq.js`，部署前需 `npm run build` |
-| CI（GitHub Actions） | ✅ | push/PR：Node 22 + `npm ci` + typecheck + test；**ubuntu / macOS / Windows 三平台矩阵** |
+| CI（GitHub Actions） | ✅ | push/PR：Node 22 + `npm ci` + typecheck + lint + test；**ubuntu / macOS / Windows 三平台矩阵**；Linux 额外跑覆盖率基线 + **离线评测守门**（`npm run eval:offline`） |
 | 环境体检 | ✅ | `npm run doctor` |
 | 真实 QQ 长跑观察 | ✅ | `npm run qq:watch -- --duration 1800`：只读观察真实回合/延迟/成本/事实，结束写 `data/realrun-*.md` 报告；流程见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md) |
 | 真实验证台（mock OneBot + 真实模型） | ✅ | `node node_modules/tsx/dist/cli.mjs scripts/mock-onebot-longrun.ts --turns 15`：本地扮演 NapCat、用另一个真实 DeepSeek 扮演用户，跑多轮对话并输出延迟/气泡/多媒体/记忆探针/重复度/成本/LLM 评审报告；临时目录隔离，不碰真实 QQ 与真实 data/。见 [docs/MOCK_VALIDATION.md](docs/MOCK_VALIDATION.md) |
@@ -247,7 +258,7 @@ npm run dev
 | 每一轮对话 | DeepSeek API | 你的消息 + 上下文（含人设块、记忆检索结果、状态标签） |
 | 图片识别 | DeepSeek API（deepseek-flash 多模态） | 图片数据（base64，先下载后上传） |
 | 检索重排（默认开启） | DeepSeek API | 初步命中的记忆片段（最多 12 条、每条截断 90 字）+ 你当前这句话 |
-| 语义嵌入（仅配置 Qwen Key 时） | 阿里云 DashScope | 用于嵌入的文本 |
+| 语义嵌入 | **本机**（默认，`services/embed` 本地模型，不出网）；仅当显式配置 Qwen Key 时才会发给阿里云 DashScope | 用于嵌入的文本 |
 | 天气感知 | OpenWeatherMap | 城市名 |
 | 主动发图（仅 CLI 非流式触发） | DeepSeek API + Unsplash | 用于生成图片搜索词的摘要、搜索关键词 |
 | 后台 LLM 操作 | DeepSeek API | 内心独白、T3 长期摘要、人设进化日志、叙事重构等用到的对话/记忆内容 |
@@ -270,12 +281,12 @@ npm run dev
 
 1. **QQ 桥接的跨平台验证不完整**：Windows/macOS 均已实机验证（macOS 原生 NapCat + 反向 WS）；Linux Docker 方案未验证；真实 QQ 端到端目前只在 macOS 跑过；平台/封号是结构性风险。
 2. **多用户隔离的边界**：同一 QQ 用户在群聊与私聊共享 state；Web 控制台默认只展示主用户（`/api/facts?owner=` 可只读查其他 owner）；商用多租户托管（多实例/账号体系）仍属 M3。
-3. **记忆深度仍不够**：真语义向量未启用（需 Qwen Key 或本地 embedding）；当前是 n-gram+FTS5+DeepSeek 重排（非真向量）；记忆相对时间感、事实变更历史、T3 摘要抽检、facts 超 20 条配额选择已完成；长期真实数据的摘要质量仍需按周抽检。
+3. **记忆深度**：已默认本地真向量（Qwen3-Embedding-0.6B，768 维）+ 锚点/日记忆/事实状态机；实测 40 条金标离线 recall@8 97.5%、合并命中 100%，真实模型 95–100%。仍缺：语义级重复的"改写"（只有句式提醒，9 次 A/B 未测出稳定效果）、长期数据的 T3 摘要需按周抽检、锚点复筛的"该记而漏记"率需真实数据积累。
 4. **双管线仍是两份实现**：QQ 私聊流式与 CLI/群聊非流式行为已对齐（T1/T2/事实/反重复/重排均接入），但代码未抽共享 helper，后续改动需要双写。
 5. **主动消息/夜间行为仍需真机长跑**：已支持 `/pause`/`/resume` 与可配置免打扰时段（`quiet_hours_*`），单日 4 条上限 + 30 分钟最小间隔；长时间无人值守的补发/主动行为仍需观察。
 6. **发图图库有限**：贴纸 11 个内置 Twemoji（私聊+群聊可用）；发图 15 张本地兜底 + 约 110 条配文（配置 Unsplash Key 才走搜索）；仍会出现「同一类场景」的重复感；群聊发照片需 `group_photo_enabled: true`（默认关，隐私保守）。
-7. **未实现**：语音 ASR（她听得懂文字/图片，但用户发来的语音只当 `[语音]` 占位）、微信桥接（无依赖占位桩）、图片生成；Web 控制台为只读。**语音消息本身只在 macOS 上真正发声**（依赖系统 `say`），其它平台自动降级为文字。年龄门已做一次性确认（自我声明，非身份证校验）。
-8. **测试覆盖仍不足**：76 文件 / 856 用例；已接入覆盖率基线（行 56.0%，`npm run test:coverage`，CI 阈值守护）与零新依赖 lint；有可复现记忆金标集（`scripts/memory-eval.ts`）、跨轮重复 A/B（`src/eval/repetition-eval.ts`）、检索增强评测（`src/eval/semantic-boost-eval.ts`）、30 轮真实长跑（`src/eval/longrun-sim.ts`）与 mock-OneBot 桥接 E2E（`src/eval/bridge-e2e.test.ts`，CI 跑）；但真实 QQ/NapCat 端到端（私有图片 URL、风控、网络抖动）仍需真机验证。
+7. **未完成/受限**：语音 ASR（用户发来的语音只当 `[语音]` 占位）、微信桥接（无依赖占位桩）、**本机生图（代码就绪但模型未下载，开关默认关）**；Web 控制台只读。**语音消息只在 macOS 真正发声**（系统 `say`），其它平台自动降级为文字；**音色仍偏"AI"**（见 [docs/VOICE_QUALITY.md](docs/VOICE_QUALITY.md)，下一步是本地零样本克隆，需一段参考音）。年龄门为一次性自我声明（非身份证校验）。
+8. **测试与评测**：98 文件 / 1174 用例；覆盖率基线行 56.0%（CI 阈值守护）；可复现评测有 4 套——记忆 40 条金标（`npm run eval:memory`）、锚点复筛 30 条金标（`npm run eval:anchor`）、跨轮重复 A/B、30 轮真实长跑；**CI 里跑 `npm run eval:offline` 真卡指标阈值**（facts≥95% / recall@8≥90% / 合并≥95% / anti-forget PASS）。真实 QQ/NapCat 端到端（私有图片 URL、风控、网络抖动）仍需真机验证。
 9. **人设字段消费不足**：创作者写的底线、软肋、人生目标等字段有一部分不进入 Prompt（审计 2.3）。
 10. **成本统计仍是估算**：主对话与旁路 LLM 都已记账（按 `kind` 拆分）；但峰谷价按「工作日/周末」近似（节假日白天可能按高峰计费、偏高），provider 不返回 usage 的调用不记录（不估算）。
 10. **平台风险**：产品命运绑定在非官方 QQ 协议上，封号/协议变更/客户端升级都可能让桥接失效。
@@ -292,7 +303,7 @@ npm run dev
 ```
 
 - **消息门**不是简单的是/否：睡眠时段、工作忙、回避话题、情绪低落等会决定「现在不回 / 晚点回 / 破例回」。延迟回复会落库，到点自动补发（M0）。
-- **记忆不是存文本**：每条对话写入 T2 并生成嵌入向量，检索时按相似度 × 衰减强度 × 情绪权重综合排序（相似度目前由 n-gram 计算）。
+- **记忆不是存文本**：每条对话写入 T2 并生成本地 768 维向量，检索时向量 + FTS5 BM25 融合排序（再叠加衰减强度、情绪权重、相对时间标签）；重要事件额外进锚点层（不衰减）。
 - **双管线说明**：QQ 私聊使用流式管线 `processMessageStream`，CLI/群聊使用完整管线 `processMessage`；M0 已让两者共用消息门上下文（`buildGateContext`），记忆写入与演化步骤的统一在 M1 继续。
 
 ### 设计上支撑「她像一个人」的机制
@@ -302,9 +313,9 @@ npm run dev
 | 六层人设（硬规则/身份/说话/情绪/关系/世界） | `src/persona/` | ✅ schema 与 Prompt 装配；部分字段未消费 |
 | L1 弹性规则裁决（resistance / immutable / 三阶段） | `src/persona/prompt-builder.ts` | 🚧 只在非流式路径生效；突破主要影响内部状态 |
 | 消息门 + 破例 | `src/impulse/` | 🚧 基础可用，延迟回复已落库+补发 |
-| T2 情节记忆 + 衰减 | `src/data/` | ✅ 存储/衰减可用；检索为字符匹配 |
-| 主动生活流（心跳触发） | `src/pipeline/orchestrator.ts` | 🚧 可用，M0 已加日上限与最小间隔 |
-| 基线漂移 / 因果链 / 自我叙事 / 内心独白 | `src/evolution/` | 🚧 模块存在、多未闭环或未持久化 |
+| T2 情节记忆 + 衰减 | `src/data/` | ✅ 存储/衰减可用；本地向量 + FTS5 混合检索 |
+| 主动生活流（心跳触发） | `src/pipeline/orchestrator.ts` | ✅ 四条链路 + 每日由头计划 + 按回复率校准频率 |
+| 基线漂移 / 因果链 / 自我叙事 / 内心独白 | `src/evolution/` | 🚧/✅ 已接主路径并持久化；反思循环（觉察→否认→承认→整合）可用 |
 | 外部感知（天气/时间/热点） | `src/world/` | 🚧 天气与时间可用；热点是硬编码话题池 |
 
 ---
@@ -322,6 +333,10 @@ npm run dev
 | `npm run lint` | 未使用导入/变量/参数检查（tsc noUnusedLocals/noUnusedParameters） |
 | `npm run test:coverage` | 单元测试 + 覆盖率基线（v8，阈值见 vitest.config.ts） |
 | `npm test` | 运行单元测试（vitest） |
+| `npm run eval:offline` | 离线评测守门：记忆 40 条 + 锚点 30 条，卡阈值（CI 同款，不联网、不花钱） |
+| `npm run eval:memory` | 记忆金标评测（`--offline` 离线 / `--live` 真实模型） |
+| `npm run eval:anchor` | 锚点复筛评测（默认真实模型，约 ¥0.003） |
+| `npm run eval:live` | 两套评测都跑真实模型（约 ¥0.02，手动） |
 | `npm run build` | 编译到 `dist/`（`npm start` 启动的是微信桩入口，不是主入口） |
 | `npm run persona:list` | 列出可用人设 |
 | `npm run persona:check <id>` | 校验指定人设 |
@@ -329,6 +344,14 @@ npm run dev
 | `npm run persona:narrate` | 叙事式创建人设（正则推导，非 LLM） |
 | `npm run wechat` | 微信桥接（🗺 仅 echo 桩，不可用） |
 | `node scripts/mock-onebot.mjs` | 无 QQ 联调：模拟 NapCat 反向 WS 客户端（需先启动 `npm run qq`） |
+| `npm run persona:pack:validate/install/list` | 人设包校验 / 安装 / 列表（v2 格式） |
+| `npm run embed:start` | 启动本地向量服务（Qwen3-Embedding-0.6B，127.0.0.1:18083） |
+| `npm run embed:spike` | 向量检索离线对比（ngram vs 本地向量） |
+| `npm run models:status/list/purge` | 查看/列出/清理本地模型占用（默认放 `~/Library/Application Support/karen/models`） |
+| `npm run media:status` | 本机生图环境状态（开关、目录占用、模型是否就绪） |
+| `npm run media:pull-model` | 下载生图模型（≈5GB，需网络稳定） |
+| `npm run media:start` | 启动 diffusers 生图服务（127.0.0.1:18084） |
+| `npm run media:purge -- --images --yes` | 清空生成图（另有 `--models` / `--all`） |
 
 ---
 
