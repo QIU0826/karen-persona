@@ -42,4 +42,13 @@ describe("toStickerCqCode", () => {
   it("资源缺失时返回 null，不影响文字回复", () => {
     expect(toStickerCqCode({ id: "missing", file: "not-exists.png", tags: [] })).toBeNull();
   });
+
+  it("recentIds 排除最近用过的贴纸（跨轮去重）", () => {
+    const base = { emotion: 0.5, hour: 14, conflictActive: false, random: () => 0 };
+    const first = pickSticker(base);
+    expect(first).not.toBeNull();
+    const again = pickSticker({ ...base, recentIds: [first!.id] });
+    expect(again).not.toBeNull();
+    expect(again!.id).not.toBe(first!.id);
+  });
 });

@@ -305,3 +305,14 @@ export function detectRepetition(
   }
   return best;
 }
+
+/**
+ * 同一轮里已经发过同样/高度相似的话 → 丢弃。
+ *
+ * 真实验证里出现过一轮里「被说啦 / 气人 / 被说啦？」两条几乎同一句：
+ * 流式分条时模型自己会重复，跨轮反重复的提示救不了当轮，所以在出站前做一次当轮去重。
+ */
+export function isWithinTurnDuplicate(fragment: string, sentFragments: string[]): boolean {
+  if (!fragment.trim() || sentFragments.length === 0) return false;
+  return detectRepetition(fragment, sentFragments, 0.8).duplicate;
+}

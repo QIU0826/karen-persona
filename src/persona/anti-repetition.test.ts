@@ -5,6 +5,7 @@
  * similar/opener/none 五种判定）。全部纯函数，无 IO。
  */
 import { describe, expect, it } from "vitest";
+import { isWithinTurnDuplicate } from "./anti-repetition.js";
 import {
   bigramSimilarity,
   buildAvoidRepeatNote,
@@ -189,5 +190,19 @@ describe("detectRepetition", () => {
 
   it("空回复不判重复", () => {
     expect(detectRepetition("  ", ["今天好热"])).toMatchObject({ score: 0, duplicate: false, kind: "none" });
+  });
+});
+
+describe("isWithinTurnDuplicate（当轮去重）", () => {
+  it("同一轮里几乎相同的话会被判为重复", () => {
+    expect(isWithinTurnDuplicate("被说啦？", ["被说啦"])).toBe(true);
+  });
+
+  it("不同的话不算重复", () => {
+    expect(isWithinTurnDuplicate("你老板真会挑时候", ["被说啦"])).toBe(false);
+  });
+
+  it("没有已发内容时永远不重复", () => {
+    expect(isWithinTurnDuplicate("被说啦", [])).toBe(false);
   });
 });

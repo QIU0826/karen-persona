@@ -92,6 +92,7 @@ import { startWebServer, type WebServerHandle } from "../web/server.js";
 import { isSpeechAvailable, synthesizeSpeech } from "../ai/tts.js";
 import { decideVoice, type VoiceSettings } from "../impulse/voice.js";
 import { detectMediaRequest } from "../impulse/media-request.js";
+import { isWithinTurnDuplicate } from "../persona/anti-repetition.js";
 import {
   DEFAULT_TYPO_RECALL_SETTINGS,
   planTypoRecall,
@@ -115,6 +116,9 @@ const MAX_LOG_VALUE_LENGTH = 120;
 const STICKER_PROBABILITY = 0.22;
 const STICKER_REPLY_TO_STICKER_PROBABILITY = 0.55;
 const STICKER_COOLDOWN_MS = 5 * 60 * 1000;
+
+/** 单轮最多几条文字气泡（超出合并到最后一条；验证里出现过多达 6-9 条） */
+const MAX_TEXT_BUBBLES = 4;
 
 /** 语音：录音补白（真人按下录音到发出之间还有一点时间） / 单条语音最长发送等待 */
 const VOICE_RECORD_PADDING_MS = 400;
@@ -1125,6 +1129,10 @@ async function streamPrivateReply(params: {
   let sentText = "";
   let safetySent = false;
   let photoSent = false;
+  /** 已发出的文字气泡数 / 当轮已发内容（去重用）/ 超出上限后待合并的尾巴 */
+  let textBubbles = 0;
+  const sentFragments: string[] = [];
+  let mergedTail = "";
   /** 每轮最多演一次「打错字撤回」，避免多气泡放大触发率 */
   let typoDecided = false;
 
@@ -1173,6 +1181,17 @@ async function streamPrivateReply(params: {
 
     if (!frag.text) continue;
 
+    // 当轮去重：同一轮里几乎相同的话只发一次（流式分条常见）
+    if (isWithinTurnDuplicate(frag.text, sentFragments)) {
+      log.info("reply.dropped_within_turn_duplicate", { user_id: userId });
+      continue;
+    }
+    // 单轮气泡上限：超出的先攒着，等这轮结束合并成一条发（不丢内容）
+    if (textBubbles >= MAX_TEXT_BUBBLES) {
+      mergedTail += (mergedTail ? "\n" : "") + frag.text;
+      continue;
+    }
+
     // 真人节奏：第一条是「看到消息 → 开始打字」，后续每条按字数模拟打字耗时
     // （中文手打约 80–120ms/字；过短的气泡也不会秒发，读/点发送有固定开销）
     if (sentCount > 0) {
@@ -1202,6 +1221,20 @@ async function streamPrivateReply(params: {
     sentCount++;
   }
 
+  // 超出气泡上限的内容合并成一条发出（保持在 4 条以内，又不会丢话）
+  if (mergedTail.trim()) {
+    await sleep(typingDelayFor(mergedTail));
+    if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
+      state.interrupted = true;
+      log.info("reply.interrupted", { user_id: userId, stage: "before_merged_tail" });
+      return { sentCount, interrupted: true, sentText, safetySent, photoSent };
+    }
+    sendPrivateMsg(userId, mergedTail);
+    sentText += (sentText ? "\n" : "") + mergedTail;
+    sentCount++;
+    log.info("reply.sent_merged_tail", { user_id: userId, chars: charCount(mergedTail) });
+  }
+
   return { sentCount, interrupted: false, sentText, safetySent, photoSent };
 }
 
@@ -1216,6 +1249,10 @@ type StickerTarget =
  * - 收到对方表情时更愿意回一个；
  * - 冲突未化解时不发；资源/发送失败静默降级。
  */
+function userIdForSticker(target: StickerTarget): number {
+  return target.userId;
+}
+
 function maybeSendSticker(
   target: StickerTarget,
   state: ConversationState,
@@ -1240,6 +1277,7 @@ function maybeSendSticker(
     emotion: state.emotionState.vector,
     hour: new Date(now).getHours(),
     conflictActive,
+    recentIds: userRecentStickers.get(userIdForSticker(target)) ?? [],
   });
   if (!sticker) return false;
 
@@ -1251,6 +1289,10 @@ function maybeSendSticker(
 
   if (target.kind === "private") {
     userLastStickerAt.set(target.userId, now);
+    userRecentStickers.set(
+      target.userId,
+      [...(userRecentStickers.get(target.userId) ?? []), sticker.id].slice(-3),
+    );
     sendPrivateMsg(target.userId, asCqCode(cq));
     log.info("sticker.sent", {
       user_id: target.userId,
@@ -1274,6 +1316,9 @@ function maybeSendSticker(
 }
 
 // ── 语音消息 ────────────────────────────────────
+
+/** 每个用户最近发过的贴纸 id（避免同一张图连着复用） */
+const userRecentStickers = new Map<number, string[]>();
 
 /** 上次给某用户发语音的时间（冷却用；进程内即可，重启后最多多发一条） */
 const userLastVoiceAt = new Map<number, number>();

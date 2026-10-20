@@ -180,6 +180,8 @@ export interface PhotoShareOptions {
   requested?: boolean;
   /** 用户提到的场景（晚霞/雪/咖啡/猫…），用于本地图库内容匹配 */
   preferredTags?: string[];
+  /** 对方在讲糟心事：这一轮不顺手发生活照（发呆/共情优先） */
+  skipWhenTroubleTalk?: boolean;
 }
 
 export async function trySharePhoto(
@@ -189,6 +191,7 @@ export async function trySharePhoto(
 ): Promise<PhotoShareResult | null> {
   const ps = state.persona.photoShare;
   if (!ps?.enabled) return null;
+  if (options.skipWhenTroubleTalk) return null;
 
   // ── 决策层（config 可覆盖，仅测试/调优用）─────
   const personaId = state.persona.name;

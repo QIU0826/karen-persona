@@ -313,6 +313,10 @@ export interface CollectedMessage {
   /** 所有 text 段拼接（媒体消息可能为空字符串） */
   text: string;
   hasMedia: boolean;
+  /** OneBot message_id（撤回时用来对账） */
+  messageId?: number;
+  /** 已被她撤回（delete_msg）——transcript 里要标出来，否则评审会当成「重复两遍」 */
+  recalled?: boolean;
 }
 
 export interface LongrunTurn {
@@ -1186,9 +1190,15 @@ function renderFullTranscript(turns: LongrunTurn[]): string[] {
     for (const text of turn.sentTexts) {
       lines.push(`**我（第 ${turn.index} 轮/${turn.tag}）**：${maskSensitive(text).slice(0, 200)}`);
     }
-    const media = turn.outbound.flatMap((message) => describeMedia(message.segments));
+    const media = turn.outbound
+      .filter((message) => !message.recalled)
+      .flatMap((message) => describeMedia(message.segments));
     const herParts: string[] = [];
     for (const message of turn.outbound) {
+      if (message.recalled) {
+        herParts.push("〔她撤回了一条消息〕");
+        continue;
+      }
       if (message.text.trim()) herParts.push(maskSensitive(message.text).slice(0, 200));
     }
     lines.push(`**她**：${herParts.join(" / ") || "（没回文字）"}${media.length > 0 ? `  ${media.map((label) => `[${label}]`).join("")}` : ""}`);
@@ -1991,6 +2001,8 @@ export class MockOneBotClient {
   readonly messages: CollectedMessage[] = [];
   readonly actions: Array<Record<string, unknown>> = [];
   private nextMessageId = 20_000;
+  /** 她撤回的消息条数（transcript 里标示，避免评审把「撤回+重发」当成重复） */
+  recalledCount = 0;
   private closedInfo = "";
   private ws: WebSocket | null = null;
   private constructor(ws: WebSocket) {
@@ -2042,22 +2054,39 @@ export class MockOneBotClient {
       request.params && typeof request.params === "object"
         ? (request.params as Record<string, unknown>)
         : {};
+    if (action === "delete_msg") {
+      // 撤回：标记对应的出站消息，transcript 渲染成「〔她撤回了一条消息〕」
+      const targetId = typeof params.message_id === "number" ? params.message_id : null;
+      if (targetId !== null) {
+        for (const message of this.messages) {
+          if (message.messageId === targetId) {
+            message.recalled = true;
+            this.recalledCount += 1;
+            break;
+          }
+        }
+      }
+    }
+    const assignedId = this.nextMessageId;
+    if (action === "send_private_msg" || action === "send_group_msg") {
+      this.nextMessageId += 1;
+    }
     if (action === "send_private_msg" || action === "send_group_msg") {
       const segments = parseOneBotMessage(params.message);
       const text = segmentsToText(segments);
       this.messages.push({
         at: Date.now(),
         action,
+        messageId: assignedId,
         userId: typeof params.user_id === "number" ? params.user_id : undefined,
         groupId: typeof params.group_id === "number" ? params.group_id : undefined,
         segments,
         text,
         hasMedia: hasMediaSegment(segments),
       });
-      this.nextMessageId += 1;
     }
     if (typeof request.echo === "string" || typeof request.echo === "number") {
-      const data = mockActionResponseData(action, params, this.nextMessageId);
+      const data = mockActionResponseData(action, params, assignedId);
       this.ws?.send(
         JSON.stringify({ status: "ok", retcode: 0, data, echo: request.echo }),
       );

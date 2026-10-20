@@ -57,6 +57,8 @@ export interface PickStickerInput {
   conflictActive: boolean;
   /** 可注入随机源（测试用；返回 0..1） */
   random?: () => number;
+  /** 最近已经用过的贴纸 id（避免同一张图连着复用） */
+  recentIds?: string[];
 }
 
 /** 按情绪/时段挑选一个贴纸；不适合发时返回 null。 */
@@ -74,6 +76,11 @@ export function pickSticker(input: PickStickerInput): StickerDef | null {
     candidates = stickersByTags(["cute", "cat", "happy"]);
   }
   if (candidates.length === 0) return null;
+
+  // 跨轮去重：优先用没发过的那几张；都发过就退回完整候选
+  const recent = new Set(input.recentIds ?? []);
+  const fresh = candidates.filter((s) => !recent.has(s.id));
+  if (fresh.length > 0) candidates = fresh;
 
   const random = input.random ?? Math.random;
   const index = Math.min(candidates.length - 1, Math.floor(random() * candidates.length));

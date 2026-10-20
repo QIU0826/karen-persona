@@ -57,6 +57,7 @@ import {
   pickMeetingFallback,
   stripFabricatedMeeting,
 } from "../persona/meeting-guard.js";
+import { decideTalkMove, isTroubleTalk, type TalkMove } from "../persona/talk-moves.js";
 import { resolveOwnerScope, OWNER_CLI } from "../data/owner.js";
 import { extractUserFactsAsync, getUserFactsContext } from "../data/user-facts.js";
 import { getT1ArcContext } from "../data/t1-injection.js";
@@ -742,6 +743,43 @@ export function updateRelationshipAfterTurn(
 
 
 
+// ── 说话动作（v0.3.3：主动/共情小改造）──────
+
+/** 最近几轮做过的说话动作（按 owner + 存储人设隔离，进程内即可） */
+const recentTalkMoves = new Map<string, TalkMove[]>();
+
+/**
+ * 给这一轮的 system prompt 追加一句内部提示：先接住情绪 / 顺手补一句自己的近况。
+ * 只影响措辞，不改变门控与记忆；`KAREN_TALK_MOVES=off` 可整体关闭（A/B 用）。
+ */
+function buildTalkMoveInjection(
+  state: ConversationState,
+  userInput: string,
+  crisis: string | null,
+): string {
+  const key = `${state.owner ?? "cli"}|${state.storagePersona}`;
+  const recent = recentTalkMoves.get(key) ?? [];
+  const decision = decideTalkMove(
+    {
+      userText: userInput,
+      hour: new Date().getHours(),
+      closeness: state.persona.relationship.closeness,
+      isCrisis: crisis !== null,
+      recentMoves: recent,
+      quietHours: {
+        start: state.config.quiet_hours_start,
+        end: state.config.quiet_hours_end,
+      },
+    },
+    { enabled: process.env.KAREN_TALK_MOVES !== "off" },
+  );
+  if (decision.move !== "none") {
+    recentTalkMoves.set(key, [...recent, decision.move].slice(-4));
+    console.log(`  [说话动作] ${decision.move}（${decision.reason}）`);
+  }
+  return decision.note;
+}
+
 export async function processMessage(
   state: ConversationState,
   userInput: string,
@@ -997,6 +1035,7 @@ export async function processMessage(
     factsContext +
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
+    buildTalkMoveInjection(state, userInput, crisis) +
     `\n${momentTag}`;
   const messages = buildChatMessages(session, fullSystem);
 
@@ -1147,6 +1186,8 @@ export async function processMessage(
       ? null
       : await trySharePhoto(state, rawReply, {
           requested: mediaRequest.photo,
+          // 他在倒苦水时不顺手发无关的生活照（点名要图除外），免得像没在听
+          skipWhenTroubleTalk: !mediaRequest.photo && isTroubleTalk(userInput),
           // 用户点名要照片时，尽量按他说的场景挑图（要晚霞就别发山/花）
           // 点名叫他看什么就发什么；普通聊天里提到晚霞/雪/咖啡/猫等强场景词，也顺手匹配
           preferredTags: detectPhotoSceneTags(userInput),
@@ -1471,6 +1512,7 @@ export async function* processMessageStream(
     factsContext +
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
+    buildTalkMoveInjection(state, userInput, crisis) +
     `\n${momentTag}`;
 
   // 构建消息列表
@@ -1595,6 +1637,7 @@ export async function* processMessageStream(
       const photo = await Promise.race([
         trySharePhoto(state, fullReply, {
           requested: mediaRequest.photo,
+          skipWhenTroubleTalk: !mediaRequest.photo && isTroubleTalk(userInput),
           preferredTags: detectPhotoSceneTags(userInput),
         }).catch(() => null),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
