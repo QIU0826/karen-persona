@@ -97,9 +97,9 @@ import { detectMediaRequest } from "../impulse/media-request.js";
 import { isWithinTurnDuplicate } from "../persona/anti-repetition.js";
 import {
   DEFAULT_TYPO_RECALL_SETTINGS,
-  planTypoRecall,
   type TypoRecallSettings,
 } from "../impulse/typo-recall.js";
+import { intentSettingsFromTypo, planMessageIntent } from "../impulse/message-intent.js";
 
 // ── 常量 ────────────────────────────────────────
 
@@ -1103,6 +1103,16 @@ const userLastTypoRecallAt = new Map<number, number>();
  * 只影响 transport 层：`sentText` / 会话 / 记忆里始终是正确原文；
  * 异步发送拿不到 message_id 或撤回失败时静默降级，不阻塞主流程。
  */
+/**
+ * 发一条文字气泡，偶尔演「发出去又想改」（v0.6 起支持四类意图）：
+ * - typo_recall   打错字 → 撤回 → 重发正确版
+ * - regret_recall 说重了 → 撤回 → 换一句收着的
+ * - rewrite       表述太绕 → 撤回 → 只说短的那半句
+ * - hesitate      犹豫（不撤回；表现为回得很慢、话很短，由节奏层处理）
+ *
+ * 只影响 transport：会话/记忆里始终只落正确原文；异步拿不到 message_id 或撤回失败
+ * 时静默降级为「发原文」或「错字+更正」并存，绝不阻塞主流程。
+ */
 async function sendPrivateBubbleWithTypoRecall(
   userId: number,
   text: string,
@@ -1118,41 +1128,49 @@ async function sendPrivateBubbleWithTypoRecall(
 
   const config = state.config;
   const defaults = DEFAULT_TYPO_RECALL_SETTINGS;
-  const settings: TypoRecallSettings = {
+  const typoSettings: TypoRecallSettings = {
     enabled: config.typo_recall_enabled ?? defaults.enabled,
     probability: config.typo_recall_probability ?? defaults.probability,
     delayMs: config.typo_recall_delay_ms ?? defaults.delayMs,
     cooldownMinutes: config.typo_recall_cooldown_minutes ?? defaults.cooldownMinutes,
   };
 
-  const plan = planTypoRecall(
-    { text, now: Date.now(), safetySent },
-    settings,
-    { lastRecallAt: userLastTypoRecallAt.get(userId) }
+  const plan = planMessageIntent(
+    {
+      text,
+      now: Date.now(),
+      safetySent,
+      emotionVector: state.emotionState.vector,
+      isNight: new Date().getHours() >= 23 || new Date().getHours() < 6,
+    },
+    intentSettingsFromTypo(typoSettings),
+    { lastRecallAt: userLastTypoRecallAt.get(userId) },
   );
-  if (!plan.recall || !plan.typoText || !plan.correctedText) {
+
+  // 犹豫 / 不演：正常发原文
+  if (plan.intent === "none" || plan.intent === "hesitate" || !plan.sentText) {
     sendPrivateMsg(userId, text);
     return;
   }
 
-  const messageId = await sendPrivateMsgAsync(userId, plan.typoText);
+  const messageId = await sendPrivateMsgAsync(userId, plan.sentText);
   if (messageId === null) {
-    // 异步发送失败：不制造「发出去但撤回不了」的错字，直接发正确原文
+    // 异步发送失败：不制造「发出去但撤回不了」的消息，直接发正确原文
     sendPrivateMsg(userId, text);
     return;
   }
 
-  const correctedText = plan.correctedText;
+  const followUp = plan.followUpText ?? text;
   const delayMs = plan.delayMs ?? defaults.delayMs;
   userLastTypoRecallAt.set(userId, Date.now());
-  log.info("typo_recall.scheduled", { user_id: userId, delay_ms: delayMs });
+  log.info("message_intent.scheduled", { user_id: userId, intent: plan.intent, delay_ms: delayMs });
   const timer = setTimeout(() => {
     void (async () => {
       const recalled = await recallMessage(messageId);
-      // 撤回失败也发修正版（错字 + 更正，总比只留错字好）
-      sendPrivateMsg(userId, correctedText);
-      log.info(recalled ? "typo_recall.done" : "typo_recall.recall_failed", {
+      sendPrivateMsg(userId, followUp);
+      log.info(recalled ? "message_intent.done" : "message_intent.recall_failed", {
         user_id: userId,
+        intent: plan.intent,
       });
     })();
   }, delayMs);
