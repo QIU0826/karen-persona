@@ -16,7 +16,7 @@
 
 ```js
 const CONFIG = {
-  heroMode: "video",          // "video" 双视频 / "character" 卡通角色图
+  heroMode: "blank",          // 当前留白：不显示人物；"video" 双视频 / "character" 卡通角色图
   leftVideo: "...",           // 左视频 URL 或本地相对路径
   rightVideo: "...",          // 右视频 URL 或本地相对路径
   characterImage: "assets/character.svg",
@@ -59,6 +59,9 @@ const CONFIG = {
   ```
 - 页面会显示角色图 + 轻微浮动动画。后面可随时升级成方案 A。
 
+> 当前默认 `heroMode: "blank"`：人物区域留空（深色渐变 + 大字背景），等你的角色素材到位后
+> 改成 `"video"` 或 `"character"` 即可，不需要改其它代码。
+
 ### 方案 C：PNG 序列 / 动画 WebP（想要更精细动作）
 
 - 发我 **12–24 帧透明 PNG**（`001.png`…，1080×1440）或一个**动画 WebP**；
@@ -73,7 +76,9 @@ const CONFIG = {
 
 ## 图库替换（10 张）
 
-- 改成你的产品截图/角色图/日常照片：直接替换 `CONFIG.gallery` 的 10 个 URL；
+- 当前默认已使用本地素材：7 张 `../assets/photos/*.jpg`（咖啡店/雪天/杯子/山/晚霞/熊等）+ 3 张
+  `assets/gallery/poster-*.svg`（她有自己的生活 / 第 37 天 / 她开始记得你）；
+- 改成你的产品截图/角色图：直接替换 `CONFIG.gallery` 的 10 个 URL；
 - 本地图放 `promo/assets/gallery/01.jpg` 等，URL 写 `assets/gallery/01.jpg`；
 - 想用仓库已有的截图/照片：`../assets/photos/xxx.jpg`（直接打开页面）或
   `http://127.0.0.1:18082/assets/photos/xxx.jpg`（经 Web 服务访问）。

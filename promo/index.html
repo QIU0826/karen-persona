@@ -740,8 +740,15 @@ function tick() {
 
   // 文字与画廊融合：首屏文字随面板升起淡出；画廊阶段只保留 logo/nav；结尾再让产品信息回来
   const captionEl = document.getElementById("caption");
+  const logoEl = document.getElementById("logo");
+  const navEl = document.getElementById("nav");
   const inGallery = y > H * 0.82 && y < outroStart - 40;
-  captionEl.style.opacity = String(y < H * 0.82 ? clamp(1 - y / (H * 0.82), 0, 1) : 0);
+  const heroFade = clamp(1 - y / (H * 0.82), 0, 1);
+  captionEl.style.opacity = String(y < H * 0.82 ? heroFade : 0);
+  // logo / nav：首屏与结尾可见，画廊阶段让位给图片
+  const chromeOpacity = inGallery ? 0 : y >= outroStart - 40 ? 1 : heroFade;
+  logoEl.style.opacity = String(chromeOpacity);
+  navEl.style.opacity = String(chromeOpacity);
   if (inGallery) {
     info.style.opacity = "0";
   } else if (y >= outroStart - 40) {
@@ -770,6 +777,18 @@ function init() {
   initVideoScrub();
   initMobileAutoplay();
   requestAnimationFrame(tick);
+
+  // 入场动画结束后移除 animation（否则 CSS animation 的 fill 会覆盖 JS 设置的 opacity，
+  // 导致画廊阶段文字无法淡出）
+  setTimeout(() => {
+    const captionEl = document.getElementById("caption");
+    const logoEl = document.getElementById("logo");
+    const navEl = document.getElementById("nav");
+    captionEl.style.animation = "none";
+    info.style.animation = "none";
+    logoEl.style.animation = "none";
+    navEl.style.animation = "none";
+  }, 1300);
 }
 
 let resizeTimer = null;
