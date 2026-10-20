@@ -80,3 +80,45 @@ describe("user_facts 存储与注入", () => {
     expect(second.getUserFactsContext("cli:local")).toContain("杭州");
   });
 });
+
+describe("user_facts 变更历史（时间维度）", () => {
+  it("同 key 值变化时记录旧值；值没变不记录", async () => {
+    const facts = await import("./user-facts.js");
+    facts.upsertUserFacts("cli:local", [{ key: "job", value: "产品设计师", category: "work" }]);
+    // 同值重复写入：不应产生历史
+    facts.upsertUserFacts("cli:local", [{ key: "job", value: "产品设计师", category: "work" }]);
+    expect(facts.listFactHistory("cli:local")).toHaveLength(0);
+
+    // 换工作：旧值入历史
+    facts.upsertUserFacts("cli:local", [{ key: "job", value: "高级产品设计师", category: "work" }]);
+    const history = facts.listFactHistory("cli:local");
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ key: "job", oldValue: "产品设计师" });
+    expect(history[0].changedAt).toBeGreaterThan(0);
+  });
+
+  it("注入块对最近变过的事实显示「（之前是：旧值）」", async () => {
+    const facts = await import("./user-facts.js");
+    facts.upsertUserFacts("cli:local", [{ key: "job", value: "产品设计师", category: "work" }]);
+    facts.upsertUserFacts("cli:local", [{ key: "job", value: "高级产品设计师", category: "work" }]);
+
+    const text = facts.getUserFactsContext("cli:local");
+    expect(text).toContain("高级产品设计师（之前是：产品设计师）");
+
+    // 180 天前的变更不展示
+    const older = facts.getRecentFactChanges("cli:local", Date.now() + 1000);
+    expect(older.size).toBe(0);
+  });
+
+  it("按 owner 隔离；每个 key 历史保留最近 20 条", async () => {
+    const facts = await import("./user-facts.js");
+    facts.upsertUserFacts("qq:1", [{ key: "city", value: "杭州", category: "profile" }]);
+    facts.upsertUserFacts("qq:2", [{ key: "city", value: "上海", category: "profile" }]);
+    for (let i = 0; i < 25; i++) {
+      facts.upsertUserFacts("qq:1", [{ key: "city", value: `城市${i}`, category: "profile" }]);
+    }
+    expect(facts.listFactHistory("qq:2")).toHaveLength(0);
+    expect(facts.listFactHistory("qq:1", 100).length).toBeLessThanOrEqual(20);
+    expect(facts.listUserFacts("qq:1").find((f) => f.key === "city")?.value).toBe("城市24");
+  });
+});

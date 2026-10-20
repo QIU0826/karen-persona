@@ -19,6 +19,8 @@
 | 上下文重复 | 最近 8 条消息同时出现在聊天历史和 shortTermContext | 已移除 shortTermContext 重复注入 |
 | 跨轮复读（连续几轮同开头/同一句） | 模型看不到自己上一轮具体说了什么，静态 prompt「别重复开头」约束不住 | 新增 `src/persona/anti-repetition.ts`：每轮注入最近开头词反重复块 + 回复后检测记日志；真实 A/B 见 §4.1 |
 | 自然问句 FTS 检索 0 命中 | 逐字 token 用 FTS5 默认 AND，自然问句要求每个字都出现在同一条记忆 | `searchEpisodesByFts` 改 OR + BM25 IDF 排序：T2 recall@1 20%→50%、@3 35%→75%、@8 40%→85% |
+| 记忆没有「多久以前」 | RAG 注入只有 `[对话] 用户: …`，没有时间标签 | 检索结果带相对时间（今天/昨天/3天前/上个月），注入为 `- [3天前] …`，她才能自然说"你上次/三天前说"（`relative-time.ts` + retriever/Web） |
+| 事实变了看不出时间层次 | `user_facts` 同 key 直接覆盖，旧值丢失 | 新增 `user_fact_history`：换工作/换城市等值变化保留旧值；注入显示「（之前是：X）」（180 天内变更）；Web 回放也显示时间标签 |
 | QQ 私聊（流式）没注入用户事实 | 事实层只接在非流式管线，流式 `fullSystem` 漏了事实块 | 已补：流式注入事实块 + 反重复块，单测覆盖（此前文档误写为「流式/非流式都生效」） |
 
 ---
@@ -51,9 +53,9 @@
 |---|---|---|---|
 | T0 会话 | `data/小雅-session.json` | 86 条消息（滚动窗口 200） | ✅ 最近 15 条直接进 messages；更早 10 条压缩成"聊过的大概" |
 | T1 人格快照 | `t1_snapshots`（SQLite） | 每轮 1 条（情绪/亲密度/负债+摘要） | ✅ 最近 8 条压成「最近几轮的状态」注入（数值趋势，不引用对话正文） |
-| T2 情节记忆 | `t2_episodes`（SQLite）+ `t2_fts` + `t2_vec` | 88 条：chat 42 / 独白 42 / 日记 4 | ✅ 每轮检索 top 8，经 RRF 后作为「你突然想起来」注入 |
+| T2 情节记忆 | `t2_episodes`（SQLite）+ `t2_fts` + `t2_vec` | 89 条（含 1 条 T3 摘要） | ✅ 每轮检索 top12 → DeepSeek 重排 → top8 注入「你突然想起来」；**每条带相对时间标签**（今天/昨天/3天前） |
 | T3 长期摘要 | 写回 `t2_episodes(source=t3_summary)` | 1 条（阈值调优后真实跑通：40 条旧片段 → 1 条摘要） | ✅ 通过 T2 检索间接生效 |
-| 用户事实 | `user_facts`（SQLite，本轮新增） | 重启后随对话累积 | ✅ 每轮以「你确定记得的关于对方的事」注入 |
+| 用户事实 | `user_facts` + `user_fact_history`（SQLite） | 随真实对话累积（当前真实库尚未有真实消息触发抽取） | ✅ 每轮注入；最近变更显示「（之前是：X）」；历史每 key 最多留 20 条 |
 | 她眼中的你 | `persona-state-小雅.json` → `herView` | 1 条（已生成） | ✅ 拼进「你和对方的关系」 |
 | 人格/关系/情绪 | `persona-state-小雅.json` | 亲密度 3.21、9 个关系事件、叙事阶段 `noticing` | ✅ 结构化标签注入 |
 | 内心独白 | T2（`source=internal_monologue`） | 42 条 | ❌ 不直接注入（只做检索/演化材料） |
@@ -175,13 +177,17 @@
 | `src/data/retrieval-boost.ts`（新） | 检索增强：对 top12 候选做一次 DeepSeek 相关性重排（默认开启；失败/超时/关闭开关降级原顺序） |
 | `src/eval/semantic-boost-eval.ts`（新） | 检索增强评测：基线/改写/重排/改写+重排 四组对照（真实 DeepSeek） |
 | `src/eval/repetition-eval.ts`（新） | 跨轮重复 A/B 脚本（baseline/openers/full；3 轮 × 6 句；真实 DeepSeek） |
+| `src/data/relative-time.ts`（新） | 记忆相对时间标签（今天/昨天/前天/N天前/上周/N周前/N个月前/N年前；按本地日历日，可注入 now） |
+| `src/data/user-facts.ts`（补） | `user_fact_history` 变更历史：值真变化才记旧值（每 key 留 20 条），注入显示「（之前是：X）」；建表缓存改为按 DB 路径（评测切库不再缺表） |
+| `src/data/retriever.ts` / `vector.ts`（补） | 检索结果带 `createdAt`/`timeLabel`；`buildRagContext` 注入 `- [3天前] …` |
+| `src/web/data.ts` / `dashboard.ts`（补） | `/api/memory-probe` 返回 `created_at`/`time_label`，回放面板显示时间徽标 |
 | `src/data/t1-injection.ts`（新） | T1 快照 → 「最近几轮的状态」状态弧（亲密度/情绪/负债趋势；不引用对话正文） |
 | `src/evolution/t3-summarizer.ts` | T3 压缩阈值 80 → 40 条；新增「≥20 条且距上次摘要 ≥1 天」时间兜底；`KAREN_T3_DRY_RUN=1` 干跑；批量按实际条数 |
 | `src/pipeline/orchestrator.ts`（补） | reply/stream/proactive 注入 T1 状态弧 |
 | `src/impulse/renderer.ts` | burst 分条去尾部软标点；压缩连续空行 |
 | `src/impulse/photo-library.ts`（上一轮） | 照片时间关系模型（今天/昨天/以前 + 亲密度门槛） |
 
-验证：`tsc` 0 错误；**49 文件 / 560 用例全绿**（2026-10-20 记忆评测 + 反重复 + Web 面板 + T1/T3 + 检索重排后）。
+验证：`tsc` 0 错误；**50 文件 / 569 用例全绿**（2026-10-20 记忆评测 + 反重复 + Web 面板 + T1/T3 + 检索重排 + 时间感/事实历史后）。
 记忆评测：`docs/MEMORY_EVAL_REPORT.md`（20 条金标集；修复 FTS 后 T2 recall@8 85%、facts 100%）。
 
 ---
@@ -211,10 +217,10 @@
    **同时修掉一个激活后会每轮重复压缩的隐患**：原逻辑只降 strength、不标记已压缩，压缩后
    42 条仍 ≥40 会再次触发（每轮一次 LLM 调用）；新增 `t2_episodes.t3_compressed` 列（幂等迁移）+
    计数/候选查询排除，已压缩片段不再重复计入。`KAREN_T3_DRY_RUN=1` 可只看候选不写库。
-6. **事实抽取的冲突消解**：同 key 直接覆盖，换工作/换城市正确，但"以前/现在"的时间关系没保留。
-   - 行动：facts 加 `valid_from/valid_to` 或"历史值"列表。
-7. **记忆召回没有"时间感"**：注入的 T2 都是 `[对话]` 文本，没有"多久以前"。
-   - 行动：注入时加相对时间（"三天前"），她才能自然说"你上次说…"。
+6. ~~**事实抽取的冲突消解**~~ **已完成（2026-10-20）**：新增 `user_fact_history`（值真变化时记录旧值，
+   每 key 保留 20 条）；最近 180 天变更注入显示「（之前是：X）」，换工作/换城市不再像没发生过。
+7. ~~**记忆召回没有"时间感"**~~ **已完成（2026-10-20）**：`src/data/relative-time.ts` + 检索结果时间标签，
+   RAG 注入 `- [3天前] …`；Web 记忆命中回放也显示时间徽标。
 8. ~~**Web 控制台看不到事实/记忆命中**~~ **已完成（2026-10-20）**：控制台新增
    「用户事实」卡（按分类分组、空态/只读、`GET /api/facts`）与「记忆命中回放」卡
    （输入 query → `GET /api/memory-probe` → 命中内容/相关度/置信度/来源，只读）。

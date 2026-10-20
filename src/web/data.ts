@@ -433,7 +433,12 @@ export interface MemoryHit {
   confidence_label: string;
   source: string;
   source_label: string;
+  /** 记忆发生时间（ISO）；老库可能为 null */
+  created_at: string | null;
+  /** 相对时间标签（如 "3天前"）；无法计算时为空串 */
+  time_label: string;
 }
+
 
 export interface MemoryHitProbeData {
   ok: true;
@@ -487,6 +492,8 @@ export function getMemoryHitProbe(
       confidence_label: CONFIDENCE_LABELS[memory.confidence] ?? "相关",
       source,
       source_label: sourceLabel(source),
+      created_at: toIsoTimestamp(memory.createdAt),
+      time_label: memory.timeLabel ?? "",
     };
   });
 

@@ -177,6 +177,19 @@ describe("同步混合检索 retrieveRelevantMemories（无 Key）", () => {
     vector.closeVectorDb();
   });
 
+  it("检索结果带相对时间标签，RAG 注入含时间前缀（记忆时间感）", async () => {
+    const { vector, retriever } = await loadModules();
+    vector.setCurrentPersona("小雅");
+    const coffee = "用户说最喜欢喝咖啡，尤其是手冲咖啡";
+    vector.insertEpisodeWithEmbedding(coffee, "chat", generateEmbedding(coffee));
+
+    const memories = retriever.retrieveRelevantMemories("咖啡");
+    expect(memories[0].createdAt).toBeGreaterThan(0);
+    expect(memories[0].timeLabel).not.toBe("");
+    const rag = retriever.buildRagContext(memories);
+    expect(rag).toMatch(/\[(刚刚|分钟前|小时前|今天)\]/);
+  });
+
   it("显式 personaId 可跨人设只读检索（Web 控制台回放用）", async () => {
     const { vector, retriever } = await loadModules();
     vector.setCurrentPersona("小雅");

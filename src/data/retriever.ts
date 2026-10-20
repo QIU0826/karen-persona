@@ -34,6 +34,7 @@ import {
   upgradeEmbeddings,
   NGRAM_EMBEDDING_MODEL,
 } from "./embedding.js";
+import { formatMemoryTime } from "./relative-time.js";
 
 export interface RetrievedMemory {
   id: number;
@@ -41,6 +42,10 @@ export interface RetrievedMemory {
   relevance: number; // 0-1 综合相关性分数
   strength: number;
   confidence: "high" | "medium" | "low";
+  /** 记忆发生时间（ms）；老库/异常为 null */
+  createdAt: number | null;
+  /** 相对时间标签（如"3天前""昨天"），注入 prompt 与 Web 展示用；无时间信息为空串 */
+  timeLabel: string;
 }
 
 /** RRF 常数：score = Σ 1/(K + rank)，k=60 为技术雷达推荐值。 */
@@ -68,6 +73,8 @@ interface EpisodeMeta {
   content: string;
   source: string;
   emotional_weight: number;
+  /** created_at 的 epoch 秒（SQLite UTC 文本直接转 epoch，避免 JS 时区误解析） */
+  createdSec: number | null;
 }
 
 interface VectorCandidate {
@@ -124,7 +131,9 @@ function fuseHybrid(
   const placeholders = ids.map(() => "?").join(", ");
   const rows = d
     .prepare(
-      `SELECT id, content, source, emotional_weight FROM t2_episodes WHERE id IN (${placeholders})`
+      `SELECT id, content, source, emotional_weight,
+              CAST(strftime('%s', created_at) AS INTEGER) AS createdSec
+         FROM t2_episodes WHERE id IN (${placeholders})`
     )
     .all(...ids) as EpisodeMeta[];
   const metaById = new Map(rows.map((row) => [row.id, row]));
@@ -134,6 +143,7 @@ function fuseHybrid(
     content: string;
     relevance: number;
     strength: number;
+    createdAt: number | null;
   }> = [];
 
   for (const id of ids) {
@@ -158,7 +168,11 @@ function fuseHybrid(
     );
     if (relevance < MIN_RELEVANCE) continue;
 
-    scored.push({ id, content: meta.content, relevance, strength: decayedStrength });
+    const createdAt =
+      typeof meta.createdSec === "number" && Number.isFinite(meta.createdSec) && meta.createdSec > 0
+        ? meta.createdSec * 1000
+        : null;
+    scored.push({ id, content: meta.content, relevance, strength: decayedStrength, createdAt });
   }
 
   // 内容去重：同一句话被重复写入时只保留 relevance 最高的
@@ -175,6 +189,7 @@ function fuseHybrid(
     .map((item) => ({
       ...item,
       confidence: confidenceFor(item.relevance, item.strength),
+      timeLabel: formatMemoryTime(item.createdAt),
     }));
 }
 
@@ -320,13 +335,17 @@ export function buildRagContext(memories: RetrievedMemory[]): string {
 
   let context = "";
 
+  // 时间前缀：让她能自然说"你上次/三天前说"，而不是把所有记忆都当成刚刚发生
+  const line = (memory: RetrievedMemory): string =>
+    `- ${memory.timeLabel ? `[${memory.timeLabel}] ` : ""}${memory.content}\n`;
+
   if (highConfidence.length > 0) {
     // 随机化措辞，避免机械感
     const phrases = ["你突然想起来", "你记得", "你想起来", "你脑子里冒出来"];
     const phrase = phrases[Math.floor(Math.random() * phrases.length)];
     context += `\n${phrase}：\n`;
     for (const m of highConfidence) {
-      context += `- ${m.content}\n`;
+      context += line(m);
     }
   }
 
@@ -335,7 +354,7 @@ export function buildRagContext(memories: RetrievedMemory[]): string {
     const phrase = phrases[Math.floor(Math.random() * phrases.length)];
     context += `\n${phrase}：\n`;
     for (const m of mediumConfidence) {
-      context += `- ${m.content}\n`;
+      context += line(m);
     }
   }
 

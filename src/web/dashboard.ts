@@ -250,6 +250,7 @@ function renderProbeHits(hits: MemoryHit[]): string {
         `<div class="item-head">` +
         `<span class="${confidenceClass(hit.confidence)}">${escapeHtml(hit.confidence_label)}</span>` +
         `<span class="chip">${escapeHtml(hit.source_label)}</span>` +
+        (hit.time_label ? `<span class="chip">${escapeHtml(hit.time_label)}</span>` : "") +
         `<span class="muted small">相关度 ${pct(hit.relevance)}%</span>` +
         `</div>` +
         `<div class="item-body">${escapeHtml(truncateText(hit.content))}</div>` +
@@ -662,6 +663,7 @@ const CLIENT_JS = `
     return '<div class="item"><div class="item-head">' +
       '<span class="' + confidenceClass(hit.confidence) + '">' + esc(hit.confidence_label || "相关") + "</span>" +
       '<span class="chip">' + esc(hit.source_label) + "</span>" +
+      (hit.time_label ? '<span class="chip">' + esc(hit.time_label) + "</span>" : "") +
       '<span class="muted small">相关度 ' + pct(hit.relevance) + "</span>" +
       "</div>" +
       '<div class="item-body">' + esc(truncateText(hit.content)) + "</div>" +

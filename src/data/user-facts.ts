@@ -9,10 +9,13 @@
  * - 只抽取「对方明确说过的关于自己的稳定事实」，不猜、不提取角色自己的话；
  * - 按 owner 隔离（多用户）；
  * - fire-and-forget：抽取失败不影响回复；15 秒内同一 owner 只抽一次，控制成本；
- * - 表结构简单：owner_id + fact_key 唯一，新的值覆盖旧值（比如换工作）。
+ * - 表结构简单：owner_id + fact_key 唯一，新的值覆盖旧值（比如换工作）；
+ * - 覆盖时把旧值写入 `user_fact_history`，注入时对最近变更显示「（之前是：X）」，
+ *   让她知道「你以前是 A，现在是 B」，而不是把变化当成没发生过。
  */
 import OpenAI from "openai";
 import { getVectorDb } from "./vector.js";
+import { dbPath } from "./paths.js";
 import { getChatModel } from "../ai/router.js";
 import { withThinking } from "../ai/chat.js";
 
@@ -39,6 +42,14 @@ export interface ExtractedFact {
   category: FactCategory;
 }
 
+/** 事实变更历史（同 key 覆盖时保留旧值/时间） */
+export interface FactHistoryEntry {
+  ownerId: string;
+  key: string;
+  oldValue: string;
+  changedAt: number;
+}
+
 const CATEGORY_LABELS: Record<FactCategory, string> = {
   profile: "基本信息",
   work: "工作",
@@ -59,10 +70,15 @@ const VALID_CATEGORIES = new Set<FactCategory>([
   "other",
 ]);
 
-let tableReady = false;
+/**
+ * 建表缓存按「当前 SQLite 文件路径」记录，而不是进程级布尔：
+ * 评测/测试会在同一进程里切换 KAREN_DATA_DIR，若只缓存一次，第二个库会缺表。
+ */
+let tableReadyForPath: string | null = null;
 
 function ensureTable(): void {
-  if (tableReady) return;
+  const currentPath = dbPath();
+  if (tableReadyForPath === currentPath) return;
   getVectorDb().exec(`
     CREATE TABLE IF NOT EXISTS user_facts (
       owner_id TEXT NOT NULL,
@@ -72,8 +88,17 @@ function ensureTable(): void {
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (owner_id, fact_key)
     );
+    CREATE TABLE IF NOT EXISTS user_fact_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_id TEXT NOT NULL,
+      fact_key TEXT NOT NULL,
+      old_value TEXT NOT NULL,
+      changed_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fact_history_owner_key
+      ON user_fact_history(owner_id, fact_key, changed_at DESC);
   `);
-  tableReady = true;
+  tableReadyForPath = currentPath;
 }
 
 /** 解析 LLM 返回的 JSON（兼容 ```json 包裹、多余文本）。 */
@@ -110,7 +135,7 @@ export function parseFactsJson(content: string): ExtractedFact[] {
   }
 }
 
-/** 写入/更新事实（同 key 覆盖），返回写入条数。 */
+/** 写入/更新事实（同 key 覆盖），返回写入条数。值真变化时把旧值记入历史。 */
 export function upsertUserFacts(ownerId: string, facts: ExtractedFact[]): number {
   if (facts.length === 0) return 0;
   ensureTable();
@@ -123,9 +148,32 @@ export function upsertUserFacts(ownerId: string, facts: ExtractedFact[]): number
       category = excluded.category,
       updated_at = excluded.updated_at
   `);
+  const selectExisting = db.prepare(
+    `SELECT fact_value FROM user_facts WHERE owner_id = ? AND fact_key = ?`,
+  );
+  const insertHistory = db.prepare(
+    `INSERT INTO user_fact_history (owner_id, fact_key, old_value, changed_at) VALUES (?, ?, ?, ?)`,
+  );
+  // 每个 key 最多保留最近 20 条旧值，避免无限膨胀
+  const trimHistory = db.prepare(`
+    DELETE FROM user_fact_history
+     WHERE owner_id = ? AND fact_key = ?
+       AND id NOT IN (
+         SELECT id FROM user_fact_history
+          WHERE owner_id = ? AND fact_key = ?
+          ORDER BY changed_at DESC, id DESC LIMIT 20
+       )
+  `);
   const now = Date.now();
   const tx = db.transaction((items: ExtractedFact[]) => {
-    for (const f of items) stmt.run(ownerId, f.key, f.value, f.category, now);
+    for (const f of items) {
+      const previous = selectExisting.get(ownerId, f.key) as { fact_value: string } | undefined;
+      if (previous && previous.fact_value !== f.value) {
+        insertHistory.run(ownerId, f.key, previous.fact_value, now);
+        trimHistory.run(ownerId, f.key, ownerId, f.key);
+      }
+      stmt.run(ownerId, f.key, f.value, f.category, now);
+    }
   });
   tx(facts);
   return facts.length;
@@ -155,9 +203,64 @@ export function listUserFacts(ownerId: string): UserFact[] {
   }));
 }
 
+/** 某个 owner 的事实变更历史（最新在前）。 */
+export function listFactHistory(ownerId: string, limit: number = 50): FactHistoryEntry[] {
+  ensureTable();
+  const rows = getVectorDb()
+    .prepare(
+      `SELECT owner_id, fact_key, old_value, changed_at
+         FROM user_fact_history
+        WHERE owner_id = ?
+        ORDER BY changed_at DESC, id DESC
+        LIMIT ?`,
+    )
+    .all(ownerId, Math.max(1, Math.min(200, Math.floor(limit)))) as Array<{
+    owner_id: string;
+    fact_key: string;
+    old_value: string;
+    changed_at: number;
+  }>;
+  return rows.map((row) => ({
+    ownerId: row.owner_id,
+    key: row.fact_key,
+    oldValue: row.old_value,
+    changedAt: row.changed_at,
+  }));
+}
+
+/**
+ * 最近变过的事实（key → 旧值）。注入时对「最近 180 天内变过」的 key 显示
+ * 「（之前是：X）」，时间更久的旧值不再展示（避免 prompt 里堆历史）。
+ */
+export function getRecentFactChanges(
+  ownerId: string,
+  sinceMs: number = Date.now() - 180 * 24 * 60 * 60 * 1000,
+): Map<string, string> {
+  ensureTable();
+  const rows = getVectorDb()
+    .prepare(
+      `SELECT fact_key, old_value
+         FROM user_fact_history
+        WHERE owner_id = ? AND changed_at >= ?
+        ORDER BY changed_at ASC, id ASC`,
+    )
+    .all(ownerId, sinceMs) as Array<{ fact_key: string; old_value: string }>;
+  const latest = new Map<string, string>();
+  for (const row of rows) latest.set(row.fact_key, row.old_value);
+  return latest;
+}
+
 /** 格式化为 prompt 注入块（≤20 条、≈300 tokens 内）。 */
-export function formatUserFacts(facts: UserFact[]): string {
+export function formatUserFacts(
+  facts: UserFact[],
+  previousChanges?: Map<string, string> | Record<string, string>,
+): string {
   if (facts.length === 0) return "";
+  const previousLookup = (key: string): string | undefined => {
+    if (!previousChanges) return undefined;
+    if (previousChanges instanceof Map) return previousChanges.get(key);
+    return previousChanges[key];
+  };
   // 按分类聚合；同 key 只保留最新
   const seen = new Set<string>();
   const lines: string[] = [];
@@ -170,7 +273,10 @@ export function formatUserFacts(facts: UserFact[]): string {
   for (const f of ordered) {
     if (seen.has(f.key)) continue;
     seen.add(f.key);
-    lines.push(`- ${CATEGORY_LABELS[f.category]}：${f.value}`);
+    const previous = previousLookup(f.key);
+    const changeNote =
+      previous && previous !== f.value ? `（之前是：${previous.slice(0, 30)}）` : "";
+    lines.push(`- ${CATEGORY_LABELS[f.category]}：${f.value}${changeNote}`);
     if (lines.length >= 20) break;
   }
   if (lines.length === 0) return "";
@@ -180,7 +286,15 @@ export function formatUserFacts(facts: UserFact[]): string {
 /** 取某 owner 的事实注入块；DB 异常时静默返回空。 */
 export function getUserFactsContext(ownerId: string): string {
   try {
-    return formatUserFacts(listUserFacts(ownerId));
+    const facts = listUserFacts(ownerId);
+    if (facts.length === 0) return "";
+    let previousChanges: Map<string, string> | undefined;
+    try {
+      previousChanges = getRecentFactChanges(ownerId);
+    } catch {
+      previousChanges = undefined;
+    }
+    return formatUserFacts(facts, previousChanges);
   } catch {
     return "";
   }

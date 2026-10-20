@@ -90,6 +90,13 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 记忆时间感 + 事实变更历史）
+
+- **记忆时间感（已完成）**：`src/data/relative-time.ts`；检索结果带 `createdAt/timeLabel`，RAG 注入 `- [3天前] …`；`/api/memory-probe` 返回 `created_at/time_label`，Web 回放显示时间徽标。按本地日历日判断今天/昨天/前天，更久远用天/周/月/年。
+- **事实变更历史（已完成）**：`user_fact_history` 表（值真变化才记录旧值，每 key 最多 20 条）；最近 180 天变更注入「（之前是：X）」；`listFactHistory` / `getRecentFactChanges` 接口。
+- **顺带修复**：user-facts 建表缓存改为按 DB 路径记录——评测/测试同进程切 `KAREN_DATA_DIR` 时不再缺表。
+- **测试**：relative-time 6 条、user-facts 历史 3 条、检索时间标签 1 条、Web 时间徽标断言；全仓 50 文件 / 569 用例，tsc 0。
+
 ### ✅ 已完成（2026-10-20 检索增强 DeepSeek 重排）
 
 - **DeepSeek 没有 embeddings**：官方 `POST /embeddings` 404（DEEPSEEK_CAPABILITY_AUDIT §7），真语义向量需外部 Key/本地模型。

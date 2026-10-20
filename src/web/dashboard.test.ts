@@ -202,6 +202,8 @@ function probeFixture(): MemoryHitProbeData {
         confidence_label: "高相关",
         source: "chat",
         source_label: "对话",
+        created_at: "2026-10-16T12:00:00.000Z",
+        time_label: "3天前",
       },
     ],
   };
@@ -300,6 +302,7 @@ describe("renderDashboard 首屏", () => {
     expect(html).toContain('id="probe-query"');
     expect(html).toContain('value="下雨天"');
     expect(html).toContain("高相关");
+    expect(html).toContain("3天前");
     expect(html).toContain("相关度 82%");
     expect(html).toContain("width:82%");
     // content 截断显示（完整内容不出现，只保留前 159 字 + 省略号）
