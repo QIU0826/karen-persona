@@ -117,7 +117,8 @@ def health() -> dict:
     return {
         "ok": True,
         "model": DEFAULT_MODEL,
-        "dim": _dim or 0,
+        # 对外实际输出维度（FORCE_DIM 生效时为截断后的维度）
+        "dim": FORCE_DIM or _dim or 0,
         "device": "cpu",  # fastembed 走 onnxruntime CPU
         "models_dir": str(MODELS_DIR),
     }
