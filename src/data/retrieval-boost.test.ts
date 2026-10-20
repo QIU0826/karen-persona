@@ -140,6 +140,21 @@ describe("retrieveWithLlmBoost", () => {
     expect(result.map((item) => item.id)).toEqual(pool.slice(0, 3).map((item) => item.id));
   });
 
+  it("候选过少（<3 条）跳过重排，省一次调用/延迟", async () => {
+    const { vector, boost } = await seedAndLoad();
+    void vector;
+    // seedAndLoad 种了 3 条；这里只用其中 1 条命中，构造候选不足的场景
+    const embedding = await import("./embedding.js");
+    const solo = await import("./vector.js");
+    solo.setCurrentPersona("小雅-单条");
+    const content = "用户说最喜欢喝咖啡";
+    solo.insertEpisodeWithEmbedding(content, "chat", embedding.generateEmbedding(content));
+    // 人设隔离：当前人设只有 1 条
+    const result = await boost.retrieveWithLlmBoost("咖啡", 3);
+    expect(Array.isArray(result)).toBe(true);
+    expect(mocked.chat).not.toHaveBeenCalled();
+  });
+
   it("过短输入（如单个语气词）跳过重排，省一次调用", async () => {
     const { boost } = await seedAndLoad();
     const result = await boost.retrieveWithLlmBoost("嗯", 3);

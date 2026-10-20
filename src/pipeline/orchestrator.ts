@@ -51,6 +51,7 @@ import { trySharePhoto } from "../impulse/unsplash-trigger.js";
 import { resolveOwnerScope, OWNER_CLI } from "../data/owner.js";
 import { extractUserFactsAsync, getUserFactsContext } from "../data/user-facts.js";
 import { getT1ArcContext } from "../data/t1-injection.js";
+import { stripMemoryDeflection } from "../persona/reply-guard.js";
 import {
   detectCrisis,
   crisisSafetyNote,
@@ -982,7 +983,13 @@ export async function processMessage(
   // M. AI 回复（近期消息已在 messages 里，避免 shortTerm 重复注入；只注入长期 RAG）
   const complexity = classifyComplexity(userInput);
   if (complexity !== "normal") logs.push(`[路由] ${complexity}(${userInput.length}字)`);
-  const rawReply = await chat(messages, persona, { ragContext, complexity });
+  let rawReply = await chat(messages, persona, { ragContext, complexity });
+  // 确定性兜底：prompt 已禁用「考我/记性没那么差」话术，模型偶尔仍会说 → 出站前删掉分句
+  const guarded = stripMemoryDeflection(rawReply);
+  if (guarded.changed) {
+    rawReply = guarded.text;
+    logs.push("[去AI味] 移除记忆防御话术");
+  }
   noteRepetitionIfAny(rawReply, recentReplies, (line) => logs.push(line));
 
   // N. 表达渲染
@@ -1426,6 +1433,7 @@ export async function* processMessageStream(
   let yieldedAny = false;
 
   const complexity = classifyComplexity(userInput);
+  let deflected = false;
 
   try {
     try {
@@ -1440,9 +1448,13 @@ export async function* processMessageStream(
         if (BREAKS.test(token)) {
           const frag = cleanFragment(buffer);
           if (frag) {
-            sentReply += frag;
-            yieldedAny = true;
-            yield { text: frag };
+            const safe = stripMemoryDeflection(frag);
+            if (safe.changed) deflected = true;
+            if (safe.text) {
+              sentReply += safe.text;
+              yieldedAny = true;
+              yield { text: safe.text };
+            }
           }
           buffer = "";
         }
@@ -1451,9 +1463,13 @@ export async function* processMessageStream(
       // 发送剩余内容
       const tail = cleanFragment(buffer);
       if (tail) {
-        sentReply += tail;
-        yieldedAny = true;
-        yield { text: tail };
+        const safe = stripMemoryDeflection(tail);
+        if (safe.changed) deflected = true;
+        if (safe.text) {
+          sentReply += safe.text;
+          yieldedAny = true;
+          yield { text: safe.text };
+        }
       }
     } catch (err) {
       // 流式失败：仅在尚未发送任何内容时降级为非流式，避免「半句 + 完整」重复发送
@@ -1464,9 +1480,12 @@ export async function* processMessageStream(
         for (const line of lines) {
           const frag = line.trim();
           if (!frag) continue;
-          sentReply += frag;
+          const safe = stripMemoryDeflection(frag);
+          if (safe.changed) deflected = true;
+          if (!safe.text) continue;
+          sentReply += safe.text;
           yieldedAny = true;
-          yield { text: frag };
+          yield { text: safe.text };
         }
       } else {
         console.log(
@@ -1474,6 +1493,8 @@ export async function* processMessageStream(
         );
       }
     }
+
+    if (deflected) console.log("  [去AI味] 移除记忆防御话术");
 
     // 后处理：QQ 表情
     const rendered = renderExpression(fullReply, {
@@ -1827,7 +1848,12 @@ export async function processProactive(
   const messages = buildChatMessages(session, fullSystem);
 
   // LLM 调用
-  const rawReply = await chat(messages, persona);
+  let rawReply = await chat(messages, persona);
+  const proactiveGuarded = stripMemoryDeflection(rawReply);
+  if (proactiveGuarded.changed) {
+    rawReply = proactiveGuarded.text;
+    logs.push("[去AI味] 移除记忆防御话术");
+  }
   noteRepetitionIfAny(rawReply, recentReplies, (line) => logs.push(line));
 
   // 表达渲染

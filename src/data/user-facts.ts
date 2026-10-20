@@ -375,17 +375,55 @@ function buildExtractPrompt(userInput: string, reply: string): string {
   return [
     "从下面这段聊天里，提取【对方（用户）】明确说过的、关于自己的稳定事实。",
     "规则：",
-    "- 只提取对方说的，不要提取角色说的话，也不要重复角色转述；",
+    "- **只从「用户说」里提取**；「角色回复」只用于理解上下文，绝对不能从角色的话里提取——",
+    "  不能把角色的城市/宠物/工作/生活当成用户的（例如角色说“我老家嘉兴”，不能说用户是嘉兴人）；",
     "- 只提取明确陈述（我叫X、我在X工作、我养了X、我在做X、我喜欢X），不要猜测、不要推断；",
+    "- **每个值必须能在用户原话里找到依据**，找不到就不提取；",
+    "- 保持细节：宠物要带名字/种类（团子、橘猫），工作要写具体职业/岗位/公司，地点写用户提到的城市；",
+    "- 不要用“上班族/打工人/员工”这种模糊词代替职业；不要把“上班/加班/累”推断成工作信息；",
+    "- 只提取稳定事实；一次性的情绪/闲聊（今天好累、在吗、晚上吃面）不要提取成偏好；",
     "- 一句话是一件事；value 用简短中文（≤30 字）；",
     "- key 用英文小写下划线，如 name/city/job/company/project/pet/preference/important_date/relationship/plan；",
     "- 如果没有可提取的事实，返回 {\"facts\":[]}。",
     "",
     `用户说：${userInput.slice(0, 500)}`,
-    `角色回复（仅参考，不要提取）：${reply.slice(0, 300)}`,
+    `角色回复（仅参考，禁止从中提取）：${reply.slice(0, 300)}`,
     "",
     '只输出 JSON：{"facts":[{"key":"name","value":"林哲","category":"profile"}]}',
   ].join("\n");
+}
+
+function normalizeFactText(text: string): string {
+  return (text ?? "").replace(/\s+/g, "").toLowerCase();
+}
+
+/**
+ * 事实「接地」校验：值必须能在用户原话里找到依据。
+ *
+ * 为什么需要：LLM 抽取偶尔会从**角色回复**里提取（例如角色说自己老家嘉兴 →
+ * 被记成用户的城市），或凭空推断（“上班族”“休息日瘫床”）。这是确定性兜底：
+ * 只要 value 的任意二字片段（中文 bigram）/英文数字 token 在用户原话里出现过，
+ * 就认为有依据；否则丢弃该条事实。
+ */
+export function isFactGroundedInUserText(value: string, userInput: string): boolean {
+  const v = normalizeFactText(value);
+  const u = normalizeFactText(userInput);
+  if (!v || !u) return false;
+  if (v.length === 1) return u.includes(v);
+  for (let i = 0; i < v.length - 1; i++) {
+    const bigram = v.slice(i, i + 2);
+    if (u.includes(bigram)) return true;
+  }
+  // 英文/数字 token（如 "coffee"、"2026"）
+  for (const token of v.match(/[a-z0-9]{2,}/g) ?? []) {
+    if (u.includes(token)) return true;
+  }
+  return false;
+}
+
+/** 过滤掉无法在用户原话中找到依据的事实（导出便于单测）。 */
+export function groundFacts<T extends { value: string }>(facts: T[], userInput: string): T[] {
+  return facts.filter((fact) => isFactGroundedInUserText(fact.value, userInput));
 }
 
 /** 后台抽取用户事实（fire-and-forget，不阻塞回复）。 */
@@ -426,7 +464,13 @@ export function extractUserFactsAsync(ownerId: string, userInput: string, reply:
         recordAuxUsage({ kind: "fact_extraction", model: modelConfig.model, startedAtMs }, resp.usage);
         const content = resp.choices[0]?.message?.content;
         if (!content) return;
-        const facts = parseFactsJson(content);
+        const parsed = parseFactsJson(content);
+        if (parsed.length === 0) return;
+        // 确定性兜底：丢弃无法在用户原话里找到依据的事实（防止从角色回复/推断里提取）
+        const facts = groundFacts(parsed, userInput);
+        if (facts.length < parsed.length) {
+          console.log(`[事实] 丢弃 ${parsed.length - facts.length} 条无依据事实（${ownerId}）`);
+        }
         if (facts.length > 0) {
           const written = upsertUserFacts(ownerId, facts);
           console.log(`[事实] 收到 ${written} 条用户事实（${ownerId}）`);

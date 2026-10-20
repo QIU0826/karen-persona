@@ -169,3 +169,38 @@ describe("事实超过 20 条的上限压测", () => {
     expect(selected).toHaveLength(2);
   });
 });
+
+describe("事实接地校验（防止从角色回复/推断里提取）", () => {
+  it("只在用户原话里有依据的事实通过", async () => {
+    const facts = await import("./user-facts.js");
+    const userText = "我叫林哲，在杭州做产品设计，养了只橘猫叫团子。";
+    expect(facts.isFactGroundedInUserText("林哲", userText)).toBe(true);
+    expect(facts.isFactGroundedInUserText("杭州", userText)).toBe(true);
+    expect(facts.isFactGroundedInUserText("产品设计", userText)).toBe(true);
+    expect(facts.isFactGroundedInUserText("团子", userText)).toBe(true);
+    expect(facts.isFactGroundedInUserText("养了一只猫", userText)).toBe(true); // 至少有「养了」
+  });
+
+  it("角色人设/推断出来的事实被判定为无依据", async () => {
+    const facts = await import("./user-facts.js");
+    const userText = "我叫林哲，在杭州做产品设计。";
+    // 嘉兴是角色老家人设，不是用户说的
+    expect(facts.isFactGroundedInUserText("嘉兴", userText)).toBe(false);
+    expect(facts.isFactGroundedInUserText("上班族", userText)).toBe(false);
+    expect(facts.isFactGroundedInUserText("休息日能在床上瘫一整天", userText)).toBe(false);
+  });
+
+  it("groundFacts 过滤掉无依据的条目", async () => {
+    const facts = await import("./user-facts.js");
+    const userText = "我下周三要去云南出差。";
+    const filtered = facts.groundFacts(
+      [
+        { key: "plan", value: "周三去云南" },
+        { key: "city", value: "嘉兴" },
+        { key: "pet", value: "养了一只猫" },
+      ],
+      userText,
+    );
+    expect(filtered.map((fact) => fact.key)).toEqual(["plan"]);
+  });
+});

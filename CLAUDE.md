@@ -40,7 +40,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
 | 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入已接线（双列，需 Qwen Key 实跑）；TTS/即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | ✅/🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF，FTS5 用 OR+BM25 IDF）→ DeepSeek 候选重排**（默认开启，非真向量；异常/超时降级）、sqlite-vec 启用、双列 embedding、schema v2/v3 幂等迁移、用户事实层、T1 状态弧、T3 压缩（40 条/隔天兜底 + `t3_compressed` 防重复）；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；**多用户隔离已实现**（owner=人设+用户+平台） |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 54 个测试文件 / 600 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入；**新增可复现记忆金标集**（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B 脚本（`src/eval/repetition-eval.ts`）；仍缺真实 QQ 集成测试与覆盖率；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 56 个测试文件 / 615 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入；**新增可复现记忆金标集**（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B 脚本（`src/eval/repetition-eval.ts`）；仍缺真实 QQ 集成测试与覆盖率；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -64,7 +64,7 @@ npm run setup      # 交互式配置向导
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + ubuntu/macOS/Windows 三平台矩阵 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 已收紧为 `>=22.12`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm test` 54 文件 / 600 用例通过（审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm test` 56 文件 / 615 用例通过（审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -99,6 +99,7 @@ npm run setup      # 交互式配置向导
 - **群聊贴纸/发图（2026-10-20）**：新增 `src/bridge/group-reply.ts` 出站计划（纯函数+单测）：群聊回复 = 文字气泡 → QQ 表情 →（可选）照片；群聊也接本地贴纸（收到表情更愿意回，按「群+人」5 分钟冷却）；生活照默认不发群，`group_photo_enabled: true` 才开（config.yaml 或 `GROUP_PHOTO=true`）；`processMessage` 新增 `skipPhoto` 开关，群聊默认跳过发图决策。测试 51 文件 / 582 用例。
 - **年龄门 18+ 确认（2026-10-20）**：新增 `src/data/consent.ts`（SQLite `user_consent`，按 owner 隔离）+ `src/persona/age-gate.ts`（确认/未成年识别、动作裁决、文案）；QQ 私聊首次对话发「披露 + 18+ 确认请求」，未确认前不进入角色对话（每 5 分钟最多提醒一次），回复「我成年了」后记录并放行；明确表示未成年的用户拒绝服务；群聊里未确认用户不回复；新增 `/age` 命令查看状态；`age_gate_enabled` 默认 true（CLI 开发者模式不强制）。测试 53 文件 / 596 用例。
 - **成本统计覆盖旁路 LLM（2026-10-20）**：新增 `src/ai/aux-usage.ts` 统一记账；事实抽取/内心独白（含深夜独白）/T3 摘要/herView/进化日志/叙事重构/视觉描述/配图搜索词全部写入 `llm_usage`（带 `kind`）；`/cost` 与 Web 控制台新增「按用途」拆分（对话/事实抽取/独白/长期摘要/图片识别…）。真实验证：一次事实抽取调用写入 kind=fact_extraction、prompt 234 / completion 63、¥0.000486。测试 54 文件 / 600 用例。
+- **30 轮真实长跑回归 + 修复（2026-10-20）**：新增 `src/eval/longrun-sim.ts`（30 轮混合场景：事实→闲聊→记忆→重复施压→新计划→再回忆）与报告 [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md)。首轮结果：记忆 6/6、复读对 0、错误/空回复 0、137 次调用 ¥0.0758；暴露并修复 3 个问题——①事实抽取把角色老家人设「嘉兴」记成用户城市、职业抽成「上班族」、丢宠物细节 → prompt 加固 + `isFactGroundedInUserText` 接地校验（修复后实测 city=杭州/job=产品设计/pet=橘猫叫团子）；②模型仍说「我记性没那么差」→ `reply-guard.ts` 确定性删分句（三管线接入）；③候选 <3 条仍调检索重排 → 跳过（省调用/延迟）。测试 56 文件 / 615 用例。
 - **问题记录**：真机联调问题与修复清单见 [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md)。
 
 ### 已知问题（M0 之后继续修）
@@ -175,6 +176,7 @@ npm run setup      # 交互式配置向导
 - [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md) — 真机联调问题与已批准修复清单
 - [docs/TECH_RADAR_AI.md](docs/TECH_RADAR_AI.md) — AI/记忆/RAG/评测技术雷达（换什么/不换什么）
 - [docs/TECH_RADAR_INFRA.md](docs/TECH_RADAR_INFRA.md) — IM/多模态/前端/基础设施技术雷达
+- [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md) — 30 轮真实模型长跑回归（记忆/事实/AI 味/延迟/成本）
 - [docs/MEMORY_AI_TONE_AUDIT.md](docs/MEMORY_AI_TONE_AUDIT.md) — 记忆与 AI 味专项审计（存储/上下文/压力测试/优化点）
 - [README.md](README.md) — 对外介绍、功能状态表、隐私与安全、已知限制
 - [QUICKSTART.md](QUICKSTART.md) — 5 分钟安装与故障排查

@@ -24,6 +24,8 @@ export const SEMANTIC_BOOST_TIMEOUT_ENV = "KAREN_SEMANTIC_BOOST_TIMEOUT_MS";
 export const DEFAULT_BOOST_TIMEOUT_MS = 2_500;
 /** 送进重排器的候选数（比最终注入的 8 条多留余量）。 */
 export const BOOST_POOL_SIZE = 12;
+/** 候选少于这个数时不值得重排（1-2 条怎么排都差不多，省一次调用/1s 延迟）。 */
+export const MIN_BOOST_POOL_SIZE = 3;
 
 export type BoostMode = "off" | "rerank";
 
@@ -136,7 +138,7 @@ export async function retrieveWithLlmBoost(
   const fallback = pool.slice(0, Math.max(1, limit));
 
   if (resolveBoostMode() === "off") return fallback;
-  if (pool.length <= 1 || userInput.trim().length < 2) return fallback;
+  if (pool.length < MIN_BOOST_POOL_SIZE || userInput.trim().length < 2) return fallback;
 
   const timeoutMs = resolveBoostTimeoutMs();
   const startedAt = Date.now();
