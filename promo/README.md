@@ -44,6 +44,7 @@
 | 03 主动性 | 傍晚发晚霞 / 忙时晚回 / 偶尔不回 三张时间线卡片 + 她手机相册横向滑轨 |
 | 04 记忆 | 「年糕今天是不是又把你键盘踩了？」示例 + 她记得的几件小事（含 `/forget` 说明） |
 | 05 隐私与自部署 | 本地存储 / 单机运行 / 可控 / 开源；明确写清「对话经模型 API，不是完全离线」 |
+| 后半页氛围背景 | 03–05 共用一条**跟随滚动**的角色氛围层：桌面是静音循环视频（进视口才播、离屏暂停），移动端/减少动态换成压暗的静态角色图（不下载视频），避免大段纯黑 |
 | Outro / 页脚 | 大 CTA「去和她打个招呼。」+ 免责声明 + 版本/许可/素材署名 |
 
 ## 设计取舍
@@ -71,7 +72,9 @@
 
 | 文件 | 来源 / 许可 |
 |---|---|
-| `assets/character-1.jpg`、`character-2.jpg`、`hero-left.mp4` | 作者提供的 AI 生成角色素材（已裁掉水印、视频去音轨）；`hero-left.mp4` 仅桌面首屏氛围播放 |
+| `assets/character-1.jpg`、`character-2.jpg`、`character-3.jpg` | 作者提供的 AI 生成角色素材（已裁掉右下角「豆包 AI 生成」水印；`character-3` 由最新一张裁切+缩放，1200×1926 / 约 224KB） |
+| `assets/hero-left.mp4` | 首屏氛围视频（桌面）；已去音轨、720×840、约 3.2MB，进视口才加载 |
+| `assets/ambient-loop.mp4` | 后半页（03–05）氛围背景：720×1280、6.1s、约 666KB，跟随滚动播放；移动端不加载 |
 | `assets/character.svg` | 早期占位插画，新页面未使用，仅保留 |
 | `assets/gallery/poster-1..3.svg` | 页面自带文案海报（纯 SVG） |
 | `assets/photos/*.jpg` | 从仓库 `assets/photos/` 复制，来源 Lorem Picsum → Unsplash License（可免费商用、无需署名） |
@@ -80,15 +83,25 @@
 素材已全部复制进 `promo/assets/`，因此把 `promo/` 目录单独部署也能正常显示。旧版的第二段首屏视频（`hero-right.mp4`，约 3.3MB）新页面已不再使用，为仓库减重已删除（git 历史里可找回）。
 首屏视频只在桌面 + 未开启减少动态 + 未开启省流量时加载（静帧兜底），移动端只加载静帧。
 
+后半页氛围层的策略：`preload="none"` + `IntersectionObserver` 播放/暂停；`@media (max-width:899px)` 与 `prefers-reduced-motion` 下直接隐藏视频元素、改用压暗的 `character-3.jpg` 作 CSS 背景，所以手机上不会因为这条视频多花流量。
+
 ## 截图（自检用）
 
-`screenshots/` 由本机 Chrome 无头模式生成（本机沙箱内含 `--no-sandbox`）：
+`screenshots/` 由 `promo/scripts/shoot.mjs` 生成（Chrome DevTools Protocol，零依赖）：
+
+> 为什么不用 `chrome --screenshot`：macOS 的 Chrome 无头模式**最小窗口宽 500px**，`--window-size=390,844` 实际按 500 布局再裁成 390，移动端截图右侧会被切掉（看起来像溢出，其实是截图方式的问题）。`shoot.mjs` 用 `Emulation.setDeviceMetricsOverride` 把视口真正设成 390。
 
 ```bash
-CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-"$CHROME" --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
-  --window-size=1440,900 --screenshot=promo/screenshots/hero.png \
-  "file://$PWD/promo/index.html?shot=top"
+export PATH="$PWD/.runtime/node22/bin:$PATH"
+node promo/scripts/shoot.mjs \
+  --url "file://$PWD/promo/index.html?shot=top" \
+  --width 1440 --height 900 --out promo/screenshots/hero.png
+
+# 移动端 / 整页
+node promo/scripts/shoot.mjs --url "file://$PWD/promo/index.html?shot=messages" \
+  --width 390 --height 844 --full --out promo/screenshots/mobile-messages.png
+node promo/scripts/shoot.mjs --url "file://$PWD/promo/index.html?longshot=1" \
+  --width 1440 --height 900 --full --out /tmp/full-desktop.png
 ```
 
 页面内置了两个截图/调试参数，避免截长页时受 `100svh` 影响：

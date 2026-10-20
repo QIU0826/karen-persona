@@ -107,6 +107,18 @@ button{font:inherit;color:inherit;background:none;border:none}
 .section-chat{background:linear-gradient(180deg,transparent,rgba(14,21,36,.6) 12%,rgba(14,21,36,.6) 88%,transparent)}
 .section-memory{background:linear-gradient(180deg,transparent,rgba(10,16,28,.5) 20%,rgba(10,16,28,.5) 80%,transparent)}
 
+/* ── 后半页氛围背景：一条视频跟着滚动，压暗后当纹理，不抢文字 ── */
+.ambient-scope{position:relative;isolation:isolate}
+.ambient-pin{position:sticky;top:0;height:100vh;height:100svh;margin-bottom:-100vh;margin-bottom:-100svh;z-index:-1;overflow:hidden;pointer-events:none}
+.ambient-video{width:100%;height:100%;object-fit:cover;opacity:.26;filter:saturate(.86) contrast(1.05);transform:scale(1.04)}
+.ambient-shade{position:absolute;inset:0;background:linear-gradient(180deg,#070a10 0%,rgba(7,10,16,.8) 14%,rgba(7,10,16,.6) 44%,rgba(7,10,16,.8) 84%,#070a10 100%)}
+.ambient-scope .section{border-top-color:rgba(255,255,255,.06)}
+/* 移动端 / 减少动态：不加载视频，用一张静态角色图压暗当背景，别留成纯黑 */
+@media (max-width:899px),(prefers-reduced-motion:reduce){
+  .ambient-pin{display:none!important}
+  .ambient-scope{background:linear-gradient(180deg,#070a10 0%,rgba(7,10,16,.88) 16%,rgba(7,10,16,.88) 84%,#070a10 100%),url("assets/character-3.jpg") center top/cover no-repeat}
+}
+
 /* ── 导航 ─────────────────────────────────────── */
 .nav{position:fixed;top:0;left:0;right:0;z-index:80;transition:background .35s ease,border-color .35s ease}
 .nav::after{content:"";position:absolute;inset:0;border-bottom:1px solid transparent;transition:border-color .35s ease}
@@ -741,6 +753,13 @@ button{font:inherit;color:inherit;background:none;border:none}
   </section>
 
   <!-- ── 03 主动 / 生活感 ─────────────────────────── -->
+  <div class="ambient-scope">
+    <div class="ambient-pin" aria-hidden="true">
+      <video class="ambient-video" muted loop playsinline preload="none"
+             poster="assets/character-3.jpg" src="assets/ambient-loop.mp4"></video>
+      <div class="ambient-shade"></div>
+    </div>
+
   <section class="section" id="proactive">
     <div class="wrap">
       <header class="sec-head reveal">
@@ -863,6 +882,8 @@ button{font:inherit;color:inherit;background:none;border:none}
   </section>
 
   <!-- ── Outro ───────────────────────────────────── -->
+  </div><!-- /.ambient-scope -->
+
   <section class="outro" id="start">
     <div class="outro-glow" aria-hidden="true"></div>
     <div class="wrap outro-inner reveal">
@@ -956,6 +977,38 @@ button{font:inherit;color:inherit;background:none;border:none}
     }, { once: true });
     video.load();
   }
+
+
+  // 后半页氛围视频：进视口才播、离开暂停；移动端/减少动态由 CSS 隐藏，不产生流量
+  (function () {
+    var scope = document.querySelector(".ambient-scope");
+    if (!scope) return;
+    var video = scope.querySelector(".ambient-video");
+    if (!video) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia("(max-width: 899px)").matches) return;
+
+    var play = function () {
+      var p = video.play();
+      if (p && p.catch) p.catch(function () {});
+    };
+
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) {
+          if (entries[i].isIntersecting) play();
+          else video.pause();
+        }
+      }, { rootMargin: "300px 0px" }).observe(scope);
+    } else {
+      play();
+    }
+
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) video.pause();
+      else play();
+    });
+  })();
 
   // 长图截图工具：把页面真实高度写进标题，便于用 --dump-dom 取值
   if (longshot) {
