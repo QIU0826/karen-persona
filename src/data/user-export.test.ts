@@ -51,8 +51,10 @@ describe("exportUserData", () => {
     expect(payload.session.messages).toHaveLength(2);
     expect(payload.t2Episodes).toHaveLength(1);
     expect(payload.personaId).toBe("xiaoya");
-    // 导出文件应仅本人可读
-    const mode = fs.statSync(result.path).mode & 0o777;
-    expect(mode).toBe(0o600);
+    // 导出文件应仅本人可读（Windows 不支持 POSIX 权限位，跳过该断言）
+    if (process.platform !== "win32") {
+      const mode = fs.statSync(result.path).mode & 0o777;
+      expect(mode).toBe(0o600);
+    }
   });
 });
