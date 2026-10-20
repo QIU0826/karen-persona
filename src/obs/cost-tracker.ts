@@ -50,6 +50,7 @@ export type LlmUsageKind =
   | "vision"
   | "photo_query"
   | "daily_digest"
+  | "initiative_plan"
   | "memory_eval"
   | "other";
 

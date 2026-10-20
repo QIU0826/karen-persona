@@ -127,6 +127,20 @@ export function ensureMemoryV2Schema(db: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_sticker_owner
       ON sticker_library(owner_id, last_used_at, use_count);
+    CREATE TABLE IF NOT EXISTS initiative_plans (
+      persona_id TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      plan_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (persona_id, owner_id, day)
+    );
+    CREATE TABLE IF NOT EXISTS initiative_stats (
+      owner_id TEXT NOT NULL,
+      sent_at INTEGER NOT NULL,
+      replied INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (owner_id, sent_at)
+    );
     CREATE TABLE IF NOT EXISTS getting_to_know (
       owner_id TEXT NOT NULL,
       topic TEXT NOT NULL,
@@ -508,5 +522,92 @@ export function markTopicAsked(db: Database, ownerId: string, topic: string, now
     ).run(ownerId, topic, now);
   } catch {
     // 忽略
+  }
+}
+
+// ── 意图式主动性：计划与统计（v0.8）─────────────
+
+export interface InitiativePlanRow {
+  persona_id: string;
+  owner_id: string;
+  day: string;
+  plan_json: string;
+  created_at: number;
+}
+
+/** 读某天的主动计划（没有返回 null）。 */
+export function getInitiativePlan(
+  db: Database,
+  personaId: string,
+  ownerId: string,
+  day: string,
+): InitiativePlanRow | null {
+  try {
+    const row = db
+      .prepare(
+        `SELECT * FROM initiative_plans WHERE persona_id = ? AND owner_id = ? AND day = ?`,
+      )
+      .get(personaId, ownerId, day) as InitiativePlanRow | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 写/覆盖某天的主动计划。 */
+export function saveInitiativePlan(
+  db: Database,
+  input: { personaId: string; ownerId: string; day: string; planJson: string; now?: number },
+): void {
+  try {
+    db.prepare(
+      `INSERT INTO initiative_plans (persona_id, owner_id, day, plan_json, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(persona_id, owner_id, day) DO UPDATE SET
+         plan_json = excluded.plan_json, created_at = excluded.created_at`,
+    ).run(input.personaId, input.ownerId, input.day, input.planJson, input.now ?? Date.now());
+  } catch {
+    // 忽略
+  }
+}
+
+/** 记一次主动发送（供频率校准）。 */
+export function recordInitiativeSent(db: Database, ownerId: string, now = Date.now()): void {
+  try {
+    db.prepare(
+      `INSERT INTO initiative_stats (owner_id, sent_at, replied) VALUES (?, ?, 0)`,
+    ).run(ownerId, now);
+  } catch {
+    // 忽略
+  }
+}
+
+/**
+ * 他回了主动消息：把最近一次「还没被回」的主动标记为已回。
+ * 简化语义：只要他在这条主动之后说过话，就算回了。
+ */
+export function markInitiativeReplied(db: Database, ownerId: string, now = Date.now()): void {
+  try {
+    db.prepare(
+      `UPDATE initiative_stats SET replied = 1
+       WHERE owner_id = ? AND replied = 0 AND sent_at < ?`,
+    ).run(ownerId, now);
+  } catch {
+    // 忽略
+  }
+}
+
+/** 最近 N 次主动里他回了几次（频率校准用）。 */
+export function recentInitiativeReplyCount(db: Database, ownerId: string, limit = 10): number {
+  try {
+    const rows = db
+      .prepare(
+        `SELECT replied FROM initiative_stats WHERE owner_id = ?
+         ORDER BY sent_at DESC LIMIT ?`,
+      )
+      .all(ownerId, Math.max(1, limit)) as Array<{ replied: number }>;
+    return rows.filter((r) => r.replied === 1).length;
+  } catch {
+    return 0;
   }
 }

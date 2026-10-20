@@ -26,7 +26,11 @@ export interface RelationshipMilestone {
   closeness: number;
 }
 
+import { createRelationshipDims, type RelationshipDims } from "./relationship-dims.js";
+
 export interface RelationshipState {
+  /** v0.8：五维关系（亲密/信任/张力/互惠/依赖）；老状态缺省时按 closeness 生成 */
+  dims?: RelationshipDims;
   /** 当前亲密度 0-10，保留 2 位小数 */
   closeness: number;
   /** 最近的事件（最多保留 200 条） */
@@ -67,6 +71,7 @@ export function createRelationshipState(initialCloseness: number): RelationshipS
   const closeness = clamp(initialCloseness);
   return {
     closeness,
+    dims: createRelationshipDims(closeness),
     events: [],
     milestones: [],
     lastEvaluatedAt: 0,

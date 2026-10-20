@@ -14,6 +14,13 @@ import {
 import { buildAboutText } from "../persona/disclosure.js";
 import { getConsent } from "../data/consent.js";
 import {
+  createRelationshipDims,
+  derivePhase,
+  describeDims,
+  behaviorNote,
+  PHASE_LABELS,
+} from "../persona/relationship-dims.js";
+import {
   confirmFact,
   listUserFacts,
   rejectFact,
@@ -118,6 +125,32 @@ export function buildFactListText(facts: UserFact[]): string {
   ].join("\n");
 }
 
+/** /relations：五维关系现状（亲密/信任/互惠/依赖/张力）+ 阶段 + 行为倾向。 */
+export function buildRelationsText(state: ConversationState): string {
+  const dims = state.relationshipState.dims ?? createRelationshipDims(state.relationshipState.closeness);
+  const recentConflict =
+    state.relationshipState.lastConflictAt !== null &&
+    Date.now() - (state.relationshipState.lastConflictAt ?? 0) < 24 * 3600_000;
+  const phase = derivePhase(dims, {
+    interactionStreak: state.relationshipState.interactionStreak,
+    recentConflict,
+  });
+  const lines = [
+    `【关系现状】${PHASE_LABELS[phase]}`,
+    describeDims(dims),
+    "",
+    `亲密度：${state.relationshipState.closeness.toFixed(2)}/10（原有的门控仍按这个值）`,
+    `连续互动：${state.relationshipState.interactionStreak} 天`,
+  ];
+  const note = behaviorNote(dims, phase);
+  if (note) lines.push("", `她现在的状态：${note}`);
+  if (dims.tension >= 3) {
+    lines.push("", "张力偏高时会自然冷一点；道歉/把话说开能降下来。");
+  }
+  lines.push("", "提示：五维描述「关系怎么走」，不直接控制回复；亲密度仍决定发图/语音等门槛。");
+  return lines.join("\n");
+}
+
 export function buildPauseText(paused: boolean): string {
   return paused
     ? "已暂停主动消息（她不会突然找你，但你发消息她仍会回）。发送 /resume 恢复。"
@@ -134,6 +167,7 @@ export function buildHelpText(): string {
     "/resume: 恢复主动消息",
     "/export: 导出你们的对话与记忆备份（JSON）",
     "/about: AI 披露、数据去向、年龄与安全说明",
+    "/relations: 五维关系现状（亲密/信任/互惠/依赖/张力）",
     "/fact: 查看她记得的关于你的事（可确认/否掉）",
     "/age: 查看年龄确认状态",
     "/help: 这条帮助",
@@ -272,6 +306,9 @@ export async function handleControlCommand(
       }
       return true;
     }
+    case "relations":
+      deps.reply(buildRelationsText(state));
+      return true;
     case "fact": {
       const owner = state.owner;
       const [action, key] = (cmd.arg ?? "").split(/\s+/).filter(Boolean);

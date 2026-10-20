@@ -2,6 +2,11 @@ import Database from "better-sqlite3";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   addAnchor,
+  getInitiativePlan,
+  markInitiativeReplied,
+  recentInitiativeReplyCount,
+  recordInitiativeSent,
+  saveInitiativePlan,
   buildAnchorInjection,
   buildDailyInjection,
   ensureMemoryV2Schema,
@@ -186,6 +191,26 @@ describe("日记忆与调度记录", () => {
     expect(recent[0].day).toBe("2026-10-20");
     const text = buildDailyInjection(recent);
     expect(text.indexOf("2026-10-19")).toBeLessThan(text.indexOf("2026-10-20"));
+  });
+
+  it("主动计划：按天存/取/覆盖，不同 owner 隔离", () => {
+    saveInitiativePlan(db, { personaId: PERSONA, ownerId: OWNER, day: "2026-10-20", planJson: '{"items":[]}' });
+    expect(getInitiativePlan(db, PERSONA, OWNER, "2026-10-20")?.plan_json).toContain("items");
+    expect(getInitiativePlan(db, PERSONA, "qq:9", "2026-10-20")).toBeNull();
+    saveInitiativePlan(db, { personaId: PERSONA, ownerId: OWNER, day: "2026-10-20", planJson: '{"items":[1]}' });
+    expect(getInitiativePlan(db, PERSONA, OWNER, "2026-10-20")?.plan_json).toContain("[1]");
+  });
+
+  it("主动统计：发送计数与「他回了」标记只作用于之前的记录", () => {
+    recordInitiativeSent(db, OWNER, 1000);
+    recordInitiativeSent(db, OWNER, 2000);
+    expect(recentInitiativeReplyCount(db, OWNER)).toBe(0);
+    markInitiativeReplied(db, OWNER, 1500);
+    expect(recentInitiativeReplyCount(db, OWNER)).toBe(1);
+    // 1500 之后的（2000）仍然未回
+    markInitiativeReplied(db, OWNER, 2001);
+    expect(recentInitiativeReplyCount(db, OWNER)).toBe(2);
+    expect(recentInitiativeReplyCount(db, "qq:other")).toBe(0);
   });
 
   it("任务记录幂等（同 job+period 只算跑过）", () => {

@@ -19,6 +19,7 @@ import { createSilenceState, type SilenceState } from "../impulse/silence-arc.js
 import type { CausalChain } from "../evolution/causal-chain.js";
 import { createNarrativeArc, type NarrativeArc } from "../evolution/narrative-reconstruct.js";
 import { createRelationshipState, type RelationshipState } from "../persona/relationship.js";
+import { createRelationshipDims } from "../persona/relationship-dims.js";
 import type { WeatherInfo } from "../world/weather.js";
 
 /** 当前持久化 schema 版本 */
@@ -173,6 +174,11 @@ function normalize(raw: unknown, personaId: string, initialCloseness: number): P
     ...createRelationshipState(closeness),
     ...(relationshipRaw as Partial<RelationshipState>),
     closeness,
+    // v0.8：老状态没有五维 → 按当前亲密度补一个起点（之后随事件演化）
+    dims:
+      isRecord(relationshipRaw.dims) && typeof (relationshipRaw.dims as { intimacy?: unknown }).intimacy === "number"
+        ? (relationshipRaw.dims as unknown as RelationshipState["dims"])
+        : createRelationshipDims(closeness),
     events: Array.isArray(relationshipRaw.events) ? (relationshipRaw.events as RelationshipState["events"]).slice(-200) : [],
     milestones: Array.isArray(relationshipRaw.milestones)
       ? (relationshipRaw.milestones as RelationshipState["milestones"]).slice(-50)

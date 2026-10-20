@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildFactListText,
+  buildRelationsText,
   buildHelpText,
   buildWhyText,
   handleControlCommand,
@@ -138,5 +139,44 @@ describe("/fact：她记得的关于你的事", () => {
     const deps = { reply: vi.fn(), persist: vi.fn(), exportData: vi.fn() };
     expect(await handleControlCommand("/fact ok", state, deps)).toBe(true);
     expect(deps.reply.mock.calls[0][0]).toContain("用法");
+  });
+});
+
+describe("/relations：五维关系", () => {
+  it("展示阶段、五维与可读描述", () => {
+    const state = makeState({
+      relationshipState: {
+        closeness: 6.2,
+        interactionStreak: 9,
+        lastConflictAt: null,
+        dims: { intimacy: 6, trust: 5.5, tension: 0.5, reciprocity: 5, dependency: 4, updatedAt: 1 },
+      },
+    }) as never;
+    const text = buildRelationsText(state);
+    expect(text).toContain("关系现状");
+    expect(text).toContain("亲密 6.0");
+    expect(text).toContain("信任 5.5");
+    expect(text).toContain("亲密度：6.20/10");
+  });
+
+  it("张力高时给出「自然会冷一点」的说明", () => {
+    const state = makeState({
+      relationshipState: {
+        closeness: 5,
+        interactionStreak: 3,
+        lastConflictAt: null,
+        dims: { intimacy: 5, trust: 4, tension: 6.5, reciprocity: 4, dependency: 3, updatedAt: 1 },
+      },
+    }) as never;
+    const text = buildRelationsText(state);
+    expect(text).toContain("别扭");
+    expect(text).toContain("冷一点");
+  });
+
+  it("老状态没有 dims 时按亲密度兜底，不报错", () => {
+    const state = makeState({
+      relationshipState: { closeness: 3, interactionStreak: 1, lastConflictAt: null },
+    }) as never;
+    expect(buildRelationsText(state)).toContain("亲密度：3.00/10");
   });
 });

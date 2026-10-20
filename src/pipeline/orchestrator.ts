@@ -20,8 +20,33 @@ import {
   touchAnchors,
 } from "../data/memory-v2.js";
 import { buildMemoryContext } from "./memory-context.js";
-import { computeDueJobs, runDailyDigest, runWeeklyRollup } from "../schedule/jobs.js";
+import { computeDueJobs, localDayKey, runDailyDigest, runWeeklyRollup } from "../schedule/jobs.js";
+import { deserializePlan, generateDailyPlanWithLLM, serializePlan } from "../schedule/initiative-llm.js";
+import {
+  buildDailyPlanPrompt,
+  calibratedDailyCap,
+  markInitiativeUsed,
+  parseDailyPlan,
+  pickDueInitiative,
+  type DailyInitiativePlan,
+} from "../impulse/initiative-plan.js";
+import {
+  getInitiativePlan,
+  markInitiativeReplied,
+  recentInitiativeReplyCount,
+  recordInitiativeSent,
+  saveInitiativePlan,
+} from "../data/memory-v2.js";
 import { buildGetToKnowNote, pickGetToKnowAsk } from "../persona/get-to-know.js";
+import {
+  applyDimEvent,
+  behaviorNote,
+  createRelationshipDims,
+  derivePhase,
+  describeDims,
+  PHASE_LABELS,
+  type DimEventKind,
+} from "../persona/relationship-dims.js";
 import { listAskedTopics, markTopicAsked } from "../data/memory-v2.js";
 import { summarizeDayWithLLM } from "../schedule/digest-llm.js";
 import { generateEmbedding } from "../data/embedding.js";
@@ -767,6 +792,30 @@ export function updateRelationshipAfterTurn(
     messages.push(
       `[关系] ${evaluation.reason}：亲密度 ${before.toFixed(2)} → ${after.toFixed(2)}（${closenessLabel(after)}）`,
     );
+    // v0.8：五维关系随事件演化（冲突顶张力、道歉修复、深聊加信任/亲密）
+    try {
+      const dims = state.relationshipState.dims ?? createRelationshipDims(before);
+      const dimEvent: DimEventKind | null = evaluation.conflict
+        ? "conflict"
+        : evaluation.repair
+          ? "apology"
+          : evaluation.delta >= 0.1
+            ? "deep_talk"
+            : evaluation.delta > 0
+              ? "care"
+              : null;
+      if (dimEvent) {
+        const next = applyDimEvent(dims, dimEvent, {
+          now: now.getTime(),
+          intensity: Math.min(2, 0.6 + Math.abs(evaluation.delta) * 6),
+        });
+        state.relationshipState.dims = next;
+        messages.push(`[关系] 五维：${describeDims(next)}`);
+      }
+    } catch {
+      // 五维失败不影响主流程
+    }
+
     if (state.relationshipState.milestones.length > beforeMilestones) {
       const milestone = state.relationshipState.milestones[state.relationshipState.milestones.length - 1];
       messages.push(`[关系] 里程碑：${milestone.title}`);
@@ -824,6 +873,28 @@ function buildGetToKnowInjection(state: ConversationState): string {
  * 与既有说法冲突的事实 → 让她自然确认一句。
  * 同一条事实 2 天内只问一次（markFactsChallenged），避免变成审问。
  */
+// ── 五维关系注入（v0.8）─────────────────────
+
+/** 把「关系现状」压成一句话注入 prompt：阶段 + 行为倾向。 */
+function buildRelationshipDimsInjection(state: ConversationState): string {
+  try {
+    const dims =
+      state.relationshipState.dims ??
+      createRelationshipDims(state.relationshipState.closeness);
+    const phase = derivePhase(dims, {
+      interactionStreak: state.relationshipState.interactionStreak,
+      recentConflict:
+        state.relationshipState.lastConflictAt !== null &&
+        Date.now() - (state.relationshipState.lastConflictAt ?? 0) < 24 * 3600_000,
+    });
+    const note = behaviorNote(dims, phase);
+    if (!note) return "";
+    return `\n「关系」${PHASE_LABELS[phase]}：${note}\n`;
+  } catch {
+    return "";
+  }
+}
+
 function buildFactConflictInjection(state: ConversationState): string {
   try {
     const conflicts = getFactsNeedingConfirmation(state.owner);
@@ -899,6 +970,85 @@ function maybeRecordAnchor(state: ConversationState, userInput: string, reply: s
   }
 }
 
+// ── 意图式主动性（v0.8）─────────────────────
+
+/** 每天几点后可以生成"今天想找他聊什么"的计划 */
+const INITIATIVE_PLAN_HOUR = 7;
+
+/**
+ * 确保今天有主动计划（没有就调一次 LLM 生成，失败下次心跳再试）。
+ * 计划只存库，不直接发消息——发不发由 processProactive 按时间窗/上限/校准决定。
+ */
+export async function ensureDailyInitiativePlan(state: ConversationState): Promise<void> {
+  if (process.env.KAREN_INITIATIVE === "off") return;
+  try {
+    const db = getVectorDb();
+    const day = localDayKey(Date.now());
+    if (new Date().getHours() < INITIATIVE_PLAN_HOUR) return;
+    if (getInitiativePlan(db, state.storagePersona, state.owner, day)) return;
+
+    const digests = listRecentDigests(db, state.storagePersona, state.owner, 3);
+    const prompt = buildDailyPlanPrompt({
+      herName: state.persona.name,
+      userName: state.config.your_name,
+      day,
+      closeness: state.relationshipState.closeness,
+      recentDigests: digests.map((d) => `${d.day}：${d.summary}`),
+      openThreads: digests
+        .map((d) => {
+          try {
+            return (JSON.parse(d.open_threads_json ?? "[]") as string[]).join("；");
+          } catch {
+            return "";
+          }
+        })
+        .filter(Boolean)
+        .slice(0, 3),
+    });
+    const raw = await generateDailyPlanWithLLM(prompt);
+    if (!raw) return;
+    const plan = parseDailyPlan(raw, day);
+    if (!plan) return;
+    saveInitiativePlan(db, {
+      personaId: state.storagePersona,
+      ownerId: state.owner,
+      day,
+      planJson: serializePlan(plan),
+    });
+    console.log(`  [主动计划] ${day} 生成 ${plan.items.length} 条由头`);
+  } catch {
+    // 计划失败不影响对话
+  }
+}
+
+/** 读今天的计划（没有返回 null）。 */
+function loadTodayPlan(state: ConversationState): DailyInitiativePlan | null {
+  if (process.env.KAREN_INITIATIVE === "off") return null;
+  try {
+    const db = getVectorDb();
+    const row = getInitiativePlan(db, state.storagePersona, state.owner, localDayKey(Date.now()));
+    return row ? deserializePlan(row.plan_json) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 按最近的回复率算今天最多主动几条。 */
+function currentDailyCap(state: ConversationState): number {
+  try {
+    const db = getVectorDb();
+    const replies = recentInitiativeReplyCount(db, state.owner, 10);
+    const { cap } = calibratedDailyCap({
+      repliesToInitiative: replies,
+      hisInitiatives: state.relationshipState.interactionStreak > 0 ? 4 : 1,
+      closeness: state.relationshipState.closeness,
+    });
+    return cap;
+  } catch {
+    return 2;
+  }
+}
+
 /**
  * 到期的记忆任务（日记忆 / 周汇总）。
  *
@@ -909,6 +1059,9 @@ export async function runMemoryJobsIfDue(state: ConversationState): Promise<void
   if (process.env.KAREN_MEMORY_V2 === "off") return;
   try {
     const db = getVectorDb();
+    // v0.8：今天的主动计划（没有就生成一次）
+    await ensureDailyInitiativePlan(state);
+
     const due = computeDueJobs({
       db,
       personaId: state.storagePersona,
@@ -999,6 +1152,13 @@ export async function processMessage(
 
   // 多用户隔离：每轮显式切回本 state 的存储 persona（防止多用户交替时串记忆）
   setCurrentPersona(state.storagePersona);
+
+  // v0.8：他说话了 → 把最近一次还没被回的主动标记为已回（频率校准用）
+  try {
+    markInitiativeReplied(getVectorDb(), state.owner, Date.now());
+  } catch {
+    // 统计失败不影响对话
+  }
 
   // A0. 天气定时刷新（30 分钟 TTL）
   await refreshWeatherIfStale(state);
@@ -1237,6 +1397,7 @@ export async function processMessage(
     crisisNote +
     t1ArcContext +
     factsContext +
+    buildRelationshipDimsInjection(state) +
     buildFactConflictInjection(state) +
     buildGetToKnowInjection(state) +
     buildMemoryInjection(state) +
@@ -1512,6 +1673,13 @@ export async function* processMessageStream(
   // 多用户隔离：每轮显式切回本 state 的存储 persona（防止多用户交替时串记忆）
   setCurrentPersona(state.storagePersona);
 
+  // v0.8：他说话了 → 把最近一次还没被回的主动标记为已回（频率校准用）
+  try {
+    markInitiativeReplied(getVectorDb(), state.owner, Date.now());
+  } catch {
+    // 统计失败不影响对话
+  }
+
   // 安全兜底：危机信号（不是情感识别，是安全优先）
   const crisis = detectCrisis(userInput);
   if (crisis) console.log("[安全] 检测到危机信号：本轮强制回复并附加专业求助资源");
@@ -1718,6 +1886,7 @@ export async function* processMessageStream(
     (crisis ? crisisSafetyNote() : "") +
     t1ArcContext +
     factsContext +
+    buildRelationshipDimsInjection(state) +
     buildFactConflictInjection(state) +
     buildGetToKnowInjection(state) +
     buildMemoryInjection(state) +
@@ -2184,6 +2353,42 @@ export async function processProactive(
     });
   }
 
+  // 1e. v0.8：今天的「主动计划」里到点的由头（时间窗/上限/校准都由纯函数判定）
+  let planItem: { topic: string; kind: string } | null = null;
+  try {
+    const plan = loadTodayPlan(state);
+    if (plan) {
+      const lastUserAt = [...session.messages].reverse().find((m) => m.role === "user")?.timestamp;
+      const decision = pickDueInitiative(plan, {
+        hour,
+        closeness: state.relationshipState.closeness,
+        sentToday: state.proactiveCountToday,
+        dailyCap: currentDailyCap(state),
+        minutesSinceLast: state.lastProactiveSentAt
+          ? Math.max(0, (now.getTime() - state.lastProactiveSentAt) / 60000)
+          : null,
+        minGapMinutes: 30,
+        quietHours: { start: config.quiet_hours_start, end: config.quiet_hours_end },
+        userRecentlyReplied:
+          lastUserAt !== undefined && now.getTime() - lastUserAt < 10 * 60 * 1000,
+      });
+      if (decision.action === "send") {
+        planItem = { topic: decision.item.topic, kind: decision.item.kind };
+        candidates.push({
+          source: "主动计划",
+          description: `你想跟他说这件事：${decision.item.topic}`,
+          intensity: 0.35 + decision.item.urgency * 0.4,
+          priority: 10, // 明确想说的由头优先于随机生活流
+        });
+        logs.push(`[主动计划] 到点由头：${decision.item.topic}`);
+      } else if (decision.reason !== "no_plan") {
+        logs.push(`[主动计划] 本轮不发：${decision.reason}`);
+      }
+    }
+  } catch {
+    // 计划异常不影响主动消息
+  }
+
   // ── 2. 四条链路决策（v0.4.0：补话 / 沉默保温 / 生活流 / 冷场开话题）───
   // 沉默保温由决策模块按沉默时长判定，不再只看阶段 4。
   const lifeTop = candidates.length > 0
@@ -2380,6 +2585,23 @@ export async function processProactive(
   state.lastProactiveSentAt = now.getTime();
   state.proactiveCountToday += 1;
   window.sentSinceUserReply += 1;
+  // v0.8：计划的由头用完标记（当天不再重复）+ 记一条主动统计（供回复率校准）
+  try {
+    if (planItem) {
+      const plan = loadTodayPlan(state);
+      if (plan) {
+        saveInitiativePlan(getVectorDb(), {
+          personaId: state.storagePersona,
+          ownerId: state.owner,
+          day: localDayKey(now.getTime()),
+          planJson: serializePlan(markInitiativeUsed(plan, planItem.topic)),
+        });
+      }
+    }
+    recordInitiativeSent(getVectorDb(), state.owner, now.getTime());
+  } catch {
+    // 统计失败不影响已发送的消息
+  }
   persistRuntimeState(state);
 
   logs.push(`[主动] 已发送: ${previewText(reply)}`);
