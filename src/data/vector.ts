@@ -275,10 +275,11 @@ function ftsDelete(database: Database.Database, id: number): void {
 export function searchEpisodesByFts(
   queryText: string,
   limit: number = 10,
-  opts?: { excludeSources?: string[] }
+  opts?: { excludeSources?: string[]; personaId?: string }
 ): Array<{ id: number; bm25: number }> {
   const d = getVectorDb();
   if (!ftsAvailable) return [];
+  const personaId = opts?.personaId ?? getCurrentPersona();
 
   const tokens = [...new Set(tokenizeForFts(queryText).split(" ").filter(Boolean))].slice(0, 48);
   if (tokens.length === 0) return [];
@@ -303,7 +304,7 @@ export function searchEpisodesByFts(
          ORDER BY bm25 ASC
          LIMIT ?`
       )
-      .all(matchExpr, getCurrentPersona(), ...excludeSources, limit) as Array<{
+      .all(matchExpr, personaId, ...excludeSources, limit) as Array<{
       id: number;
       bm25: number;
     }>;
@@ -457,12 +458,13 @@ export function searchSemanticEpisodes(
   queryEmbedding: Float32Array,
   k: number = 10,
   model: string = "",
-  opts?: { excludeSources?: string[] }
+  opts?: { excludeSources?: string[]; personaId?: string }
 ): Array<{ id: number; similarity: number }> {
   const d = getVectorDb();
   if (!model) return [];
   const excludeSources = opts?.excludeSources ?? [];
   const excludeSet = new Set(excludeSources);
+  const personaId = opts?.personaId ?? getCurrentPersona();
 
   // 1) sqlite-vec KNN（metadata 过滤 persona/model；source 在 JS 里过滤，k 放大补偿）
   if (vecAvailable) {
@@ -475,7 +477,7 @@ export function searchSemanticEpisodes(
            WHERE embedding MATCH ? AND k = ? AND persona_id = ? AND embedding_model = ?
            ORDER BY distance`
         )
-        .all(toVecBuffer(queryEmbedding), fetchK, getCurrentPersona(), model) as Array<{
+        .all(toVecBuffer(queryEmbedding), fetchK, personaId, model) as Array<{
         id: number;
         source: string;
         distance: number;
@@ -505,7 +507,7 @@ export function searchSemanticEpisodes(
          AND semantic_embedding IS NOT NULL
          ${excludeClause}`
     )
-    .all(getCurrentPersona(), model, ...excludeSources) as Array<{
+    .all(personaId, model, ...excludeSources) as Array<{
     id: number;
     semantic_embedding: string;
   }>;
@@ -864,10 +866,12 @@ export function updateEpisodeSemanticEmbedding(
 export function searchSimilarEpisodes(
   queryEmbedding: Float32Array,
   k: number = 10,
-  opts?: { excludeSources?: string[] }
+  opts?: { excludeSources?: string[]; personaId?: string }
 ): Array<{ id: number; similarity: number }> {
   const d = getVectorDb();
   const excludeSources = opts?.excludeSources ?? [];
+  // 显式 personaId 供 Web 控制台等“非当前会话”场景只读检索；默认仍用当前人设
+  const personaId = opts?.personaId ?? getCurrentPersona();
   const excludeClause =
     excludeSources.length > 0
       ? ` AND source NOT IN (${excludeSources.map(() => "?").join(", ")})`
@@ -879,7 +883,7 @@ export function searchSimilarEpisodes(
        AND embedding IS NOT NULL
        AND COALESCE(embedding_model, ?) = ?
        ${excludeClause}`
-  ).all(getCurrentPersona(), NGRAM_EMBEDDING_MODEL, NGRAM_EMBEDDING_MODEL, ...excludeSources) as Array<{ id: number; embedding: string }>;
+  ).all(personaId, NGRAM_EMBEDDING_MODEL, NGRAM_EMBEDDING_MODEL, ...excludeSources) as Array<{ id: number; embedding: string }>;
 
   if (rows.length === 0) return [];
 

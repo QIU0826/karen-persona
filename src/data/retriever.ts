@@ -184,19 +184,21 @@ function fuseHybrid(
  */
 export function retrieveRelevantMemories(
   userMessage: string,
-  limit: number = 5
+  limit: number = 5,
+  opts?: { personaId?: string }
 ): RetrievedMemory[] {
   const fetchK = Math.max(limit * CANDIDATE_MULTIPLIER, MIN_CANDIDATES);
   const queryEmbedding = generateEmbedding(userMessage);
+  // 显式 personaId 供 Web 控制台等“非当前会话”场景只读检索；默认仍用当前人设
+  const personaOpts = {
+    excludeSources: RAG_EXCLUDED_SOURCES,
+    ...(opts?.personaId ? { personaId: opts.personaId } : {}),
+  };
 
   // 向量路：legacy n-gram 空间（只与 ngram-v1 向量比较）
-  const vectorCandidates = searchSimilarEpisodes(queryEmbedding, fetchK, {
-    excludeSources: RAG_EXCLUDED_SOURCES,
-  });
+  const vectorCandidates = searchSimilarEpisodes(queryEmbedding, fetchK, personaOpts);
   // 关键词路：FTS5 BM25（中文 2 字词可命中）
-  const ftsCandidates = searchEpisodesByFts(userMessage, fetchK, {
-    excludeSources: RAG_EXCLUDED_SOURCES,
-  });
+  const ftsCandidates = searchEpisodesByFts(userMessage, fetchK, personaOpts);
 
   return fuseHybrid(vectorCandidates, ftsCandidates, limit, MIN_NGRAM_SIMILARITY);
 }

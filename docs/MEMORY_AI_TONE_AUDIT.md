@@ -160,7 +160,7 @@
 | `src/impulse/renderer.ts` | burst 分条去尾部软标点；压缩连续空行 |
 | `src/impulse/photo-library.ts`（上一轮） | 照片时间关系模型（今天/昨天/以前 + 亲密度门槛） |
 
-验证：`tsc` 0 错误；**46 文件 / 539 用例全绿**（2026-10-20 记忆评测 + 反重复 + Web 面板后）。
+验证：`tsc` 0 错误；**46 文件 / 540 用例全绿**（2026-10-20 记忆评测 + 反重复 + Web 面板后）。
 记忆评测：`docs/MEMORY_EVAL_REPORT.md`（20 条金标集；修复 FTS 后 T2 recall@8 85%、facts 100%）。
 
 ---

@@ -465,7 +465,8 @@ export function getMemoryHitProbe(
   let memories: RetrievedMemory[] = [];
   if (text) {
     try {
-      memories = retrieveRelevantMemories(text, safeLimit);
+      // 显式传入控制台展示的人设：避免桥接进程当前活跃人设为空（刚重启未聊天）时回放全空
+      memories = retrieveRelevantMemories(text, safeLimit, { personaId: persona.id });
     } catch {
       // 记忆库不可用/检索异常：回放面板展示空态，不影响页面其他区块
       memories = [];

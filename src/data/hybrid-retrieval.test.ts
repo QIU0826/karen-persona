@@ -177,6 +177,23 @@ describe("同步混合检索 retrieveRelevantMemories（无 Key）", () => {
     vector.closeVectorDb();
   });
 
+  it("显式 personaId 可跨人设只读检索（Web 控制台回放用）", async () => {
+    const { vector, retriever } = await loadModules();
+    vector.setCurrentPersona("小雅");
+    vector.insertEpisodeWithEmbedding(
+      "用户说最喜欢喝咖啡，尤其是手冲咖啡",
+      "chat",
+      generateEmbedding("用户说最喜欢喝咖啡，尤其是手冲咖啡"),
+    );
+    // 切到另一个人设：默认检索查不到；显式 personaId 能查到
+    vector.setCurrentPersona("秋瑶");
+    expect(retriever.retrieveRelevantMemories("咖啡")).toEqual([]);
+    const hits = retriever.retrieveRelevantMemories("咖啡", 5, { personaId: "小雅" });
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].content).toContain("咖啡");
+    vector.closeVectorDb();
+  });
+
   it("相似度阈值生效：完全无关查询返回空数组", async () => {
     const { vector, retriever } = await loadModules();
     vector.setCurrentPersona("小雅");

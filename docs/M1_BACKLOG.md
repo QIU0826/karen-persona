@@ -97,6 +97,7 @@
 - **跨轮反重复（已完成）**：`src/persona/anti-repetition.ts`（抽取最近开头词/检测 exact/prefix/similar/opener）；reply/stream/proactive 三条路径注入；默认 `openers` 模式（A/B 实测回放整句会诱发模型照抄自己上一轮，full 组复读对 0→0.33，openers 组 0 且相似度 0.056→0.027）。
 - **记忆评测金标集（已完成）**：20 条中文 case（7 类，direct 8 / indirect 12）+ 离线 recall@k/facts 命中/anti-forget harness + `--live` 真实模型验证；报告 `docs/MEMORY_EVAL_REPORT.md`。live 20 条 expect 命中 17/20、违规表达 0。
 - **Web 控制台新面板（已完成）**：`/api/facts`（只读 user_facts，owner 参数）、`/api/memory-probe`（同步混合检索回放）；页面新增「用户事实」「记忆命中回放」两张卡；CSP/转义/无写库（表不存在不建表）保持不变。
+- **回放按展示人设检索（补）**：桥接刚重启、尚无对话时 `getCurrentPersona()` 为空会让回放全空；`retrieveRelevantMemories/searchSimilarEpisodes/searchSemanticEpisodes/searchEpisodesByFts` 增加显式 `personaId` 选项，Web 回放用控制台人设检索（默认行为不变，单测覆盖）。
 
 - **BUG-2 延迟队列持久化**：`src/data/pending-queue.ts` + 桥接恢复；实测重启后到点补发成功。
 - **IMP-1 图片描述增强**：30–60 字描述 + max_tokens 240，单测已更新。
