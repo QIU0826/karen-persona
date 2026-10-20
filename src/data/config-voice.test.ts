@@ -20,6 +20,10 @@ const ENV_KEYS = [
   "TYPO_RECALL_PROBABILITY",
   "TYPO_RECALL_DELAY_MS",
   "TYPO_RECALL_COOLDOWN_MINUTES",
+  "VOICE_TTS_VOICE",
+  "VOICE_TTS_RATE",
+  "VOICE_STYLE_ENABLED",
+  "VOICE_FILLER_PROBABILITY",
 ] as const;
 
 beforeEach(() => {
@@ -120,5 +124,43 @@ describe("打字错字→撤回→改对 配置", () => {
 
   it("撤回延迟越界会报配置错误", async () => {
     await expect(loadWith("typo_recall_delay_ms: 100")).rejects.toThrow(/typo_recall_delay_ms|TYPO_RECALL_DELAY_MS/);
+  });
+});
+
+describe("语音音色与语气配置（v0.4.1）", () => {
+  it("默认：音色不指定（用 Tingting）、180 语速、语气润色开、语气词 12%", async () => {
+    const config = await loadWith("");
+    expect(config.voice_tts_voice).toBeUndefined();
+    expect(config.voice_tts_rate).toBe(180);
+    expect(config.voice_style_enabled).toBe(true);
+    expect(config.voice_filler_probability).toBe(0.12);
+  });
+
+  it("可以换音色、调语速、关润色、关语气词", async () => {
+    const config = await loadWith(
+      [
+        'voice_tts_voice: "Meijia"',
+        "voice_tts_rate: 165",
+        "voice_style_enabled: false",
+        "voice_filler_probability: 0",
+      ].join("\n"),
+    );
+    expect(config.voice_tts_voice).toBe("Meijia");
+    expect(config.voice_tts_rate).toBe(165);
+    expect(config.voice_style_enabled).toBe(false);
+    expect(config.voice_filler_probability).toBe(0);
+  });
+
+  it("空音色名视为不指定", async () => {
+    const config = await loadWith('voice_tts_voice: "   "');
+    expect(config.voice_tts_voice).toBeUndefined();
+  });
+
+  it("语速越界要报错（100-300）", async () => {
+    await expect(loadWith("voice_tts_rate: 999")).rejects.toThrow(/voice_tts_rate/);
+  });
+
+  it("语气词概率越界要报错（0-1）", async () => {
+    await expect(loadWith("voice_filler_probability: 2")).rejects.toThrow(/voice_filler_probability/);
   });
 });

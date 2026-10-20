@@ -9,6 +9,7 @@ data/*.sqlite-*
 data/*.json
 data/*.md
 data/qq/
+data/voice-samples/
 *.log
 .DS_Store
 personas/*/corrections.md

@@ -22,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { encode as encodeSilk } from "silk-wasm";
 import { createLogger } from "../obs/logger.js";
+import { buildSayText, planSpeechStyle, type SpeechStyle } from "./tts-style.js";
 
 const log = createLogger("tts");
 
@@ -45,6 +46,15 @@ const MAX_SILK_BYTES = 200 * 1024;
 
 // ── 对外类型 ─────────────────────────────────────
 
+/** 本次合成用了什么语气（便于日志/调试；不影响调用方逻辑）。 */
+export interface SpeechStyleSummary {
+  style: SpeechStyle;
+  rate: number;
+  pitch: number;
+  addedPauseMs: number;
+  usedFiller: boolean;
+}
+
 export interface SpeechResult {
   /** `base64://` 后面的内容；调用方拼成 `[CQ:record,file=base64://…]`。 */
   silkBase64: string;
@@ -52,6 +62,8 @@ export interface SpeechResult {
   durationMs: number;
   /** SILK 二进制字节数（base64 解码后长度）。 */
   byteLength: number;
+  /** v0.4.1：这次念出来是什么语气 */
+  style?: SpeechStyleSummary;
 }
 
 export interface SpeechOptions {
@@ -63,6 +75,18 @@ export interface SpeechOptions {
   maxChars?: number;
   /** 合成超时（毫秒），默认 8000（clamp 1000-30000）。 */
   timeoutMs?: number;
+  /**
+   * v0.4.1：语气润色入参（情绪/时间/亲密度）。
+   * 不传 `hour` 时按「自然」处理；`styleEnabled: false` 可整体关闭（A/B 用）。
+   */
+  style?: {
+    emotionVector?: number;
+    hour?: number;
+    closeness?: number;
+    fillerProbability?: number;
+  };
+  /** 是否启用语气润色（默认 true） */
+  styleEnabled?: boolean;
 }
 
 /**
@@ -272,6 +296,30 @@ export async function synthesizeSpeech(
     return null;
   }
 
+  // v0.4.1：语气润色（语速/音高/停顿/语气词），让念出来不像朗读
+  const plan =
+    opts.styleEnabled === false
+      ? null
+      : planSpeechStyle({
+          text: spoken,
+          baseRate: rate,
+          emotionVector: opts.style?.emotionVector,
+          hour: opts.style?.hour,
+          closeness: opts.style?.closeness,
+          fillerProbability: opts.style?.fillerProbability,
+        });
+  const sayText = plan ? buildSayText(plan) : spoken;
+  const finalRate = plan ? plan.rate : rate;
+  if (plan) {
+    log.debug("tts.style", {
+      style: plan.style,
+      rate: plan.rate,
+      pitch: plan.pitch,
+      pause_ms: plan.addedPauseMs,
+      filler: plan.usedFiller,
+    });
+  }
+
   let tempDir: string | null = null;
   try {
     tempDir = await fs.mkdtemp(path.join(deps.tmpDir ?? os.tmpdir(), "karen-tts-"));
@@ -281,12 +329,12 @@ export async function synthesizeSpeech(
       "-v",
       voice,
       "-r",
-      String(rate),
+      String(finalRate),
       "-o",
       wavPath,
       "--file-format=WAVE",
       "--data-format=LEI16@24000",
-      spoken,
+      sayText,
     ];
 
     try {
@@ -347,7 +395,22 @@ export async function synthesizeSpeech(
       silk_bytes: data.byteLength,
       base64_len: silkBase64.length,
     });
-    return { silkBase64, durationMs, byteLength: data.byteLength };
+    return {
+      silkBase64,
+      durationMs,
+      byteLength: data.byteLength,
+      ...(plan
+        ? {
+            style: {
+              style: plan.style,
+              rate: plan.rate,
+              pitch: plan.pitch,
+              addedPauseMs: plan.addedPauseMs,
+              usedFiller: plan.usedFiller,
+            },
+          }
+        : {}),
+    };
   } catch (err) {
     log.warn("tts.failed", { reason: "unexpected", code: safeErrorCode(err) });
     return null;

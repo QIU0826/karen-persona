@@ -9,7 +9,7 @@
 
 QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、情绪、记忆和社交圈的人」，而不是一个问答助手。
 
-当前阶段：**v0.4.0 已发布（2026-10-20）——把「她主动找你」从一条链路拆成四条（生活流分享 / 没人接话补一句 / 冷场开话题 / 沉默保温），每次心跳记录「为什么发/为什么不发」并可 `/why` 查看；新增连推收手、深夜打字变慢、`proactive_channels` 链路开关与离线模拟脚本（docs/PROACTIVE_CHANNELS.md）；另做了一次 Prompt 预算审计（docs/PROMPT_BUDGET.md，实测对话轮 prompt p50 2241 tokens、系统提示词 3591 字符）。**历史：v0.3.3——「说话动作」提示（A/B 未测出收益）+ 气泡/重复/照片治理 + 同类项目调研；历史：v0.3.2——v0.3.0「更像真人」（语音消息、打错字撤回、打字节奏、被点名要媒体会真给、宣传页重做）+ v0.3.1 修复 15 轮真实验证暴露的 P0/P1/P2（编造相识场景、多媒体内容错位、情绪承接、嘲讽话术、图片跨轮复用）+ v0.3.2 图库扩充（7→15 张、配文池 42→约 110 条，针对「多媒体 2/5、配文重复」）**。M0 地基已修复完成（新装可用、不丢消息、安全加固、文档真话）；M1 核心体验闭环主要项已完成（状态持久化、关系成长、演化可见化、多用户隔离、双管线对齐、检索增强）；M2-A 首次引导 2.0、M2-B 人设包 v2、M2-C 多用户只读 Web + 导出、M2-D 真实长跑工具已实施；发布检查见 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（已 push main + tag v0.2.0）。M1/M2 路线见审计报告第 5 节。
+当前阶段：**v0.4.1 已发布（2026-10-20）——针对「语音太 AI」加了语气润色（按情绪/作息调语速音高、分句语调轮廓、句中停顿、偶尔语气词）、音色可配、试听脚本与 [docs/VOICE_QUALITY.md](docs/VOICE_QUALITY.md)（含微软 Edge 神经语音 403 的实测结论）；v0.4.0 ——把「她主动找你」从一条链路拆成四条（生活流分享 / 没人接话补一句 / 冷场开话题 / 沉默保温），每次心跳记录「为什么发/为什么不发」并可 `/why` 查看；新增连推收手、深夜打字变慢、`proactive_channels` 链路开关与离线模拟脚本（docs/PROACTIVE_CHANNELS.md）；另做了一次 Prompt 预算审计（docs/PROMPT_BUDGET.md，实测对话轮 prompt p50 2241 tokens、系统提示词 3591 字符）。**历史：v0.3.3——「说话动作」提示（A/B 未测出收益）+ 气泡/重复/照片治理 + 同类项目调研；历史：v0.3.2——v0.3.0「更像真人」（语音消息、打错字撤回、打字节奏、被点名要媒体会真给、宣传页重做）+ v0.3.1 修复 15 轮真实验证暴露的 P0/P1/P2（编造相识场景、多媒体内容错位、情绪承接、嘲讽话术、图片跨轮复用）+ v0.3.2 图库扩充（7→15 张、配文池 42→约 110 条，针对「多媒体 2/5、配文重复」）**。M0 地基已修复完成（新装可用、不丢消息、安全加固、文档真话）；M1 核心体验闭环主要项已完成（状态持久化、关系成长、演化可见化、多用户隔离、双管线对齐、检索增强）；M2-A 首次引导 2.0、M2-B 人设包 v2、M2-C 多用户只读 Web + 导出、M2-D 真实长跑工具已实施；发布检查见 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（已 push main + tag v0.2.0）。M1/M2 路线见审计报告第 5 节。
 
 ## 技术栈（如实）
 
@@ -23,7 +23,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 - **外部世界**：OpenWeatherMap（真实天气，可选）、时间感知（结构化标签）；网络热点是硬编码话题池
 - **桥接**：NapCatQQ（Windows 已验证 v4.18.4，官方最新 v4.18.38）+ OneBot 11 反向 WebSocket；macOS 原生 NapCat / Linux Docker 方案见 [docs/QQ_BRIDGE_CROSS_PLATFORM.md](docs/QQ_BRIDGE_CROSS_PLATFORM.md)；微信桥接 = 无依赖占位桩（不在近期路线图）
 - **工程**：GitHub Actions CI（ubuntu/macOS/Windows 三平台矩阵：`npm ci` → typecheck → lint → test；Linux 额外覆盖率基线）、`npm run doctor` 环境体检、结构化日志 + `/health` + 成本统计、Dockerfile（node:22-slim/非 root）、PM2（跑 dist 需先 build）
-- **语音（v0.3.0 新增）**：macOS 系统 TTS（`say -v Tingting`）→ 24kHz WAV → **SILK**（`silk-wasm` 纯 wasm，无原生构建）→ OneBot `[CQ:record]` 语音条；决策层 `src/impulse/voice.ts`（概率/亲密度/免打扰/冷却/危机语境），合成层 `src/ai/tts.ts`；**仅 macOS 真正发声**，其它平台自动降级为文字
+- **语音（v0.3.0 新增，v0.4.1 加语气润色）**：macOS 系统 TTS（`say -v Tingting`）→ 24kHz WAV → **SILK**（`silk-wasm` 纯 wasm，无原生构建）→ OneBot `[CQ:record]` 语音条；决策层 `src/impulse/voice.ts`（概率/亲密度/免打扰/冷却/危机语境），合成层 `src/ai/tts.ts`；**仅 macOS 真正发声**，其它平台自动降级为文字
 - **撤回（v0.3.0 新增）**：OneBot `delete_msg` 受控撤回（只允许本进程 15s 内发出的消息 + 全局 5s 限频），用于「打错字→撤回→改对」
 - **不存在的**：语音 ASR（用户发来的语音仍是 `[语音]` 占位）、图片生成（即梦）、真实语义向量需 Qwen Key；Web 控制台为只读 MVP
 
@@ -42,7 +42,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
 | 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入已接线（双列，需 Qwen Key 实跑）；**TTS 已落地**（macOS say→SILK，`src/ai/tts.ts`）、即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | ✅/🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF，FTS5 用 OR+BM25 IDF）→ DeepSeek 候选重排**（默认开启，非真向量；异常/超时降级）、sqlite-vec 启用、双列 embedding、schema v2/v3 幂等迁移、用户事实层、T1 状态弧、T3 压缩（40 条/隔天兜底 + `t3_compressed` 防重复）；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；**多用户隔离已实现**（owner=人设+用户+平台） |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 81 个测试文件 / 911 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入（typecheck/lint/test/覆盖率）；**新增 mock-OneBot 桥接端到端测试**（真实 bridge 子进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊/命令/危机/多用户隔离，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）、可复现记忆金标集（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B（`src/eval/repetition-eval.ts`）；真实 QQ/NapCat 端到端仍需真机；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 82 个测试文件 / 944 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入（typecheck/lint/test/覆盖率）；**新增 mock-OneBot 桥接端到端测试**（真实 bridge 子进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊/命令/危机/多用户隔离，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）、可复现记忆金标集（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B（`src/eval/repetition-eval.ts`）；真实 QQ/NapCat 端到端仍需真机；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -66,7 +66,7 @@ npm run setup      # 交互式配置向导
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + ubuntu/macOS/Windows 三平台矩阵 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 已收紧为 `>=22.12`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm run lint` 0 违规；`npm test` 当前 81 文件 / 911 用例通过（M0 审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm run lint` 0 违规；`npm test` 当前 82 文件 / 944 用例通过（M0 审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -226,6 +226,7 @@ npm run setup      # 交互式配置向导
 - [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md) — mock-OneBot 桥接端到端测试（披露/年龄门/私聊/图片/群聊）
 - [docs/MOCK_VALIDATION.md](docs/MOCK_VALIDATION.md) — 真实验证台（mock OneBot + 真实 DeepSeek + 临时目录）：多轮指标、真人感问题与优化记录
 - [docs/PROACTIVE_CHANNELS.md](docs/PROACTIVE_CHANNELS.md) — 主动消息四条链路、护栏、配置、`/why` 输出与离线模拟结果
+- [docs/VOICE_QUALITY.md](docs/VOICE_QUALITY.md) — 语音「像 AI」的三条根因、语气润色的实测数据、试听与换音色、神经 TTS 路线评估
 - [docs/PROMPT_BUDGET.md](docs/PROMPT_BUDGET.md) — Prompt 预算离线审计：真实 `llm_usage` 分位（对话轮 p50 2241 / p95 2864 tokens）、系统提示词分段占比、6 条优化建议
 - [docs/RESEARCH_REFERENCE.md](docs/RESEARCH_REFERENCE.md) — 同类项目调研（GitHub AI 伴侣 / QQ Bot 可借鉴设计）
 - [docs/MEMORY_AI_TONE_AUDIT.md](docs/MEMORY_AI_TONE_AUDIT.md) — 记忆与 AI 味专项审计（存储/上下文/压力测试/优化点）

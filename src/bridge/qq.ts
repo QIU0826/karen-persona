@@ -1413,7 +1413,19 @@ async function maybeSendVoice(
   }
   if (!line) return;
 
-  const speech = await synthesizeSpeech(line, { maxChars: settings.maxChars });
+  const speech = await synthesizeSpeech(line, {
+    maxChars: settings.maxChars,
+    voice: config.voice_tts_voice,
+    rate: config.voice_tts_rate,
+    styleEnabled: config.voice_style_enabled !== false,
+    style: {
+      // 语气跟着她此刻的情绪和作息走：开心快一点、深夜慢一点、偶尔带个语气词
+      emotionVector: state.emotionState.vector,
+      hour: new Date().getHours(),
+      closeness: state.persona.relationship.closeness,
+      fillerProbability: config.voice_filler_probability,
+    },
+  });
   if (!speech) {
     log.warn("voice.synth_failed", { user_id: userId });
     return;

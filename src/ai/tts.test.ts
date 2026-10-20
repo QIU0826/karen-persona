@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { isSilk } from "silk-wasm";
+import { stripSpeechCommands } from "./tts-style.js";
 import { configureLogger } from "../obs/logger.js";
 import {
   DEFAULT_TTS_RATE,
@@ -205,7 +206,9 @@ describe("synthesizeSpeech（注入 deps，CI 安全）", () => {
     expect(args[args.indexOf("-v") + 1]).toBe("Meijia");
     expect(args[args.indexOf("-r") + 1]).toBe("200");
     expect(options.timeoutMs).toBe(2500);
-    expect(Array.from(args[args.length - 1]).length).toBeLessThanOrEqual(8);
+    // v0.4.1：say 文本里含语调命令（[[rate]]/[[slnc]]），字数只算真正念出来的部分
+    const spokenOnly = stripSpeechCommands(args[args.length - 1]);
+    expect(Array.from(spokenOnly).length).toBeLessThanOrEqual(8);
   });
 
   it("临时目录在成功/失败后都会被清理", async () => {

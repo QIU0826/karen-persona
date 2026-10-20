@@ -88,6 +88,18 @@ export interface AppConfig {
   voice_max_chars?: number;
   voice_group_enabled?: boolean;
   /**
+   * 语音音色与语气（v0.4.1，针对「TTS 念起来太像 AI」）：
+   * - voice_tts_voice：macOS `say` 发音人（默认 Tingting；也可用 Meijia/Sinji，
+   *   见 `say -v '?'`；装了高质量语音的话填它的名字）
+   * - voice_tts_rate：基准语速（字/分钟，默认 180；真人聊天比朗读慢一点）
+   * - voice_style_enabled：是否按情绪/时间调整语速音高、加句中停顿（默认 true）
+   * - voice_filler_probability：偶尔加个语气词「嗯…」的概率（默认 0.12，0 = 不加）
+   */
+  voice_tts_voice?: string;
+  voice_tts_rate?: number;
+  voice_style_enabled?: boolean;
+  voice_filler_probability?: number;
+  /**
    * 打字错字 → 撤回 → 改对（真人感细节）：
    * - typo_recall_enabled：总开关（默认 true）
    * - typo_recall_probability：每轮回复触发概率（默认 0.04，太高会显得手滑）
@@ -511,6 +523,25 @@ export function loadConfig(): AppConfig {
     ? parseBooleanOption(voiceGroupPicked.value, voiceGroupPicked.source)
     : false;
 
+  // 语音音色/语气（可选；缺省 Tingting + 180 + 润色开）
+  const voiceTtsVoiceRaw = raw.voice_tts_voice ?? envValue("VOICE_TTS_VOICE");
+  const voiceTtsVoice =
+    typeof voiceTtsVoiceRaw === "string" && voiceTtsVoiceRaw.trim().length > 0
+      ? voiceTtsVoiceRaw.trim()
+      : undefined;
+  const voiceTtsRatePicked = pickOption(raw, "voice_tts_rate", "VOICE_TTS_RATE");
+  const voiceTtsRate = voiceTtsRatePicked
+    ? Math.round(parseOptionalNumber(voiceTtsRatePicked.value, voiceTtsRatePicked.source, 100, 300))
+    : 180;
+  const voiceStylePicked = pickOption(raw, "voice_style_enabled", "VOICE_STYLE_ENABLED");
+  const voiceStyleEnabled = voiceStylePicked
+    ? parseBooleanOption(voiceStylePicked.value, voiceStylePicked.source)
+    : true;
+  const voiceFillerPicked = pickOption(raw, "voice_filler_probability", "VOICE_FILLER_PROBABILITY");
+  const voiceFillerProbability = voiceFillerPicked
+    ? parseOptionalNumber(voiceFillerPicked.value, voiceFillerPicked.source, 0, 1)
+    : 0.12;
+
   // 打字错字 → 撤回 → 改对：私聊正常回复才生效，默认低概率、可关
   const typoRecallEnabledPicked = pickOption(raw, "typo_recall_enabled", "TYPO_RECALL_ENABLED");
   const typoRecallEnabled = typoRecallEnabledPicked
@@ -565,6 +596,10 @@ export function loadConfig(): AppConfig {
     voice_cooldown_minutes: voiceCooldownMinutes,
     voice_max_chars: voiceMaxChars,
     voice_group_enabled: voiceGroupEnabled,
+    voice_tts_voice: voiceTtsVoice,
+    voice_tts_rate: voiceTtsRate,
+    voice_style_enabled: voiceStyleEnabled,
+    voice_filler_probability: voiceFillerProbability,
     typo_recall_enabled: typoRecallEnabled,
     typo_recall_probability: typoRecallProbability,
     typo_recall_delay_ms: typoRecallDelayMs,

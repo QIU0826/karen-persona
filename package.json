@@ -1,6 +1,6 @@
 {
   "name": "karen-persona",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "QQ AI 虚拟人设聊天系统 - 让通讯录里住进一个有自己生活、情绪和记忆的人",
   "main": "dist/index.js",
   "scripts": {

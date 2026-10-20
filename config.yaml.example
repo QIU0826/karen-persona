@@ -87,6 +87,16 @@ health_port: 18081
 # 群聊是否允许发语音（默认 false）
 # voice_group_enabled: false
 
+# === 语音的音色与语气（v0.4.1，针对「念起来太像 AI」）===
+# 发声人（macOS `say -v '?'` 里挑；默认 Tingting，可试 Meijia / Sinji）
+# voice_tts_voice: "Tingting"
+# 基准语速（字/分钟，默认 180；真人聊天比朗读慢一点，200 以上会显赶）
+# voice_tts_rate: 180
+# 语气润色：按情绪/时间调整语速与音高、在分句之间加停顿（默认开）
+# voice_style_enabled: true
+# 偶尔在句首加一个语气词「嗯…」的概率（默认 0.12；0 = 不加）
+# voice_filler_probability: 0.12
+
 # === 打字错字 → 撤回 → 改对（真人感细节，可选）===
 # 她偶尔会打错字，隔一会儿撤回，再发一条改对的（默认开启、低概率）。
 # 只在私聊的正常回复里发生；危机语境、被中断、延迟补发都不会触发。
