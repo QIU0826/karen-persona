@@ -33,7 +33,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 |---|---|---|---|
 | 1 | 消息桥接 `src/bridge` | ✅/🚧 | QQ 私聊流式回复可用（`qq.ts`）；群聊仅 @ + 私聊过的人（半成品）；M0 已加固：默认监听 `127.0.0.1`、token/path 校验、`ALLOWED_USERS` 白名单、CQ 注入转义与超长切分、message_id 去重、延迟回复落库补发、进程级异常兜底；`scripts/mock-onebot.mjs` 支持无 QQ 端到端联调；Windows/macOS 均已实机验证（macOS 原生 NapCat + 反向 WS）；微信仅无依赖占位 🗺 |
 | 2 | 消息路由 `src/router` | 💀/🚧 | `router/classifier.ts`、`router/session.ts` 未被主路径引用（死代码）；实际合并窗口在 `bridge/qq.ts`、复杂度分级在 `ai/router.ts` |
-| 3 | 响应管线 `src/pipeline` | 🚧 | 双管线：`processMessage`（完整，CLI/群聊）/ `processMessageStream`（精简，QQ 私聊）。M0 已统一门控上下文（`buildGateContext`）与延迟消息落库/补发；记忆写入与其余演化步骤的统一在 M1 继续 |
+| 3 | 响应管线 `src/pipeline` | ✅/🚧 | 双管线：`processMessage`（完整，CLI/群聊）/ `processMessageStream`（QQ 私聊）。M1 已**行为对齐**：流式路径补齐因果链闯入/漂移、叙事弧线、纠正层、L1 裁决/EMA、动态风格参考、热点、T1 快照、因果链回响、herView 更新、门控记录等；两份实现仍并存（后续可抽取共享 helper） |
 | 4 | 人设引擎 `src/persona` | 🚧 | 六层 schema、校验器、Prompt 静态缓存 + 动态组装可用；未消费字段多（审计 2.3）；负债偿还、纠正层、社交分寸未闭环 |
 | 5 | 演化引擎 `src/evolution` | 🚧 | 基线漂移/因果链/叙事重构/进化日志代码存在，但多数未接 QQ 主路径、状态不持久化（重启归零） |
 | 6 | 冲动引擎 `src/impulse` | 🚧 | 消息门可用；延迟回复已在 M0 落库+补发；沉默弧线/tone 链/撤回仅有限生效 |
@@ -86,12 +86,12 @@ npm run setup      # 交互式配置向导
 - **M1 治理与数据主权（2026-10-20 凌晨）**：新增 `src/commands/control.ts`（QQ/CLI 共用 `/why` 门控可解释、`/pause`/`/resume` 主动消息暂停、`/export` 记忆导出、`/stats`、`/help`）；`lastGate` 与 `proactivePaused` 写入持久化状态；心跳跳过暂停用户；新增 `src/data/user-export.ts` 导出会话+人格状态+T2 记忆为本地 JSON（600 权限）。测试 37 文件 / 471 用例全绿。
 - **合规最小版（2026-10-20 上午）**：新增 `src/persona/disclosure.ts`（首次对话 AI 披露：AI 身份/数据去向/18+；`/about` 详细说明）与 `src/safety/crisis.ts`（危机信号兜底：命中后**强制回复** + prompt 安全指引 + 程序追加专业求助资源 12356/010-82951332/110/120；关键词只做安全兜底，不做情感识别）；`ai_disclosure` 配置默认开启；桥接与 CLI 均接入。E2E 实测：新用户收到披露；发送危机表达后收到关心式回复 + 求助资源。
 - **多用户隔离（2026-10-20 上午）**：新增 `src/data/owner.ts`——owner = `qq:<id>` / `cli:local`；主用户（白名单第一个 QQ）与 CLI 沿用历史 session/state/T2（旧数据零迁移即归属主用户），其他用户使用 `-<ownerSlug>` 后缀的会话/状态文件、T2/T1 persona_id 带 `@ownerSlug` 后缀（检索天然隔离）；每轮处理前显式切回本 state 的存储 persona，防止多用户交替串记忆。E2E：两个测试用户各自收到披露、会话文件/人格状态/T2 记忆完全隔离。
+- **双管线对齐（2026-10-20 上午）**：QQ 私聊流式主路径补齐完整管线的状态演化步骤——因果链闯入/漂移、自我叙事弧线注入、纠正层、L1 弹性裁决/EMA 内心状态、动态风格参考、热点注入、T1 人格快照、因果链回响、纠正记录、herView 异步更新、`lastGate` 门控记录；冒烟实测流式回复正常且 T1/T2/成本数据落库。两份实现仍并存，后续可抽取共享 helper。
 - **问题记录**：真机联调问题与修复清单见 [docs/M1_BACKLOG.md](docs/M1_BACKLOG.md)。
 
 ### 已知问题（M0 之后继续修）
 
-- 双管线仍不对等：QQ 私信缺少部分演化/表达步骤（M0-6 部分统一，M1 继续）
-- 演化模块尚未全部接入 QQ 流式主路径（herView/叙事/独白等仍只在完整管线生效）
+- 双管线行为已对齐（QQ 流式主路径补齐叙事/风格/因果链/T1/herView 等），但代码仍是两份实现，后续可抽取共享 helper 降低漂移风险
 - Web 控制台仍只读取主用户（历史文件）数据；多用户下其他好友不展示（本地控制台为单机运维工具，商业多租户 UI 属 M3）
 - 群聊与私聊共用一个用户 state（同一 QQ 用户在群/私聊的上下文共享），如需严格分开可后续加 platform 维度
 - 主动消息：M0 已加单日上限 4 条、两次最小间隔 30 分钟、连续沉默 3 次强制回复；仍无免打扰/暂停开关（M1-4）

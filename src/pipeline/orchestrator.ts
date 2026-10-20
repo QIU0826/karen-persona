@@ -1183,12 +1183,30 @@ export async function* processMessageStream(
   }
   Object.assign(silenceState, touchUserActivity(silenceState, userInput));
 
+  // C. 因果链闯入 + 漂移（与非流式对齐）
+  const streamIntrusion = generateIntrusion(state.causalChains);
+  if (streamIntrusion) {
+    Object.assign(
+      emotionState,
+      adjustEmotion(
+        emotionState,
+        streamIntrusion.intensity * (Math.random() > 0.5 ? 1 : -1) * 0.1,
+        "闯入事件",
+      ),
+    );
+  }
+  addDriftPressure(state.driftState, Math.abs(emotionState.vector - emotionState.baseline), 0);
+  emotionState.baseline += getDriftOffset(state.driftState) * 0.01;
+  dailyRebound(state.driftState, 0);
+  checkAwareness(state.driftState);
+
   const now = new Date();
   const hour = now.getHours();
 
   // 消息门（与 CLI/群聊共用同一上下文；修复此前写死 messageCountToday=0 的问题）
   const gateContext = buildGateContext(state, userInput, now);
-  const gate = decideGateForTurn(state, gateContext, opts);
+  const gate = decideGateForTurn(state, gateContext, opts, crisis);
+  recordGateDecision(state, gate, opts, crisis);
 
   if (gate.type === "delay") {
     if (!opts.skipUserPersist) addMessage(session, "user", userInput);
@@ -1207,6 +1225,30 @@ export async function* processMessageStream(
 
   if (!opts.skipUserPersist) addMessage(session, "user", userInput);
 
+  // P2-b+P2-1: 自我叙事弧线（与非流式对齐）
+  const streamDiary = await flipThroughDiary();
+  const { arc: streamNarrArc, logs: streamNarrLogs } = advanceNarrativeArc({
+    arc: state.narrativeArc,
+    drift: state.driftState,
+    recentMemories: [],
+    attachmentStyle: persona.emotions.attachmentStyle,
+    diaryReaction: streamDiary ?? undefined,
+  });
+  state.narrativeArc = streamNarrArc;
+  for (const line of streamNarrLogs) console.log(`  ${line}`);
+
+  let narrativeInject = "";
+  if (shouldInjectNarrative(state.narrativeArc) && Math.random() < 0.15) {
+    narrativeInject =
+      "\n\n## 内心觉察\n你隐隐约约感觉到自己有些变化(" +
+      state.narrativeArc.stage +
+      ")。若自然可顺带提起，不必硬说。";
+    state.narrativeArc = markNarrativeExpressed(state.narrativeArc);
+  }
+
+  // G. 纠正层（与非流式对齐）
+  applyCorrections(persona.name, userInput);
+
   // 中断恢复
   let interruptedNote = "";
   if (state.interrupted) {
@@ -1214,17 +1256,58 @@ export async function* processMessageStream(
     state.interrupted = false;
   }
 
-  // Prompt 构建（与非流式共享相同逻辑）
+  // I/J/L. 社交分寸 + L1 弹性裁决 + 内心状态 EMA（与非流式对齐）
   const exposure = exposureRatio(socialTact, persona.relationship.closeness);
   const impulseIntensity = calculateImpulseIntensity(emotionState, persona.relationship.closeness);
+  if (impulseIntensity > 0.3) {
+    const rawState: InnerState = {
+      exposure,
+      guilt: guiltState.guilt,
+      emotion: emotionState.vector,
+      hour,
+      mode: "neutral",
+      closeness: persona.relationship.closeness,
+    };
+    const l1Threshold = computeThreshold(persona.emotions.attachmentStyle, rawState);
+    const ruling = checkRuleBreach(state.chainRules, impulseIntensity, l1Threshold);
+    if (ruling.phase === "rule_broken") {
+      Object.assign(guiltState, incurGuilt(guiltState, ruling.guiltProduced, "规则突破"));
+    }
+  }
+
+  const exceptionThreshold = calculateExceptionThreshold(
+    0.6,
+    persona.relationship.closeness,
+    Math.abs(emotionState.vector),
+    impulseIntensity,
+  );
+  const isExceptional = isException(impulseIntensity, 0.6, exceptionThreshold);
+
+  session.t3.emotionVector = emotionState.vector;
+  const ema = (prev: number, curr: number) => prev * 0.7 + curr * 0.3;
+  const smoothedExposure = state.prevInnerState
+    ? ema(state.prevInnerState.exposure, exposure)
+    : exposure;
+  const smoothedGuilt = state.prevInnerState
+    ? ema(state.prevInnerState.guilt, guiltState.guilt)
+    : guiltState.guilt;
+
+  let innerMode: InnerState["mode"] = "neutral";
+  if (isExceptional) innerMode = "guilty";
+  else if (smoothedGuilt > 0.3) innerMode = "avoidant";
+  else if (smoothedExposure < 0.3) innerMode = "distant";
+  else if (smoothedExposure > 0.6 && persona.relationship.closeness >= 5) innerMode = "close";
+
   const currentInner: InnerState = {
-    exposure,
-    guilt: guiltState.guilt,
+    exposure: smoothedExposure,
+    guilt: smoothedGuilt,
     emotion: emotionState.vector,
     hour,
-    mode: "neutral",
+    mode: innerMode,
     closeness: persona.relationship.closeness,
   };
+  state.prevInnerState = { ...currentInner };
+  state.innerState = currentInner;
 
   const systemPrompt = buildPrompt({
     persona, config,
@@ -1240,12 +1323,33 @@ export async function* processMessageStream(
 
   const timeCtx = perceiveTime(persona.world);
   const momentTag = buildMomentTag(timeCtx, weatherPerception.raw);
+
+  // P1-2: 动态风格参考（与非流式对齐）
+  const styleRefs = retrieveStyleReference({
+    emotionVector: emotionState.vector,
+    guilt: guiltState.guilt,
+    mode: innerMode,
+    userInput,
+  });
+  const styleContext = buildStyleContext(styleRefs);
+
+  // 热点感知：每 1-2 小时刷新一次（与非流式对齐）
+  let trendingContext = "";
+  const streamNowTs = Date.now();
+  if (streamNowTs - state.lastTrendingInject > 60 * 60 * 1000 + Math.random() * 60 * 60 * 1000) {
+    const topics = getTrendingTopics();
+    const careerKw = persona.identity.lifeStory.career?.split(/[,，、\s]+/) ?? [];
+    const matched = matchTrendingTopics(topics, careerKw, []);
+    trendingContext = buildTrendingContext(matched);
+    if (trendingContext) state.lastTrendingInject = streamNowTs;
+  }
+
   const memories = await retrieveRelevantMemoriesAsync(userInput);
   const ragContext = buildRagContext(memories);
   const shortTermContext = buildShortTermContext(session);
   const fullSystem =
     systemPrompt +
-    interruptedNote +
+    narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
     buildConflictNote(state) +
     (crisis ? crisisSafetyNote() : "") +
     `\n${momentTag}`;
@@ -1370,6 +1474,65 @@ export async function* processMessageStream(
         guilt: guiltState.guilt,
         summary: "[stream]",
       });
+      session.t3.currentTopic = userInput.slice(0, 40);
+
+      // P. 因果链回响（与非流式对齐）
+      for (const chain of state.causalChains) {
+        addUserTrace(chain, userInput);
+        if (Math.random() < 0.1) recallUserTrace(chain);
+      }
+
+      // Q. 纠正记录（与非流式对齐）
+      if (userInput.includes("你不会这样说") || userInput.includes("你应该是")) {
+        addCorrection(persona.name, userInput.slice(0, 50), persisted.slice(0, 50), userInput);
+      }
+
+      // R. herViewOfYou 触发检测 + 异步更新（与非流式对齐）
+      const prevStage = state.lastNarrativeStage;
+      const currStage = state.narrativeArc.stage;
+      if (prevStage !== currStage) state.lastNarrativeStage = currStage;
+      if (
+        !state.herViewGenerating &&
+        shouldUpdateView({
+          currentCloseness: persona.relationship.closeness,
+          lastViewUpdateCloseness: state.lastViewUpdateCloseness,
+          lastViewUpdateAt: state.lastViewUpdateAt,
+          narrativeStage: currStage,
+          previousNarrativeStage: prevStage,
+        })
+      ) {
+        state.herViewGenerating = true;
+        const captureCloseness = persona.relationship.closeness;
+        const captureView = state.herViewOfYou;
+        const streamRecentEpisodes = (() => {
+          try {
+            const { getAllEpisodes } = require("../data/vector.js");
+            return (getAllEpisodes(5) as Array<{ content: string }>).map((e) => e.content);
+          } catch {
+            return [];
+          }
+        })();
+        generateHerView({
+          persona,
+          currentCloseness: captureCloseness,
+          previousView: captureView,
+          recentMemories: streamRecentEpisodes,
+        })
+          .then((newView) => {
+            if (newView) {
+              state.previousViewOfYou = captureView;
+              state.herViewOfYou = newView;
+              state.lastViewUpdateCloseness = captureCloseness;
+              state.lastViewUpdateAt = Date.now();
+              console.log(`[herView] 更新: "${newView}"`);
+            }
+            state.herViewGenerating = false;
+          })
+          .catch(() => {
+            state.herViewGenerating = false;
+          });
+      }
+
       triggerMonologue(state, userInput, persisted);
       state.consecutiveSilences = 0;
       for (const line of updateRelationshipAfterTurn(state, userInput, persisted, complexity)) {
