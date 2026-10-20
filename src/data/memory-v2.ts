@@ -410,6 +410,80 @@ export function expireAnchor(db: Database, id: number, now = Date.now(), rewritt
 }
 
 /** 锚点 → prompt 片段（一行一条，带类型标签）。 */
+export interface WeeklyRollupRow {
+  id: number;
+  persona_id: string;
+  owner_id: string;
+  week_start: string;
+  summary: string;
+  created_at: number;
+}
+
+/**
+ * 取某周汇总（v0.8.18）。
+ *
+ * 背景：`weekly_rollups` 表从 v0.5 就在写，但**没有任何地方读它**——
+ * 数据写进去却从不进 prompt，等于"周记忆"这个能力是断的（真实冒烟发现的）。
+ */
+export function getWeeklyRollup(
+  db: Database,
+  personaId: string,
+  ownerId: string,
+  weekStart: string,
+): WeeklyRollupRow | null {
+  try {
+    const row = db
+      .prepare(
+        `SELECT * FROM weekly_rollups
+         WHERE persona_id = ? AND owner_id = ? AND week_start = ?`,
+      )
+      .get(personaId, ownerId, weekStart) as WeeklyRollupRow | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 取最近 N 周的周汇总（新的在前），供 prompt 注入「上周大概」。 */
+export function listRecentRollups(
+  db: Database,
+  personaId: string,
+  ownerId: string,
+  limit = 1,
+): WeeklyRollupRow[] {
+  try {
+    return db
+      .prepare(
+        `SELECT * FROM weekly_rollups
+         WHERE persona_id = ? AND owner_id = ?
+         ORDER BY week_start DESC LIMIT ?`,
+      )
+      .all(personaId, ownerId, Math.max(1, limit)) as WeeklyRollupRow[];
+  } catch {
+    return [];
+  }
+}
+
+/** 周汇总注入文本的最大字符数（长期上下文要压得很小，别抢锚点/日记忆的预算） */
+export const WEEKLY_INJECTION_MAX_CHARS = 140;
+
+/**
+ * 把最近一周的汇总变成 prompt 里的一小段（v0.8.18）。
+ * 只给「上周大概发生了什么」，不代替锚点/日记忆；接不上就不提。
+ */
+export function formatWeeklyInjection(
+  rollup: Pick<WeeklyRollupRow, "week_start" | "summary"> | null | undefined,
+): string {
+  const summary = (rollup?.summary ?? "").replace(/\s+/g, " ").trim();
+  if (!summary) return "";
+  const chars = Array.from(summary);
+  const body =
+    chars.length > WEEKLY_INJECTION_MAX_CHARS
+      ? `${chars.slice(0, WEEKLY_INJECTION_MAX_CHARS).join("")}…`
+      : chars.join("");
+  return `\n## 上一周大概\n（${rollup?.week_start ?? ""} 那周）${body}\n这些是一周前的事，别当成这两天刚发生的。\n`;
+}
+
 export function buildAnchorInjection(anchors: AnchorRow[]): string {
   if (anchors.length === 0) return "";
   const kindLabel: Record<AnchorKind, string> = {

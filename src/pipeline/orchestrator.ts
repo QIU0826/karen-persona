@@ -14,7 +14,9 @@ import {
   addAnchor,
   inferAnchorKind,
   listAnchors,
+  formatWeeklyInjection,
   listRecentDigests,
+  listRecentRollups,
   scoreSalience,
   summarizeAnchor,
   touchAnchors,
@@ -1053,6 +1055,26 @@ function buildMemoryInjection(state: ConversationState): string {
 }
 
 /**
+ * v0.8.18：上周汇总注入。
+ *
+ * 真实冒烟发现的缺口：`weekly_rollups` 从 v0.5 就在写，但**没有任何地方读它**，
+ * 等于「周记忆」这个能力是断的（日→周链路末端没人消费）。
+ * 这里把它压成 ≤140 字的一小段注入 prompt：只给「上周大概」，不抢锚点/日记忆预算。
+ */
+function buildWeeklyInjection(state: ConversationState): string {
+  if (process.env.KAREN_MEMORY_V2 === "off") return "";
+  try {
+    const db = getVectorDb();
+    const rollups = listRecentRollups(db, state.storagePersona, state.owner, 1);
+    const text = formatWeeklyInjection(rollups[0] ?? null);
+    if (text) console.log("  [记忆] 注入上周汇总");
+    return text;
+  } catch {
+    return "";
+  }
+}
+
+/**
  * 回合结束时判定这段对话值不值得成为「锚点」。
  *
  * 规则打分（无额外 LLM 调用）：情绪强度/承诺/冲突/道歉/自我披露/共同经历/秘密/表白/失去。
@@ -1594,6 +1616,7 @@ export async function processMessage(
     buildFactConflictInjection(state) +
     buildGetToKnowInjection(state) +
     buildMemoryInjection(state) +
+    buildWeeklyInjection(state) +
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
     buildTalkMoveInjection(state, userInput, crisis) +
@@ -2090,6 +2113,7 @@ export async function* processMessageStream(
     buildFactConflictInjection(state) +
     buildGetToKnowInjection(state) +
     buildMemoryInjection(state) +
+    buildWeeklyInjection(state) +
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
     buildTalkMoveInjection(state, userInput, crisis) +

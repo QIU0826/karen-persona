@@ -291,3 +291,57 @@ describe("pickDayMessages：超长一天要保头保尾（v0.8.16 真实冒烟�
     expect(pickDayMessages(messages, day)).toHaveLength(1);
   });
 });
+
+describe("buildWeeklySummary：7 天真实长度也不能丢尾（v0.8.18 冒烟驱动）", () => {
+  function digest(day: string, summary: string, threads: string[] = []) {
+    return {
+      id: 0,
+      persona_id: "xiaoya",
+      owner_id: "cli:local",
+      day,
+      summary,
+      mood: null,
+      events_json: "[]",
+      open_threads_json: JSON.stringify(threads),
+      created_at: 0,
+    };
+  }
+  // 每天约 100 字，7 天 ≈ 700 字（超过 400 上限）
+  const longDay = (n: number) =>
+    `第${n}天他讲了很多工作上的事，包括项目进度、和同事的沟通、加班到很晚、第二天的安排，还有一点自己的情绪`;
+
+  it("7 天长日记忆：每一天都要保留（不能砍掉最后几天）", () => {
+    const digests = Array.from({ length: 7 }, (_, i) =>
+      digest(`2026-10-${String(12 + i).padStart(2, "0")}`, longDay(i + 1)),
+    );
+    const text = buildWeeklySummary(digests);
+    for (let i = 1; i <= 7; i++) {
+      expect(text, `第 ${i} 天丢失`).toContain(`第${i}天`);
+    }
+    expect(Array.from(text).length).toBeLessThanOrEqual(400);
+  });
+
+  it("「还没聊完」必须留在周汇总里（它是主动由头的原料）", () => {
+    const digests = Array.from({ length: 7 }, (_, i) =>
+      digest(`2026-10-${String(12 + i).padStart(2, "0")}`, longDay(i + 1), ["裁员的事到底怎么落还没定"]),
+    );
+    const text = buildWeeklySummary(digests);
+    expect(text).toContain("还没聊完");
+    expect(text).toContain("裁员的事到底怎么落还没定");
+    expect(Array.from(text).length).toBeLessThanOrEqual(400);
+  });
+
+  it("没有未完成话题时不加尾巴", () => {
+    const text = buildWeeklySummary([digest("2026-10-12", "今天随便聊了聊")]);
+    expect(text).not.toContain("还没聊完");
+  });
+
+  it("超过 7 天只保留最近 7 天", () => {
+    const digests = Array.from({ length: 9 }, (_, i) =>
+      digest(`2026-10-${String(10 + i).padStart(2, "0")}`, `第${i + 1}天`),
+    );
+    const text = buildWeeklySummary(digests);
+    expect(text).not.toContain("第1天");
+    expect(text).toContain("第9天");
+  });
+});

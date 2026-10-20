@@ -15,6 +15,7 @@ import {
   listAnchors,
   listRecentDigests,
   markJobRun,
+  formatWeeklyInjection,
   scoreSalience,
   summarizeAnchor,
   touchAnchors,
@@ -241,5 +242,29 @@ describe("scoreSalience：至亲离世必须能记住（v0.8.15 真实冒烟驱�
 
   it("承诺 + 共同经历仍然是强信号（原有行为不变）", () => {
     expect(score("我们约好了下个月一起去看海")).toBeGreaterThanOrEqual(0.75);
+  });
+});
+
+describe("formatWeeklyInjection（v0.8.18）", () => {
+  it("有周汇总 → 生成一小段注入文本，带周起点与时间提醒", () => {
+    const text = formatWeeklyInjection({
+      week_start: "2026-10-12",
+      summary: "他月底要上线晚风信箱项目；被老板谈话；橘猫团子踩坏键盘",
+    });
+    expect(text).toContain("上一周大概");
+    expect(text).toContain("2026-10-12");
+    expect(text).toContain("晚风信箱");
+    expect(text).toContain("别当成这两天刚发生的");
+  });
+
+  it("超长摘要被压到 140 字以内（不能抢锚点/日记忆的 prompt 预算）", () => {
+    const text = formatWeeklyInjection({ week_start: "2026-10-12", summary: "长".repeat(500) });
+    const body = text.replace(/\s+/g, "");
+    expect(Array.from(body).length).toBeLessThan(200);
+  });
+
+  it("没有周汇总 → 空串（不注入）", () => {
+    expect(formatWeeklyInjection(null)).toBe("");
+    expect(formatWeeklyInjection({ week_start: "2026-10-12", summary: "   " })).toBe("");
   });
 });

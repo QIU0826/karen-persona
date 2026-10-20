@@ -210,23 +210,76 @@ export async function runDailyDigest(input: RunDailyDigestInput): Promise<JobRes
 // ── 周汇总（规则版，先不上 LLM） ────────────────
 
 /** 把一周的日记忆拼成周汇总（规则拼接，避免每周多一次 LLM 调用）。 */
+export const WEEKLY_SUMMARY_MAX_CHARS = 400;
+/** 每周最多纳入几天（按日记忆最近 7 条） */
+export const WEEKLY_MAX_DAYS = 7;
+/** 未完成话题最多保留几条、每条最多多少字 */
+const WEEKLY_MAX_THREADS = 3;
+const WEEKLY_THREAD_CHARS = 24;
+
+/**
+ * 周汇总文本（纯拼接，不调模型）。
+ *
+ * v0.8.18：原来是「拼完再 slice(0,400)」——真实冒烟用 7 天各约 100 字的日记忆跑，
+ * 结果**「还没聊完」整段被截掉**（那正是她一周后该记得的"什么没做完"，也是主动由头的原料），
+ * 最后一天也被截成半句。
+ *
+ * 现在改成先给尾部（未完成话题）留预算，再按天均分剩余预算：
+ * - 每一天都保留（覆盖整周，不漏天）；
+ * - 每条日记忆按配额截短（超出加省略号），不会出现"最后一天被砍掉"；
+ * - 总长严格 ≤ WEEKLY_SUMMARY_MAX_CHARS。
+ */
 export function buildWeeklySummary(digests: DailyDigestRow[]): string {
   if (digests.length === 0) return "";
-  const ordered = [...digests].sort((a, b) => a.day.localeCompare(b.day));
-  const threads = new Set<string>();
+  const ordered = [...digests].sort((a, b) => a.day.localeCompare(b.day)).slice(-WEEKLY_MAX_DAYS);
+
+  // 1) 先算尾部（未完成话题）：去重、截短、最多 3 条
+  const threads: string[] = [];
   for (const d of ordered) {
     try {
-      for (const t of JSON.parse(d.open_threads_json ?? "[]") as string[]) {
-        if (t) threads.add(t);
+      for (const raw of JSON.parse(d.open_threads_json ?? "[]") as string[]) {
+        const text = String(raw ?? "").replace(/\s+/g, " ").trim();
+        if (!text || threads.includes(text)) continue;
+        threads.push(
+          Array.from(text).length > WEEKLY_THREAD_CHARS
+            ? `${Array.from(text).slice(0, WEEKLY_THREAD_CHARS).join("")}…`
+            : text,
+        );
       }
     } catch {
       // 忽略坏数据
     }
   }
-  const head = ordered.map((d) => `${d.day.slice(5)} ${d.summary}`).join("；");
-  const tail = threads.size > 0 ? ` 还没聊完：${[...threads].slice(0, 3).join("、")}。` : "";
-  const text = `${head}。${tail}`;
-  return text.length > 400 ? `${text.slice(0, 400)}…` : text;
+  const tail =
+    threads.length > 0 ? ` 还没聊完：${threads.slice(0, WEEKLY_MAX_THREADS).join("、")}。` : "";
+  const tailChars = Array.from(tail).length;
+
+  // 2) 每天预留「MM-DD 」前缀 6 字 + 分号 1 字；剩余预算均分给日记忆正文
+  const dayCount = ordered.length;
+  const prefixChars = 6;
+  const separators = Math.max(1, dayCount - 1);
+  const bodyBudget = Math.max(
+    dayCount * 12,
+    WEEKLY_SUMMARY_MAX_CHARS - tailChars - dayCount * prefixChars - separators,
+  );
+  const perDay = Math.max(12, Math.floor(bodyBudget / dayCount));
+
+  const head = ordered
+    .map((d) => {
+      const chars = Array.from((d.summary ?? "").replace(/\s+/g, " ").trim());
+      const body = chars.length > perDay ? `${chars.slice(0, perDay).join("")}…` : chars.join("");
+      return `${d.day.slice(5)} ${body}`;
+    })
+    .join("；");
+
+  let text = `${head}。${tail}`;
+  // 3) 兜底：极端情况下（每天都很短、话题很多）再收一次，优先保留尾部
+  if (Array.from(text).length > WEEKLY_SUMMARY_MAX_CHARS) {
+    const keep = WEEKLY_SUMMARY_MAX_CHARS - tailChars - 1;
+    const headChars = Array.from(head);
+    text = `${headChars.slice(0, Math.max(0, keep)).join("")}…${tail}`;
+  }
+  return text;
 }
 
 /** 写入某周的周汇总（幂等）。 */
