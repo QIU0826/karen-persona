@@ -94,6 +94,7 @@ import { startWebServer, type WebServerHandle } from "../web/server.js";
 import { isSpeechAvailable, synthesizeSpeech } from "../ai/tts.js";
 import { decideVoice, type VoiceSettings } from "../impulse/voice.js";
 import { detectMediaRequest } from "../impulse/media-request.js";
+import { collectSticker, downloadStickerBytes } from "../data/sticker-library.js";
 import { isWithinTurnDuplicate } from "../persona/anti-repetition.js";
 import {
   DEFAULT_TYPO_RECALL_SETTINGS,
@@ -1092,6 +1093,36 @@ function buildPacing(state: ConversationState): PacingResult {
   });
 }
 
+// ── 表情包持续收集（v0.6）─────────────────────
+
+/**
+ * 入站图片/表情包 → 本地库（fire-and-forget）。
+ *
+ * 只存**用户主动发来的**图片，且只在本机使用；默认关闭，需要 `KAREN_STICKER_COLLECT=on`
+ * 才开启（首周建议只入库不发送）。视觉描述里的关键词作为初始标签（后续可让模型重新打标）。
+ */
+function maybeCollectSticker(url: string | undefined, owner: string, description?: string | null): void {
+  if (!url) return;
+  if (process.env.KAREN_STICKER_COLLECT !== "on") return;
+  void (async () => {
+    try {
+      const bytes = await downloadStickerBytes(url);
+      if (!bytes) return;
+      const tags = (description ?? "")
+        .replace(/[^\u4e00-\u9fffA-Za-z0-9]+/g, " ")
+        .split(" ")
+        .filter((t) => t.length >= 2)
+        .slice(0, 5);
+      const result = collectSticker({ ownerId: owner, bytes, source: "inbound", tags });
+      if (result.reason === "saved") {
+        log.info("sticker.collected", { owner, bytes: bytes.length, id: result.id });
+      }
+    } catch {
+      // 采集失败完全不影响聊天
+    }
+  })();
+}
+
 // ── 打错字 → 撤回 → 重发修正（v0.3 真实感）──────
 
 /** 上次给某用户演「打错字撤回」的时间（冷却用；进程内即可，重启最多多演一次） */
@@ -1538,6 +1569,7 @@ async function handlePrivateBatch(
         syntheticText = `[图片：${desc}]`;
         log.info("vision.described", { chars: charCount(desc), source: "private" });
       }
+      maybeCollectSticker(media.data.url, ownerForQq(userId), desc);
     }
 
     // 图片/表情附带文字时保留文字（raw_message 去掉 CQ 码后的残余）

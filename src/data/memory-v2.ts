@@ -110,6 +110,23 @@ export function ensureMemoryV2Schema(db: Database): void {
       created_at INTEGER NOT NULL,
       UNIQUE(persona_id, owner_id, week_start)
     );
+    CREATE TABLE IF NOT EXISTS sticker_library (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      owner_id TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      file TEXT NOT NULL,
+      source TEXT,
+      tags_json TEXT,
+      emotion TEXT,
+      use_count INTEGER DEFAULT 0,
+      first_seen_at INTEGER,
+      last_used_at INTEGER,
+      mime TEXT,
+      bytes INTEGER,
+      UNIQUE(owner_id, hash)
+    );
+    CREATE INDEX IF NOT EXISTS idx_sticker_owner
+      ON sticker_library(owner_id, last_used_at, use_count);
     CREATE TABLE IF NOT EXISTS getting_to_know (
       owner_id TEXT NOT NULL,
       topic TEXT NOT NULL,
