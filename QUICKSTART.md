@@ -2,7 +2,7 @@
 
 让通讯录里住进一个有自己生活、情绪、记忆和社交圈的人。
 
-> 本文对应 2026-10 的 M0 地基修复版本。功能现状以 [README 的「功能状态」表](README.md#功能状态) 为准——未完成的能力会标成「半成品 / 规划中」。完整审计与路线图见 [docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md)。
+> 本文对应 2026-10 的 M0–M2 版本（地基修复 + 产品化：首次引导/人设包/Web 控制台/真实长跑工具）。功能现状以 [README 的「功能状态」表](README.md#功能状态) 为准——未完成的能力会标成「半成品 / 规划中」。完整审计与路线图见 [docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md)。
 
 ## 你需要准备
 
@@ -139,7 +139,19 @@ user_personas:
   987654321: "suchi"      # QQ 987654321 → 苏迟
 ```
 
-> 注意：该配置链路已在 M0 修复（`loadConfig` 会返回并校验 `user_personas`；QQ 号建议加引号，避免 YAML 把数字解析成 number）。但**同一人设的多个好友仍会共享会话与记忆**，完整多用户隔离尚未实现；把这个实例同时给多个朋友用之前请先看 README 的「已知限制」。
+> 注意：该配置链路已在 M0 修复（`loadConfig` 会返回并校验 `user_personas`；QQ 号建议加引号，避免 YAML 把数字解析成 number）。**多用户隔离已实现**（M1）：主用户沿用历史会话/状态/记忆，其他好友各自隔离，不会串记忆；把实例给朋友用小范围使用是可行的（仍需自行承担 NapCat 封号风险，见 README「已知限制」）。
+
+## 8. 本地 Web 控制台 + 数据导出（可选）
+
+桥接启动后，浏览器打开 **`http://127.0.0.1:18082/`**（仅本机）：
+
+- 聊天 / 记忆搜索 / 关系时间线 / 状态与成本四个只读视图；
+- 顶栏「导出当前用户」：下载该用户的会话 + 人格状态 + T2 记忆 JSON（不落盘）；
+- 默认只展示主用户。想让页面能切换查看其他好友：`config.yaml` 设 `web_all_owners: true`（或 `.env` 设 `WEB_ALL_OWNERS=true`）后重启桥接；
+- 想加访问 token：`web_token`（页面 URL 带 `?token=...`，或请求头 `X-Web-Token`）；
+- `/health` 与 `/cost` 在 `http://127.0.0.1:18081/`。
+
+> 控制台只读、仅绑本机；删除/暂停等写操作尚未提供。
 
 ## 可选：让 Karen 开机自启（PM2）
 
@@ -204,7 +216,7 @@ Windows：`netstat -ano | findstr :18080` 找到 PID 后结束进程，或把 `O
 这是 LLM/网络失败时的人设内兜底句（M0 起不再发送会破坏人设的 `[系统]` 文案；请求本身已带超时与 429/5xx 重试）。先确认 `.env` 的 Key 与网络是否正常，再重试。
 
 **Q: 如何换人设？**
-修改 `config.yaml` 的 `persona` 字段并重启。不同人设的记忆数据按人设隔离；同一人设的多个好友仍会共享会话/记忆。
+修改 `config.yaml` 的 `persona` 字段并重启。不同人设的记忆数据按人设隔离；同一人设下的多个好友也已是隔离的（M1 多用户隔离）。
 
 **Q: 我想创建自己的人设？**
 阅读 [PERSONA_GUIDE.md](PERSONA_GUIDE.md)，然后 `npm run persona:narrate`（叙事式）或 `npm run persona:create`（脚手架），最后 `npm run persona:check <id>` 校验。

@@ -1,6 +1,6 @@
 # karen-persona 项目总控
 
-> 最后更新：2026-10（M1 核心体验闭环阶段）
+> 最后更新：2026-10-20（M2 产品化与发布准备阶段）
 >
 > **单一事实源**：功能现状与路线图以 [docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md) 为准；对外表述以 [README.md](README.md) 为准。
 > 原则：**宁少说，不夸大**。文档里的每个功能宣称都必须能在代码中找到对应；不确定的写成「半成品 / 规划中」，绝不把设计目标写成已实现。
@@ -9,7 +9,7 @@
 
 QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、情绪、记忆和社交圈的人」，而不是一个问答助手。
 
-当前阶段：**M1 核心体验闭环（2026-10）**。M0 地基已修复完成（新装可用、不丢消息、安全加固、文档真话）；M1 正在让「她真的会变化」成立：状态持久化、关系成长、演化可见化。M1/M2 路线见审计报告第 5 节。
+当前阶段：**M2 产品化收尾 + 发布准备（2026-10）**。M0 地基已修复完成（新装可用、不丢消息、安全加固、文档真话）；M1 核心体验闭环主要项已完成（状态持久化、关系成长、演化可见化、多用户隔离、双管线对齐、检索增强）；M2-A 首次引导 2.0、M2-B 人设包 v2、M2-C 多用户只读 Web + 导出、M2-D 真实长跑工具已实施；发布检查见 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（未 push/tag）。M1/M2 路线见审计报告第 5 节。
 
 ## 技术栈（如实）
 
@@ -99,6 +99,7 @@ npm run setup      # 交互式配置向导
 - **群聊贴纸/发图（2026-10-20）**：新增 `src/bridge/group-reply.ts` 出站计划（纯函数+单测）：群聊回复 = 文字气泡 → QQ 表情 →（可选）照片；群聊也接本地贴纸（收到表情更愿意回，按「群+人」5 分钟冷却）；生活照默认不发群，`group_photo_enabled: true` 才开（config.yaml 或 `GROUP_PHOTO=true`）；`processMessage` 新增 `skipPhoto` 开关，群聊默认跳过发图决策。测试 51 文件 / 582 用例。
 - **年龄门 18+ 确认（2026-10-20）**：新增 `src/data/consent.ts`（SQLite `user_consent`，按 owner 隔离）+ `src/persona/age-gate.ts`（确认/未成年识别、动作裁决、文案）；QQ 私聊首次对话发「披露 + 18+ 确认请求」，未确认前不进入角色对话（每 5 分钟最多提醒一次），回复「我成年了」后记录并放行；明确表示未成年的用户拒绝服务；群聊里未确认用户不回复；新增 `/age` 命令查看状态；`age_gate_enabled` 默认 true（CLI 开发者模式不强制）。测试 53 文件 / 596 用例。
 - **成本统计覆盖旁路 LLM（2026-10-20）**：新增 `src/ai/aux-usage.ts` 统一记账；事实抽取/内心独白（含深夜独白）/T3 摘要/herView/进化日志/叙事重构/视觉描述/配图搜索词全部写入 `llm_usage`（带 `kind`）；`/cost` 与 Web 控制台新增「按用途」拆分（对话/事实抽取/独白/长期摘要/图片识别…）。真实验证：一次事实抽取调用写入 kind=fact_extraction、prompt 234 / completion 63、¥0.000486。测试 54 文件 / 600 用例。
+- **发布准备（2026-10-20）**：干净 checkout（`git archive` → 临时目录 + 软链 node_modules）复验通过：typecheck 0、679 用例全绿、doctor 在缺 config/.env 时给出可执行指引；仓库卫生检查（无 .env/config.yaml/data/coverage 入库、无真实密钥、跟踪文件 257 个约 12.6MB）；新增 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（检查结果 + 发布步骤 + Release Note 草案）；版本号/ push / tag 待用户拍板。
 - **M2-D 真实 QQ 长跑工具 + 首轮真机修复（2026-10-20）**：新增 `src/eval/qq-realrun.ts`（只读快照/回合延迟/重复空回复/成本/事实/同意 → 报告）+ `scripts/qq-longrun-watch.ts` + `npm run qq:watch`，结束写 `data/realrun-*.md`（含对话原文，600 权限）；支持 `--once --since <时间>` 随时复盘历史并标记「AI 披露未确认/空回复/重复/无成本记录」。首轮真机（3 轮）暴露并修复：①老用户 session 非空导致 AI 披露被跳过 → 改为按 `user_consent.disclosure_acked_at` 补发（`shouldSendDisclosure`），披露/`/about` 文案改用当前人设名；②消息门未把当前消息计入「5 分钟连续跟进」，18s 后的追问被随机延迟 31 分钟 → `buildGateContext` 修正并补回归测试。测试 67 文件 / 678 用例。
 - **M2-C 单 owner 导出（2026-10-20）**：`user-export.ts` 拆出 `buildUserExportPayload`（只读组装，不落盘）+ Web API `GET /api/export?owner=`（JSON 附件下载，ASCII 安全文件名，默认仅主用户、开启 `web_all_owners` 后可导出其他 owner；非法/越权 400/403）；前端顶栏「导出当前用户」按钮（自动带 token/owner）。测试：导出新文件 3 条场景 + dashboard 断言；全仓 65 文件 / 666 用例。
 - **M2-C 多租户 Web 最小版（2026-10-20）**：新增 `src/web/owner-view.ts`（owner↔storageKey/persona 映射、扫描会话/facts/consent 汇总已知 owner）+ Web API `/api/owners`；`?owner=` 支持只读切换会话/时间线/记忆/总览（默认 `web_all_owners: false` 只展示主用户，开启后允许切换；`/api/facts?owner=` 保持历史只读行为）；前端顶栏 owner 下拉（仅在 >1 用户且开启时显示）。配置 `web_all_owners`（config.yaml 或 `WEB_ALL_OWNERS`），桥接传入 primaryOwner/allOwners。新增测试 7 条（owner 映射/汇总 + 多用户 API 作用域 200/403 + 页面选择器）。测试 65 文件 / 665 用例。
@@ -188,6 +189,7 @@ npm run setup      # 交互式配置向导
 - [docs/TECH_RADAR_INFRA.md](docs/TECH_RADAR_INFRA.md) — IM/多模态/前端/基础设施技术雷达
 - [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md) — 30 轮真实模型长跑回归（记忆/事实/AI 味/延迟/成本）
 - [docs/M2_PRODUCT_PLAN.md](docs/M2_PRODUCT_PLAN.md) — M2 产品化方案（A 首次引导 2.0、B 人设包 v2、C 多用户只读 Web 已实施）
+- [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md) — 发布准备：干净 checkout 复验、仓库卫生、Release Note 草案与待拍板事项
 - [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md) — 真实 QQ 长跑验证流程、首轮结果与修复记录
 - [docs/PERSONA_PACK.md](docs/PERSONA_PACK.md) — 人设包 v2 规范（manifest/素材/记忆种子/CLI/限制）
 - [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md) — mock-OneBot 桥接端到端测试（披露/年龄门/私聊/图片/群聊）

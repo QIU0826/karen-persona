@@ -6,9 +6,9 @@
 
 > ⚠️ **免责声明**：本项目仅用于个人回忆与情感疗愈，不用于骚扰、跟踪或侵犯他人隐私。**她是 AI，不是真人**。QQ 桥接依赖非官方协议（NapCatQQ），存在封号与协议变更风险，请使用小号并自行承担后果。
 
-> **项目状态（2026-10）**：M0「地基修复」完成（新装可启动、延迟消息不丢、QQ 桥接安全加固、LLM 异常兜底、文档真话）；**M1 进行中**：情绪/负债/关系/演化状态已持久化（重启不归零）、亲密度会随互动成长并有里程碑、CLI 可查看她的日记/关系时间线/她眼中的你；图片识别已切换到 DeepSeek Flash（不再需要 Qwen-VL Key）。多用户隔离已完成（主用户兼容历史数据，其他好友隔离）；双管线行为已对齐（QQ 流式主路径与完整管线同步演化）；记忆检索已加 **DeepSeek 候选重排**（默认开启，20 条金标 recall@1 55%→95%，见 [docs/SEMANTIC_BOOST_EVAL.md](docs/SEMANTIC_BOOST_EVAL.md)），**真语义向量**（需 Qwen Key 或本地模型）仍在 M1/M2。本文所有功能宣称都以当前代码为准：未完成的能力明确标成「半成品 / 规划中」，不会把设计目标写成已实现。完整的功能清单、差距分析与 M0–M3 路线图见 **[docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md)**。
+> **项目状态（2026-10）**：M0「地基修复」完成（新装可启动、延迟消息不丢、QQ 桥接安全加固、LLM 异常兜底、文档真话）；M1 核心体验闭环已完成主要项（情绪/负债/关系/演化状态持久化、亲密度成长与里程碑、CLI 可看日记/时间线/她眼中的你、多用户隔离、双管线对齐、记忆检索 DeepSeek 候选重排 20 条金标 recall@1 55%→95%）；M2 产品化已交付 **首次引导 2.0**（setup 变成她记得的第一段对话）、**人设包 v2**（manifest/素材/记忆种子/CLI）、**本地 Web 控制台多用户只读视图 + 单用户 JSON 导出**、**真实 QQ 长跑观察工具**。图片识别走 DeepSeek Flash（不需要 Qwen-VL Key）；真语义向量（需 Qwen Key 或本地模型）仍未开启。本文所有功能宣称都以当前代码为准：未完成的能力明确标成「半成品 / 规划中」，不会把设计目标写成已实现。完整功能清单与路线图见 **[docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md)**。
 >
-> 仓库实测状态（2026-10-19）：`npm run typecheck` 0 错误；`npm test` **67 个测试文件 / 679 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例，M0/M1 新增数据层、消息门、编排器、桥接解析、天气、关系成长、状态持久化、演化视图、AI 路由/视觉等测试）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线；CLI + 真实 DeepSeek Key 已完成 3 轮端到端实测（含缓存命中、关系成长、重启恢复）；另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）。真实 QQ/NapCat 端到端仍需真机人工验证。
+> 仓库实测状态（2026-10-20）：`npm run typecheck` 0 错误；`npm test` **67 个测试文件 / 679 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 54.1%）。**干净 checkout（`git archive` 到临时目录）已复验**：typecheck 0 错误、679 用例全绿、doctor 在缺 config/.env 时给出可执行的修复指引。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**。
 
 ---
 
@@ -190,7 +190,7 @@ npm run dev
 | 人设创建 / 叙事创建 | 🚧 | `persona:create` 脚手架、`persona:narrate` 五种入口；叙事创建是**正则推导**而非 LLM 分析 |
 | 人设包 v2（安装/分发） | ✅ | `manifest.json` + `persona.json` + 可选素材/记忆种子；`npm run persona:pack:validate/install/list`；结构/引擎兼容校验、覆盖备份、种子默认不写库；规范见 [docs/PERSONA_PACK.md](docs/PERSONA_PACK.md) |
 | 人设字段进入 Prompt | 🚧 | 不足一半的字段真正影响对话（审计 2.3） |
-| 不同好友不同人设 | 🚧 | M0 修复配置链路；同一人设多好友仍共享会话/记忆 |
+| 不同好友不同人设 | 🚧 | 配置链路可用；M1 起多用户隔离（主用户兼容历史数据，其他好友的会话/状态/记忆隔离）；同一人设下的不同好友不会串记忆 |
 | 演化（基线漂移 / 因果链 / 叙事重构 / herView） | 🚧 | 模块存在，但多数未接入 QQ 主路径、状态不持久化；重启归零 |
 | 亲密度 / 关系成长 | 🗺 | `relationship.closeness` 当前不会被运行时修改 |
 
@@ -381,6 +381,8 @@ karen-persona/
 - **这是 AI，不是真人。** 请勿在心理脆弱期过度依赖。
 - QQ 桥接使用 NapCatQQ 协议，本项目不提供 QQ 账号，封号风险由使用者承担。
 - 本项目为开源学习与个人疗愈用途。使用者自行承担使用后果。
+
+发布检查与 Release Note 草案见 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)。
 
 ---
 
