@@ -90,6 +90,15 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 M2-D 真实长跑工具 + 首轮真机修复）
+
+- **工具**：`src/eval/qq-realrun.ts` + `scripts/qq-longrun-watch.ts` + `npm run qq:watch`（只读观察真实回合/延迟/成本/事实/同意，结束写 `data/realrun-*.md`）；报告含空回复/重复/延迟/成本/异常标记。
+- **真机首轮（3 轮）**：延迟 2–4s，成本约 ¥0.0057；发现两个真实问题并修复：
+  1. **老用户无 AI 披露**：披露只看 session 是否为空，升级用户被跳过 → `shouldSendDisclosure` 按 `user_consent.disclosure_acked_at` 补发；披露/`/about` 文案支持人设名（不再硬编码小雅）。
+  2. **快速追问被误延迟 31 分钟**：消息门当前消息未计入「5 分钟连续跟进」→ `buildGateContext` 修正 + 回归测试。
+- **测试**：+12 条（报告/采集/CLI/披露/门控回归）；全仓 67 文件 / 678 用例，tsc 0、lint 0、覆盖率阈值通过（行 53.9%）。
+- **状态**：桥接已带修复重启，继续观察真实对话。
+
 ### ✅ 已完成（2026-10-20 M2-C 单 owner 导出）
 
 - `user-export.ts` 拆出 `buildUserExportPayload`（只读组装，不落盘）/ `exportDownloadFilename`（ASCII 安全）。

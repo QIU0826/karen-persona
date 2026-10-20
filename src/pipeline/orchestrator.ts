@@ -506,13 +506,21 @@ export function buildGateContext(
     (m) => m.role === "user" && m.timestamp >= todayStart
   );
   const messageCountToday = userMsgsToday.length;
-  const isRapidFollowUp =
-    userMsgsToday.length >= 2 &&
-    userMsgsToday[userMsgsToday.length - 1].timestamp -
-      userMsgsToday[userMsgsToday.length - 2].timestamp <
-      5 * 60 * 1000;
-
   const trimmed = userInput.trim();
+  // 门控在写入本轮用户消息之前调用（CLI/QQ、流式/非流式一致）。
+  // 判断「连续快速跟进」时要把当前这条也算进去，否则刚回完一句紧跟着的第二句
+  // 会被当成普通消息去掷工作延迟（2026-10-20 真机复现：18s 内连发仍被延迟 31 分钟）。
+  const lastSessionMsg = session.messages[session.messages.length - 1];
+  const currentAlreadySaved =
+    lastSessionMsg?.role === "user" &&
+    lastSessionMsg.content === trimmed &&
+    now.getTime() - lastSessionMsg.timestamp < 2_000;
+  const userTimestamps = userMsgsToday.map((m) => m.timestamp);
+  if (!currentAlreadySaved) userTimestamps.push(now.getTime());
+  const isRapidFollowUp =
+    userTimestamps.length >= 2 &&
+    userTimestamps[userTimestamps.length - 1] - userTimestamps[userTimestamps.length - 2] <
+      5 * 60 * 1000;
   const msgType: GateContext["messageType"] =
     /^\[图片/.test(trimmed) ? "image" : /^\[语音/.test(trimmed) ? "voice" : "text";
 

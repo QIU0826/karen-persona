@@ -12,15 +12,32 @@
 export const DISCLOSURE_VERSION = 1;
 
 /**
+ * 是否需要补发 AI 披露。
+ *
+ * 不能只看「会话是否为空」：老版本升级上来的用户会话已有上百条，但从未确认过披露；
+ * 披露应该按 owner 只发一次（以 user_consent.disclosure_acked_at 为准）。
+ */
+export function shouldSendDisclosure(input: {
+  enabled: boolean;
+  acknowledgedAt?: number | null;
+}): boolean {
+  return input.enabled && !input.acknowledgedAt;
+}
+
+/**
  * 首次对话披露文案（短版，发一条消息）。
  * @param options.ageGate 开启年龄门时，把最后一句改成「确认 18+」的指引（QQ 正式发布默认）
+ * @param options.herName 人设名（默认小雅；多人设时必须传，否则披露会说错名字）
  */
-export function buildFirstContactDisclosure(options: { ageGate?: boolean } = {}): string {
+export function buildFirstContactDisclosure(
+  options: { ageGate?: boolean; herName?: string } = {},
+): string {
+  const herName = options.herName?.trim() || "小雅";
   const lastLine = options.ageGate
     ? "继续聊之前，请先确认你已满 18 岁（回复「我成年了」）。"
     : "想继续聊就直接发消息吧。";
   return [
-    "先说明一下：我是小雅，一个 AI 扮演的虚拟角色，不是真人。",
+    `先说明一下：我是${herName}，一个 AI 扮演的虚拟角色，不是真人。`,
     "我们的聊天内容存在本机，但生成回复时会把对话（以及你发的图片）发送给 AI 服务；语义记忆若启用还会用到向量服务。",
     "本服务面向 18 岁以上用户；如果你未满 18 岁，请在监护人陪同下使用。",
     lastLine,
@@ -28,10 +45,11 @@ export function buildFirstContactDisclosure(options: { ageGate?: boolean } = {})
 }
 
 /** /about 详细说明。 */
-export function buildAboutText(): string {
+export function buildAboutText(options: { herName?: string } = {}): string {
+  const herName = options.herName?.trim() || "小雅";
   return [
     "【关于这个角色】",
-    "· 这是一个 AI 虚拟人角色（当前人设：小雅），由大语言模型驱动，不是真人。",
+    `· 这是一个 AI 虚拟人角色（当前人设：${herName}），由大语言模型驱动，不是真人。`, 
     "· 微信/QQ 上的文字可能由模型生成；她的人设、记忆、情绪状态都是程序的一部分。",
     "",
     "【数据会去哪里】",

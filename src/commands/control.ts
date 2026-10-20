@@ -139,7 +139,7 @@ export async function handleControlCommand(
       return true;
     }
     case "about":
-      deps.reply(buildAboutText());
+      deps.reply(buildAboutText({ herName: state.persona?.name }));
       return true;
     case "age": {
       const owner = (state as unknown as { owner?: string }).owner ?? "";

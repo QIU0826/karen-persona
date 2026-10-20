@@ -54,6 +54,20 @@ describe("buildGateContext", () => {
     expect(buildGateContext(state, "快回", NOW).isRapidFollowUp).toBe(true);
   });
 
+  it("刚回完一句就紧跟的第二句算连续跟进（当前消息也要计入间隔）", () => {
+    const state = makeState([
+      { role: "user", content: "在干嘛", timestamp: todayAt(14, 58) },
+      { role: "assistant", content: "在忙", timestamp: todayAt(14, 58) + 3_000 },
+      { role: "user", content: "忙什么？", timestamp: todayAt(14, 59) },
+      { role: "assistant", content: "整理东西", timestamp: todayAt(14, 59) + 3_000 },
+    ]);
+    // 上一条用户消息在 1 分钟前（<5min）→ 当前这条也算快速跟进
+    const ctx = buildGateContext(state, "啥呀？忘记你是干什么的了", NOW);
+    expect(ctx.isRapidFollowUp).toBe(true);
+    // messageCountToday 仍只统计已落库的消息（当前消息由调用方写入）
+    expect(ctx.messageCountToday).toBe(2);
+  });
+
   it("识别短问句快聊与自然收尾", () => {
     const state = makeState([]);
     expect(buildGateContext(state, "在吗？", NOW).isQuickChat).toBe(true);

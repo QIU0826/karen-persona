@@ -68,7 +68,7 @@ import {
 import { describeImage } from "../ai/vision.js";
 import { handleControlCommand } from "../commands/control.js";
 import { exportUserData } from "../data/user-export.js";
-import { buildFirstContactDisclosure } from "../persona/disclosure.js";
+import { buildFirstContactDisclosure, shouldSendDisclosure } from "../persona/disclosure.js";
 import {
   buildAgeConfirmedText,
   buildAgeDeclinedText,
@@ -78,7 +78,7 @@ import {
   shouldEnforceAgeGate,
   stripAgeConfirmationMarkers,
 } from "../persona/age-gate.js";
-import { ackDisclosure, confirmAge, hasAgeConfirmation } from "../data/consent.js";
+import { ackDisclosure, confirmAge, getConsent, hasAgeConfirmation } from "../data/consent.js";
 import { ownerForQq } from "../data/owner.js";
 import { pickSticker, toStickerCqCode } from "../impulse/stickers.js";
 import { buildGroupReplyPlan } from "./group-reply.js";
@@ -1230,11 +1230,20 @@ async function handlePrivateBatch(
       const st = await initConversation(persona, sharedBase.config, ownerForQq(userId));
       st.stickerMode = "qqface";
       userStates.set(userId, st);
-      if (sharedBase.config.ai_disclosure && st.session.messages.length === 0) {
+      // 披露按 owner 只发一次：老版本升级上来的用户 session 非空但从未确认过披露，也要补发
+      if (
+        shouldSendDisclosure({
+          enabled: sharedBase.config.ai_disclosure,
+          acknowledgedAt: getConsent(st.owner)?.disclosureAckedAt,
+        })
+      ) {
         const gatePending =
           shouldEnforceAgeGate(st.owner, sharedBase.config.age_gate_enabled) &&
           !hasAgeConfirmation(st.owner);
-        sendPrivateMsg(userId, buildFirstContactDisclosure({ ageGate: gatePending }));
+        sendPrivateMsg(
+          userId,
+          buildFirstContactDisclosure({ ageGate: gatePending, herName: st.persona.name }),
+        );
         ackDisclosure(st.owner);
         log.info("compliance.disclosure_sent", { user_id: userId });
       }
@@ -1270,9 +1279,18 @@ async function handlePrivateBatch(
     const gatePending =
       shouldEnforceAgeGate(st.owner, sharedBase.config.age_gate_enabled) &&
       !hasAgeConfirmation(st.owner);
-    // 合规：首次对话披露（AI 身份 + 数据去向 + 18+），仅新会话发一次
-    if (sharedBase.config.ai_disclosure && st.session.messages.length === 0) {
-      sendPrivateMsg(userId, buildFirstContactDisclosure({ ageGate: gatePending }));
+    // 合规：披露按 owner 只发一次（AI 身份 + 数据去向 + 18+）。
+    // 不能只看「会话是否为空」：老版本升级用户 session 已有上百条，但从未确认过披露。
+    if (
+      shouldSendDisclosure({
+        enabled: sharedBase.config.ai_disclosure,
+        acknowledgedAt: getConsent(st.owner)?.disclosureAckedAt,
+      })
+    ) {
+      sendPrivateMsg(
+        userId,
+        buildFirstContactDisclosure({ ageGate: gatePending, herName: st.persona.name }),
+      );
       ackDisclosure(st.owner);
       log.info("compliance.disclosure_sent", { user_id: userId });
     }
