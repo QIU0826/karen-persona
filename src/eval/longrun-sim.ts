@@ -105,9 +105,10 @@ export interface LongRunMetrics {
   questionEndingRate: number;
 }
 
-// 只看「中文括号/方括号」的动作描述；ASCII 括号通常是颜文字（=^･ω･^=），不算违规
-const BRACKET_RE = /（[^）]*）|【[^】]*】|\[[^\]]*\]/;
-const DEFLECTION_RE = /考我|查岗|抽查|我记性没那么差/;
+// 只看中文括号/【】以及「内含中文的 ASCII 方括号」（动作描述）；
+// 纯符号方括号通常是颜文字（(:3[▓▓]），不算违规
+const BRACKET_RE = /（[^）]*）|【[^】]*】|\[[^\]]*[\u4e00-\u9fff][^\]]*\]/;
+const DEFLECTION_RE = /记性没那么差|记性没那么好|我记性不好|考我|查岗|抽查/;
 const TRAILING_SOFT_RE = /[，,、；;]\s*$/;
 
 function lines(reply: string): string[] {
@@ -204,6 +205,8 @@ export interface LongRunResult {
   replies: LongRunReply[];
   metrics: LongRunMetrics;
   facts: Array<{ key: string; value: string }>;
+  /** T3 压缩结果（30 轮通常不够 40 条，但便于观测） */
+  t3: { summaries: number; uncompressed: number; newest: string | null };
   counts: { t2: number; t1: number; facts: number };
   cost: {
     calls: number;
@@ -263,6 +266,36 @@ export async function runLongRunLive(options: { turns?: number } = {}): Promise<
       t1: Number((db.prepare("SELECT COUNT(*) c FROM t1_snapshots").get() as { c: number }).c),
       facts: Number((db.prepare("SELECT COUNT(*) c FROM user_facts").get() as { c: number }).c),
     };
+    const t3Row = db
+      .prepare(
+        `SELECT content FROM t2_episodes
+         WHERE persona_id = ? AND source = 't3_summary' ORDER BY id DESC LIMIT 1`,
+      )
+      .get(state.storagePersona) as { content: string } | undefined;
+    const uncompressed = Number(
+      (
+        db
+          .prepare(
+            `SELECT COUNT(*) c FROM t2_episodes
+             WHERE persona_id = ? AND source IN ('chat','event','causal_chain','user_trace')
+               AND strength > 0.1 AND COALESCE(t3_compressed, 0) = 0`,
+          )
+          .get(state.storagePersona) as { c: number }
+      ).c,
+    );
+    const t3 = {
+      summaries: Number(
+        (
+          db
+            .prepare(
+              `SELECT COUNT(*) c FROM t2_episodes WHERE persona_id = ? AND source = 't3_summary'`,
+            )
+            .get(state.storagePersona) as { c: number }
+        ).c,
+      ),
+      uncompressed,
+      newest: t3Row?.content ?? null,
+    };
     const report = getCostReport(2);
     const cost = {
       calls: report.total.calls,
@@ -279,6 +312,7 @@ export async function runLongRunLive(options: { turns?: number } = {}): Promise<
       replies,
       metrics: summarizeLongRun(replies),
       facts: listUserFacts(state.owner).map((fact) => ({ key: fact.key, value: fact.value })),
+      t3,
       counts,
       cost,
     };
@@ -299,7 +333,7 @@ function formatMarkdown(result: LongRunResult): string {
     `- 错误：${m.errors.length}；空回复：${m.flags.emptyTurns.length}`,
     `- 括号动作：${m.flags.bracketTurns.length} 轮；逗号结尾：${m.flags.trailingCommaTurns.length} 轮`,
     `- 记忆防御话术：${m.flags.memoryDeflectionTurns.length} 轮；超长行：${m.flags.longLineTurns.length} 轮`,
-    `- 数据：T2 ${result.counts.t2} / T1 ${result.counts.t1} / facts ${result.counts.facts}`,
+    `- 数据：T2 ${result.counts.t2} / T1 ${result.counts.t1} / facts ${result.counts.facts} / T3 摘要 ${result.t3.summaries}（未压缩 ${result.t3.uncompressed}）`,
     `- 成本：${result.cost.calls} 次 / ¥${result.cost.costCny}`,
     "",
     "## 记忆检查明细",

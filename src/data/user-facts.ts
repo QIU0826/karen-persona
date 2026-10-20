@@ -8,7 +8,7 @@
  * 设计：
  * - 只抽取「对方明确说过的关于自己的稳定事实」，不猜、不提取角色自己的话；
  * - 按 owner 隔离（多用户）；
- * - fire-and-forget：抽取失败不影响回复；15 秒内同一 owner 只抽一次，控制成本；
+ * - fire-and-forget：抽取失败不影响回复；1.5 秒节流窗口内合并排队（连发消息不丢事实），控制成本；
  * - 表结构简单：owner_id + fact_key 唯一，新的值覆盖旧值（比如换工作）；
  * - 覆盖时把旧值写入 `user_fact_history`，注入时对最近变更显示「（之前是：X）」，
  *   让她知道「你以前是 A，现在是 B」，而不是把变化当成没发生过。
@@ -426,16 +426,19 @@ export function groundFacts<T extends { value: string }>(facts: T[], userInput: 
   return facts.filter((fact) => isFactGroundedInUserText(fact.value, userInput));
 }
 
-/** 后台抽取用户事实（fire-and-forget，不阻塞回复）。 */
-export function extractUserFactsAsync(ownerId: string, userInput: string, reply: string): void {
-  try {
-    if (!userInput || userInput.trim().length < 4) return;
-    if (userInput.trim().startsWith("/")) return;
-    const now = Date.now();
-    const last = lastExtractAt.get(ownerId) ?? 0;
-    if (now - last < EXTRACT_COOLDOWN_MS) return;
-    lastExtractAt.set(ownerId, now);
+/** 节流窗口内被跳过的消息先排队，窗口结束后补抽（连发多条也能抽到事实）。 */
+interface PendingExtraction {
+  inputs: string[];
+  reply: string;
+}
 
+const pendingExtractions = new Map<string, PendingExtraction>();
+const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/** 单个窗口最多合并 5 条用户消息，避免刷屏导致 token 失控。 */
+const MAX_PENDING_INPUTS = 5;
+
+async function runExtraction(ownerId: string, userInput: string, reply: string): Promise<void> {
+  try {
     const modelConfig = getChatModel();
     const client = new OpenAI({
       apiKey: modelConfig.apiKey,
@@ -444,47 +447,92 @@ export function extractUserFactsAsync(ownerId: string, userInput: string, reply:
       maxRetries: 0,
     });
     const startedAtMs = Date.now();
-    client.chat.completions
-      .create(
-        withThinking({
-          model: modelConfig.model,
-          messages: [
-            {
-              role: "system",
-              content: "你是信息抽取器。只输出 JSON，不要解释。",
-            },
-            { role: "user", content: buildExtractPrompt(userInput, reply) },
-          ],
-          temperature: 0,
-          max_tokens: 400,
-          response_format: { type: "json_object" },
-        }) as never,
-      )
-      .then((resp) => {
-        recordAuxUsage({ kind: "fact_extraction", model: modelConfig.model, startedAtMs }, resp.usage);
-        const content = resp.choices[0]?.message?.content;
-        if (!content) return;
-        const parsed = parseFactsJson(content);
-        if (parsed.length === 0) return;
-        // 确定性兜底：丢弃无法在用户原话里找到依据的事实（防止从角色回复/推断里提取）
-        const facts = groundFacts(parsed, userInput);
-        if (facts.length < parsed.length) {
-          console.log(`[事实] 丢弃 ${parsed.length - facts.length} 条无依据事实（${ownerId}）`);
-        }
-        if (facts.length > 0) {
-          const written = upsertUserFacts(ownerId, facts);
-          console.log(`[事实] 收到 ${written} 条用户事实（${ownerId}）`);
-        }
-      })
-      .catch(() => {
-        // 抽取失败不影响对话
-      });
+    const resp = await client.chat.completions.create(
+      withThinking({
+        model: modelConfig.model,
+        messages: [
+          {
+            role: "system",
+            content: "你是信息抽取器。只输出 JSON，不要解释。",
+          },
+          { role: "user", content: buildExtractPrompt(userInput, reply) },
+        ],
+        temperature: 0,
+        max_tokens: 400,
+        response_format: { type: "json_object" },
+      }) as never,
+    );
+    recordAuxUsage({ kind: "fact_extraction", model: modelConfig.model, startedAtMs }, resp.usage);
+    const content = resp.choices[0]?.message?.content;
+    if (!content) return;
+    const parsed = parseFactsJson(content);
+    if (parsed.length === 0) return;
+    // 确定性兜底：丢弃无法在用户原话里找到依据的事实（防止从角色回复/推断里提取）
+    const facts = groundFacts(parsed, userInput);
+    if (facts.length < parsed.length) {
+      console.log(`[事实] 丢弃 ${parsed.length - facts.length} 条无依据事实（${ownerId}）`);
+    }
+    if (facts.length > 0) {
+      const written = upsertUserFacts(ownerId, facts);
+      console.log(`[事实] 收到 ${written} 条用户事实（${ownerId}）`);
+    }
+  } catch {
+    // 抽取失败不影响对话
+  }
+}
+
+function schedulePendingDrain(ownerId: string): void {
+  if (pendingTimers.has(ownerId)) return;
+  const last = lastExtractAt.get(ownerId) ?? 0;
+  const delay = Math.max(0, EXTRACT_COOLDOWN_MS - (Date.now() - last));
+  const timer = setTimeout(() => {
+    pendingTimers.delete(ownerId);
+    const pending = pendingExtractions.get(ownerId);
+    pendingExtractions.delete(ownerId);
+    if (!pending || pending.inputs.length === 0) return;
+    lastExtractAt.set(ownerId, Date.now());
+    void runExtraction(ownerId, pending.inputs.join("\n"), pending.reply);
+  }, delay);
+  timer.unref?.();
+  pendingTimers.set(ownerId, timer);
+}
+
+function enqueuePendingExtraction(ownerId: string, userInput: string, reply: string): void {
+  const pending = pendingExtractions.get(ownerId) ?? { inputs: [], reply: "" };
+  if (pending.inputs.length >= MAX_PENDING_INPUTS) pending.inputs.shift();
+  pending.inputs.push(userInput);
+  pending.reply = reply;
+  pendingExtractions.set(ownerId, pending);
+  schedulePendingDrain(ownerId);
+}
+
+/**
+ * 后台抽取用户事实（fire-and-forget，不阻塞回复）。
+ *
+ * 1.5s 节流窗口内的消息不直接丢弃，而是排队合并，窗口结束后补抽一次——
+ * 否则用户连发多条（「我叫林哲」「养了只橘猫叫团子」）时，第二条的宠物事实会丢。
+ */
+export function extractUserFactsAsync(ownerId: string, userInput: string, reply: string): void {
+  try {
+    if (!userInput || userInput.trim().length < 4) return;
+    if (userInput.trim().startsWith("/")) return;
+    const now = Date.now();
+    const last = lastExtractAt.get(ownerId) ?? 0;
+    if (now - last < EXTRACT_COOLDOWN_MS) {
+      enqueuePendingExtraction(ownerId, userInput, reply);
+      return;
+    }
+    lastExtractAt.set(ownerId, now);
+    void runExtraction(ownerId, userInput, reply);
   } catch {
     // 忽略
   }
 }
 
-/** 测试用：清空抽取节流。 */
+/** 测试用：清空抽取节流与排队。 */
 export function resetFactExtractionThrottle(): void {
   lastExtractAt.clear();
+  pendingExtractions.clear();
+  for (const timer of pendingTimers.values()) clearTimeout(timer);
+  pendingTimers.clear();
 }

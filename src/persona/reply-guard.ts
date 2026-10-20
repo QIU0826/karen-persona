@@ -10,8 +10,9 @@
  */
 
 /** 记忆防御/考试话术（与 prompt 里的禁用词保持一致）。 */
-const DEFLECTION_TEST = /我记性没那么差|我记性没那么好|考考你|考我|查岗|抽查/;
-const DEFLECTION_REPLACE = /我记性没那么差|我记性没那么好|考考你|考我|查岗|抽查/g;
+const DEFLECTION_SOURCE = "记性没那么差|记性没那么好|我记性不好|考考你|考我|查岗|抽查";
+const DEFLECTION_TEST = new RegExp(DEFLECTION_SOURCE);
+const DEFLECTION_REPLACE = new RegExp(DEFLECTION_SOURCE, "g");
 
 /** 分句切分：按中英文标点/换行切开，保留标点（用于拼回）。 */
 const CLAUSE_SPLIT = /(?<=[，,。！？!?；;…\n])/;

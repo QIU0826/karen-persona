@@ -57,6 +57,16 @@ describe("summarizeLongRun", () => {
     expect(metrics.flags.emptyTurns).toEqual([5]);
   });
 
+  it("颜文字方括号不误报；省略「我」的记性话术会命中", () => {
+    const replies = [
+      row(1, "今天店里也怪闷的\n腿都不是自己的了 (:3[▓▓]"),
+      row(2, "林哲 杭州做产品设计\n才一个月 记性没那么差"),
+    ];
+    const metrics = summarizeLongRun(replies);
+    expect(metrics.flags.bracketTurns).toEqual([]);
+    expect(metrics.flags.memoryDeflectionTurns).toEqual([2]);
+  });
+
   it("复读对用 detectRepetition 统计相邻回复", () => {
     const replies = [row(1, "今天真的好累啊"), row(2, "今天真的好累啊"), row(3, "行吧")];
     const metrics = summarizeLongRun(replies);

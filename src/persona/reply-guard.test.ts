@@ -30,6 +30,12 @@ describe("stripMemoryDeflection", () => {
     expect(result.text).toBe("真的");
   });
 
+  it("省略「我」的口语变体也会被清理（真实长跑出现过）", () => {
+    const result = stripMemoryDeflection("林哲 杭州做产品设计\n才一个月 记性没那么差");
+    expect(result.changed).toBe(true);
+    expect(result.text).toBe("林哲 杭州做产品设计");
+  });
+
   it("正常回复原样返回（changed=false）", () => {
     const reply = "今天好累啊\n早点睡吧";
     const result = stripMemoryDeflection(reply);

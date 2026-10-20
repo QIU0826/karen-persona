@@ -204,7 +204,7 @@ plan 3 / preference 2 / other 2），小数据量时行为不变。压测（29 �
 | `src/data/user-facts.ts`（新） | 用户事实抽取/存储/注入；按 owner 隔离；JSON 输出；失败静默；单测覆盖解析/覆盖/隔离/持久化 |
 | `src/pipeline/orchestrator.ts` | 每轮注入事实块；回复后后台抽取；删除重复 shortTermContext；T2 检索 top 8 改为 8；流式/非流式都生效 |
 | `src/persona/prompt-builder.ts` | 反套话、反"考我/抽查"、反编造往事、限制自我分析开头、禁止逗号结尾 |
-| `src/persona/reply-guard.ts`（新） | `stripMemoryDeflection`：出站前删掉含「考我/查岗/抽查/我记性没那么差」的分句（整条命中退化为「嗯」），三条管线接入；纯函数 6 条单测 |
+| `src/persona/reply-guard.ts`（新） | `stripMemoryDeflection`：出站前删掉含「考我/查岗/抽查/记性没那么差（含省略「我」的变体）」的分句（整条命中退化为「嗯」），三条管线接入；纯函数单测覆盖变体 |
 | `src/persona/anti-repetition.ts`（新） | 跨轮反重复：抽取最近回复开头/短句 → 生成提示块；`detectRepetition` 检测 exact/prefix/similar/opener；`extractRepeatedFormulaicPatterns` 检测套话句式复读；供日志与评测复用 |
 | `src/pipeline/orchestrator.ts`（补） | reply/stream/proactive 三条路径都注入反重复块；**流式路径补注入用户事实块**（此前 QQ 私聊主路径漏注入）；回复后记 `[重复]` 日志 |
 | `src/data/vector.ts` | FTS5 查询从隐式 AND 改 `OR` + BM25 IDF 排序（去重、截断 48 token），修复自然问句 0 命中 |
@@ -212,7 +212,7 @@ plan 3 / preference 2 / other 2），小数据量时行为不变。压测（29 �
 | `src/eval/semantic-boost-eval.ts`（新） | 检索增强评测：基线/改写/重排/改写+重排 四组对照（真实 DeepSeek） |
 | `src/eval/repetition-eval.ts`（新） | 跨轮重复 A/B 脚本（baseline/openers/full；3 轮 × 6 句；真实 DeepSeek） |
 | `src/data/relative-time.ts`（新） | 记忆相对时间标签（今天/昨天/前天/N天前/上周/N周前/N个月前/N年前；按本地日历日，可注入 now） |
-| `src/data/user-facts.ts`（补） | 事实抽取 prompt 加固（只从用户原话提取/保持细节/禁模糊职业）+ 确定性接地校验 `isFactGroundedInUserText`（从角色回复或推断出来的事实会被丢弃）；另含 `user_fact_history` 变更历史：值真变化才记旧值（每 key 留 20 条），注入显示「（之前是：X）」；建表缓存改为按 DB 路径（评测切库不再缺表） |
+| `src/data/user-facts.ts`（补） | 事实抽取 prompt 加固（只从用户原话提取/保持细节/禁模糊职业）+ 确定性接地校验 `isFactGroundedInUserText`（从角色回复或推断出来的事实会被丢弃）；节流窗口内**排队合并**（连发多条不丢事实）；另含 `user_fact_history` 变更历史：值真变化才记旧值（每 key 留 20 条），注入显示「（之前是：X）」；建表缓存改为按 DB 路径（评测切库不再缺表） |
 | `src/data/retriever.ts` / `vector.ts`（补） | 检索结果带 `createdAt`/`timeLabel`；`buildRagContext` 注入 `- [3天前] …` |
 | `src/web/data.ts` / `dashboard.ts`（补） | `/api/memory-probe` 返回 `created_at`/`time_label`，回放面板显示时间徽标 |
 | `src/data/t1-injection.ts`（新） | T1 快照 → 「最近几轮的状态」状态弧（亲密度/情绪/负债趋势；不引用对话正文） |
@@ -223,7 +223,7 @@ plan 3 / preference 2 / other 2），小数据量时行为不变。压测（29 �
 | `src/impulse/renderer.ts` | burst 分条去尾部软标点；压缩连续空行 |
 | `src/impulse/photo-library.ts`（上一轮） | 照片时间关系模型（今天/昨天/以前 + 亲密度门槛） |
 
-验证：`tsc` 0 错误、lint 0 违规；**57 文件 / 619 用例全绿**（2026-10-20 记忆评测 + 反重复 + Web 面板 + T1/T3 + 检索重排 + 时间感/事实历史 + 句式复读 + T3 质量/facts 压测后）。
+验证：`tsc` 0 错误、lint 0 违规；**58 文件 / 623 用例全绿**（2026-10-20 记忆评测 + 反重复 + Web 面板 + T1/T3 + 检索重排 + 时间感/事实历史 + 句式复读 + T3 质量/facts 压测后）。
 记忆评测：`docs/MEMORY_EVAL_REPORT.md`（20 条金标集；修复 FTS 后 T2 recall@8 85%、facts 100%）。
 
 ---
