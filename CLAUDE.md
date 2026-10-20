@@ -9,7 +9,7 @@
 
 QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、情绪、记忆和社交圈的人」，而不是一个问答助手。
 
-当前阶段：**v0.3.1 已发布（2026-10-20）——v0.3.0「更像真人」（语音消息、打错字撤回、打字节奏、被点名要媒体会真给、宣传页重做）+ v0.3.1 修复 15 轮真实验证暴露的 P0/P1/P2（编造相识场景、多媒体内容错位、情绪承接、嘲讽话术、图片跨轮复用）**。M0 地基已修复完成（新装可用、不丢消息、安全加固、文档真话）；M1 核心体验闭环主要项已完成（状态持久化、关系成长、演化可见化、多用户隔离、双管线对齐、检索增强）；M2-A 首次引导 2.0、M2-B 人设包 v2、M2-C 多用户只读 Web + 导出、M2-D 真实长跑工具已实施；发布检查见 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（已 push main + tag v0.2.0）。M1/M2 路线见审计报告第 5 节。
+当前阶段：**v0.3.2 已发布（2026-10-20）——v0.3.0「更像真人」（语音消息、打错字撤回、打字节奏、被点名要媒体会真给、宣传页重做）+ v0.3.1 修复 15 轮真实验证暴露的 P0/P1/P2（编造相识场景、多媒体内容错位、情绪承接、嘲讽话术、图片跨轮复用）+ v0.3.2 图库扩充（7→15 张、配文池 42→约 110 条，针对「多媒体 2/5、配文重复」）**。M0 地基已修复完成（新装可用、不丢消息、安全加固、文档真话）；M1 核心体验闭环主要项已完成（状态持久化、关系成长、演化可见化、多用户隔离、双管线对齐、检索增强）；M2-A 首次引导 2.0、M2-B 人设包 v2、M2-C 多用户只读 Web + 导出、M2-D 真实长跑工具已实施；发布检查见 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（已 push main + tag v0.2.0）。M1/M2 路线见审计报告第 5 节。
 
 ## 技术栈（如实）
 
@@ -42,7 +42,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
 | 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入已接线（双列，需 Qwen Key 实跑）；**TTS 已落地**（macOS say→SILK，`src/ai/tts.ts`）、即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | ✅/🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF，FTS5 用 OR+BM25 IDF）→ DeepSeek 候选重排**（默认开启，非真向量；异常/超时降级）、sqlite-vec 启用、双列 embedding、schema v2/v3 幂等迁移、用户事实层、T1 状态弧、T3 压缩（40 条/隔天兜底 + `t3_compressed` 防重复）；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；**多用户隔离已实现**（owner=人设+用户+平台） |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 76 个测试文件 / 841 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入（typecheck/lint/test/覆盖率）；**新增 mock-OneBot 桥接端到端测试**（真实 bridge 子进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊/命令/危机/多用户隔离，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）、可复现记忆金标集（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B（`src/eval/repetition-eval.ts`）；真实 QQ/NapCat 端到端仍需真机；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 76 个测试文件 / 842 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入（typecheck/lint/test/覆盖率）；**新增 mock-OneBot 桥接端到端测试**（真实 bridge 子进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊/命令/危机/多用户隔离，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）、可复现记忆金标集（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B（`src/eval/repetition-eval.ts`）；真实 QQ/NapCat 端到端仍需真机；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -66,7 +66,7 @@ npm run setup      # 交互式配置向导
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + ubuntu/macOS/Windows 三平台矩阵 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 已收紧为 `>=22.12`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm run lint` 0 违规；`npm test` 76 文件 / 841 用例通过（审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm run lint` 0 违规；`npm test` 76 文件 / 842 用例通过（审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -83,7 +83,7 @@ npm run setup      # 交互式配置向导
 - **步骤 3 可观测最小闭环（2026-10-20 凌晨）**：零新依赖新增 `src/obs/`——结构化脱敏日志（非 TTY JSON lines / TTY 可读，敏感字段 `[redacted N chars]`）、SQLite `llm_usage` 成本统计（DeepSeek 峰谷价/缓存命中/flash-pro）、`GET /health` + `/cost`（仅绑 127.0.0.1，默认 18081，可配 0=关）、PM2 改跑 `dist/bridge/qq.js`。实测 `/health` 200、`/cost` 单次调用成本 ¥0.000033 正确入账。
 - **步骤 4 表情/贴纸（2026-10-20 凌晨）**：入站 face/mface 不再丢弃，转成 `[表情：微笑]`/`[表情包：...]` 交给管线；新增 `src/impulse/stickers.ts` + `assets/stickers/`（11 个 Twemoji，CC-BY 4.0）：文字回复后按情绪/时段以 22% 概率顺手发本地贴纸（收到对方表情时 55%），5 分钟冷却，冲突未化解不发；CQ 白名单仅放行内部 base64 图片；私聊生效，群聊暂不支持。
 - **步骤 5 本地 Web 控制台（2026-10-20 凌晨）**：新增 `src/web/`（node:http，零新依赖）：单页只读四视图（聊天/记忆搜索+列表/关系时间线+herView/状态+健康+成本），深色移动端适配、5s 自动刷新可暂停；仅绑 127.0.0.1，默认 `web_port: 18082`，可选 `web_token`（`?token=` 或 `X-Web-Token`），CSP/no-store/HTML 转义；API：`/api/overview|session|memory|timeline|health|cost`。实测页面 200、API 正常。
-- **主动发图接通 QQ（2026-10-20）**：`photoShare` 在流式路径也触发；有 `UNSPLASH_ACCESS_KEY` 走 Unsplash 搜索，无 Key 回退**本地 7 张授权图库**（`assets/photos`，Picsum/Unsplash License）；桥接下载/读文件转 base64 发送 CQ image；修掉「qqFace 后 break 导致发图 fragment 被丢弃」的 bug；测试期 config 可覆盖门槛/概率/冷却（`photo_share_*`），实测 E2E 收到配文+图片。
+- **主动发图接通 QQ（2026-10-20）**：`photoShare` 在流式路径也触发；有 `UNSPLASH_ACCESS_KEY` 走 Unsplash 搜索，无 Key 回退**本地图库**（`assets/photos`，当前 15 张，Picsum/Unsplash License）；桥接下载/读文件转 base64 发送 CQ image；修掉「qqFace 后 break 导致发图 fragment 被丢弃」的 bug；测试期 config 可覆盖门槛/概率/冷却（`photo_share_*`），实测 E2E 收到配文+图片。
 - **发图时间关系模型（2026-10-20）**：照片不再按小时硬过滤；每张图带场景与「今天/昨天/以前」时间关系——早上可以发「昨天的晚霞」，亲密度 ≥4 才会分享「以前的生活」（`minCloseness` 可配）；配文按时间关系生成，避免「早上 10 点说今天的晚霞」这类错乱。
 - **0 号依赖升级（2026-10-20 凌晨）**：`better-sqlite3` 11.10 → **13.0.3**（改为内置 N-API 预编译，`npm install` 不再需要 C++ 构建工具，Windows/macOS 安装风险大幅下降；npm 仍会对带 `binding.gyp` 的包自动跑 node-gyp → 仓库根 `.npmrc ignore-scripts=true` 直接使用包内 prebuilds，Windows 无需 Visual Studio）；`engines` 收紧 `>=22.12`；移除未使用的 `wechaty`（微信 echo 桩改为无依赖占位）与 `node-cron`（死依赖），依赖树从 ~446 个包降到 ~162 个；CI 改为 ubuntu/macOS/Windows 三平台矩阵；Node 22 下 `tsc` 0 错误、462 用例全绿、桥接/健康/Web 实测正常。**vitest 5 暂缓**（其依赖树引入 rolldown 平台包，安装解析过慢，后续单独升级）。
 - **M1 治理与数据主权（2026-10-20 凌晨）**：新增 `src/commands/control.ts`（QQ/CLI 共用 `/why` 门控可解释、`/pause`/`/resume` 主动消息暂停、`/export` 记忆导出、`/stats`、`/help`）；`lastGate` 与 `proactivePaused` 写入持久化状态；心跳跳过暂停用户；新增 `src/data/user-export.ts` 导出会话+人格状态+T2 记忆为本地 JSON（600 权限）。测试 37 文件 / 471 用例全绿。
@@ -118,8 +118,9 @@ npm run setup      # 交互式配置向导
   - **P0 多媒体错位**：`detectPhotoSceneTags` 把用户说的场景映射到图库标签（sunset/snow/cafe/animal/mountain/lake…），点名要照片时按场景挑图；点名要语音时不再被「本轮已发照片/贴纸」拦截，且没有合格句子时从正文截短句兜底合成（修「说发了语音其实没发」）。
   - **P1 情绪承接**：prompt 增加「对方讲糟心事时先接情绪，不立刻转到自己」。
   - **P2**：记忆防御嘲讽变体（才说的就忘/才两句就忘/这就忘了）纳入 `reply-guard`；本地图库按 persona 记住最近 3 张、选图排除（全排除时宁可不发）。
-  - 测试 76 文件 / 841 用例；行覆盖 56.0%。
+  - 测试 76 文件 / 842 用例；行覆盖 56.0%。
 
+- **v0.3.2 图库扩充（2026-10-20）**：本地图库 7 → 15 张（新增拿铁+绿植/沙发上的猫/雨后傍晚街头/雨窗/晚餐/三杯拿铁/店内灯牌/花田，800×600，Unsplash License），配文池 42 → 约 110 条（今天/昨天/以前 × 2-3 句）；`detectPhotoSceneTags` 补雨/花/城市街头/晚饭/猫标签；新增多样性测试。针对验证评审「多媒体 2/5、配文重复」的根因。
 - **v0.2.1 Windows 安装与 CI 修复（2026-10-20）**：`.npmrc ignore-scripts=true` 避免 npm 对 better-sqlite3 自动跑 node-gyp（Windows 无 VS 失败）；Windows 跳过 POSIX 0600 断言；通过临时诊断 workflow + check-run annotations 定位后删除诊断分支；CI ubuntu/macOS/Windows 全绿（run 39382097271）。
 - **发布准备（2026-10-20）**：干净 checkout（`git archive` → 临时目录 + 软链 node_modules）复验通过：typecheck 0、687 用例全绿、doctor 在缺 config/.env 时给出可执行指引；仓库卫生检查（无 .env/config.yaml/data/coverage 入库、无真实密钥、跟踪文件 257 个约 12.6MB）；新增 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（检查结果 + 发布步骤 + Release Note）与 [CHANGELOG.md](CHANGELOG.md)；用户已拍板：升级 **v0.2.0** 并 push + tag（远端 `master` 是上游旧历史，不 force push，推本地 `main` 新分支）。
 - **M2-D 真实 QQ 长跑工具 + 首轮真机修复（2026-10-20）**：新增 `src/eval/qq-realrun.ts`（只读快照/回合延迟/重复空回复/成本/事实/同意 → 报告）+ `scripts/qq-longrun-watch.ts` + `npm run qq:watch`，结束写 `data/realrun-*.md`（含对话原文，600 权限）；支持 `--once --since <时间>` 随时复盘历史并标记「AI 披露未确认/空回复/重复/无成本记录」。首轮真机（3 轮）暴露并修复：①老用户 session 非空导致 AI 披露被跳过 → 改为按 `user_consent.disclosure_acked_at` 补发（`shouldSendDisclosure`），披露/`/about` 文案改用当前人设名；②消息门未把当前消息计入「5 分钟连续跟进」，18s 后的追问被随机延迟 31 分钟 → `buildGateContext` 修正并补回归测试；③第二轮真机发现「问怎么认识」时编造具体场景 → prompt 增加确定性反编造规则 + 单测。测试 69 文件 / 687 用例。
@@ -148,7 +149,7 @@ npm run setup      # 交互式配置向导
 - 成本统计为估算：峰谷价按工作日/周末近似（节假日可能高估），provider 不返回 usage 的调用不记录（不估算）
 - 日志正文默认脱敏（`[redacted N chars]`；`LOG_CONTENT=1` 输出 40 字预览），但仍有较多直接 console.log、未全部改结构化 logger
 - 贴纸 11 个内置 Twemoji（私聊+群聊）；出站 mface/收藏表情未做
-- 发图 7 张本地兜底（Unsplash Key 未配置）；群聊发图需 `group_photo_enabled: true`（默认关）；夜间发图由免打扰门控
+- 发图 15 张本地兜底 + 约 110 条配文（Unsplash Key 未配置）；仍有「同类场景」重复感；群聊发图需 `group_photo_enabled: true`（默认关）；夜间发图由免打扰门控
 - Web 控制台只读、仅本机；默认只展示主用户，`web_all_owners: true` 可只读切换其他 owner（会话/时间线/记忆按 owner 隔离）；单 owner JSON 导出已可用（`/api/export`），删除/暂停等写操作仍无；token 在 URL query 可见（后续可改 fragment）；多人设搜索仍受 getCurrentPersona 单例约束
 - 语音：只有 TTS（她发语音），**没有 ASR**（用户发来的语音只当 `[语音]` 占位）；TTS 依赖 macOS `say`（Linux/Windows 自动降级为文字）；群聊语音未接线（`voice_group_enabled` 目前只影响决策层，私聊才真正发送）；QQ 真实语音条（SILK）只在真实 QQ 上验证过一次手工链路，mock OneBot 已覆盖协议形态
 - 打错字撤回：依赖 NapCat 对 `send_private_msg` 的 echo（拿 message_id）；echo 丢失/旧版本可能降级为「错字+更正」并存；群聊未接线

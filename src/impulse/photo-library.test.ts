@@ -89,6 +89,22 @@ describe("photo-library 时间关系模型", () => {
     expect(low!.caption.length).toBeGreaterThan(0);
   });
 
+  it("图库有 15 张，连续 12 次选择就有明显多样性（修复「配文重复」）", () => {
+    expect(getPhotoCatalog().length).toBe(15);
+    let n = 0;
+    const random = () => ((n++ * 37) % 100) / 100;
+    const photos = new Set<string>();
+    const captions = new Set<string>();
+    for (let i = 0; i < 12; i++) {
+      const choice = pickPhotoShare({ emotion: 0, hour: 20, closeness: 5, random });
+      expect(choice).not.toBeNull();
+      photos.add(choice!.photo.id);
+      captions.add(choice!.caption);
+    }
+    expect(photos.size).toBeGreaterThanOrEqual(6);
+    expect(captions.size).toBeGreaterThanOrEqual(8);
+  });
+
   it("excludeIds 排除最近发过的图（跨轮去重）", () => {
     // 先取一张，拿到它的 id
     const first = pickPhotoShare({ emotion: 0, hour: 20, closeness: 5, random: () => 0.1 });

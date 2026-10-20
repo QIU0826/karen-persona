@@ -10,7 +10,7 @@
 >
 > **v0.3.1 已发布**（2026-10-20）：GitHub `main` 分支 + tag（v0.3.0 是「更像真人」：语音消息、打错字撤回、被点名要媒体会真给、宣传页重做；v0.3.1 修掉 15 轮真实验证暴露的两个 P0——**编造「怎么认识的」** 与 **多媒体内容和请求错位**，以及情绪承接/嘲讽话术/图片复用等 P1-P2）。
 >
-> 仓库实测状态（2026-10-20）：`npm run typecheck` 0 错误；`npm test` **76 个测试文件 / 841 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 56.0%）。**干净 checkout + 真实 `npm ci` 已复验**（v0.2.1 时）：122 个依赖约 40s 安装、typecheck 0 错误、doctor 在缺 config/.env 时给出可执行的修复指引；v0.3.0 新增 `silk-wasm`（纯 wasm，无原生构建）。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**；另用「本地模拟用户 + 真实 DeepSeek」跑过 30 轮长跑（记忆 6/6、复读对 0、错误 0、平均延迟 2047ms、成本 ¥0.147），见 [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md)。
+> 仓库实测状态（2026-10-20）：`npm run typecheck` 0 错误；`npm test` **76 个测试文件 / 842 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 56.0%）。**干净 checkout + 真实 `npm ci` 已复验**（v0.2.1 时）：122 个依赖约 40s 安装、typecheck 0 错误、doctor 在缺 config/.env 时给出可执行的修复指引；v0.3.0 新增 `silk-wasm`（纯 wasm，无原生构建）。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**；另用「本地模拟用户 + 真实 DeepSeek」跑过 30 轮长跑（记忆 6/6、复读对 0、错误 0、平均延迟 2047ms、成本 ¥0.147），见 [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md)。
 
 ---
 
@@ -159,7 +159,7 @@ npm run dev
 | 引用消息 / QQ 表情 | ✅ | 引用原文回查、qqface CQ 码发送 |
 | 表情/贴纸（入站+出站） | ✅ | 入站 QQ 表情/表情包转合成文本；她会在合适情绪下主动发本地贴纸（11 个 Twemoji，CC-BY 4.0）；仅私聊 |
 | 用户事实记忆 | ✅ | 后台抽取「你明确说过的」稳定事实（名字/工作/宠物/项目/偏好/计划），存 SQLite（按用户隔离），每轮以「她确定记得的事」注入 prompt |
-| 主动发图 | ✅ | 亲密度/情绪/概率门控；照片带「拍摄时间/故事」——今天/昨天/以前，早上可发「昨天的晚霞」；亲密度 ≥4 才会分享「以前的生活」；有 `UNSPLASH_ACCESS_KEY` 走 Unsplash 搜索，无 Key 用本地图库兜底 |
+| 主动发图 | ✅ | 亲密度/情绪/概率门控；照片带「拍摄时间/故事」——今天/昨天/以前，早上可发「昨天的晚霞」；亲密度 ≥4 才会分享「以前的生活」；有 `UNSPLASH_ACCESS_KEY` 走 Unsplash 搜索，无 Key 用**15 张本地图库 + 约 110 条配文**兜底，并会按他提到的场景挑图（晚霞/雨/咖啡/猫/山/湖/花…） |
 | 本地 Web 控制台 | ✅ | `http://127.0.0.1:18082/`：聊天/记忆/关系时间线/状态成本四视图；只读、仅本机、可选 `web_token`；支持多用户只读切换（`/api/owners` + `web_all_owners: true`，默认关）与单用户 JSON 导出（`/api/export`，含会话/状态/T2 记忆） |
 | 宣传页（promo） | ✅ | `http://127.0.0.1:18082/promo/`：重做后的滚动式落地页——首屏人物 + 一句话主张 + 双 CTA，分区「她的日常 / 消息形态 / 主动性 / 记忆 / 隐私」，用纯 HTML/CSS 聊天 mockup 展示照片、表情包、3″ 语音、撤回与正在输入；后半页还有一条跟随滚动的角色氛围背景（桌面视频 / 移动端静态图），单文件零构建、移动端适配，详见 [promo/README.md](promo/README.md) |
 | 治理命令 | ✅ | QQ/CLI 可用：`/why`（解释上一轮门控）、`/pause`/`/resume`（暂停/恢复主动消息）、`/forget 关键词 [--yes]`（按关键词删除 T2 记忆，先预览再确认）、`/export`（导出对话+记忆 JSON）、`/about`（数据说明）、`/age`（年龄确认状态）、`/stats`、`/help` |
@@ -215,7 +215,7 @@ npm run dev
 | 功能 | 状态 | 说明 |
 |---|---|---|
 | 首次引导 2.0 | ✅ | `npm run setup` 是「第一段对话」：写入会话 + `user_facts`（名字/城市/认识方式）+ 18+ 确认，并生成 `data/onboarding.json` 标记；CLI/QQ 首次聊天不再重复 18+ 确认（AI 披露默认关闭）；`npm run setup -- --force` 重设 |
-| 类型检查 + lint + 单测 + mock-OneBot 端到端 + 覆盖率基线 | ✅ | `npm run typecheck`（0 错误）、`npm run lint`（tsc 未使用代码检查，0 违规）、`npm test`（76 文件 / 841 用例，含 `npm run test:e2e` 桥接 E2E、setup E2E、人设包、多用户 Web、真实长跑观察、TTS 真实链路、相识编造守卫）、`npm run test:coverage`（行覆盖 56.0%，阈值守护） |
+| 类型检查 + lint + 单测 + mock-OneBot 端到端 + 覆盖率基线 | ✅ | `npm run typecheck`（0 错误）、`npm run lint`（tsc 未使用代码检查，0 违规）、`npm test`（76 文件 / 842 用例，含 `npm run test:e2e` 桥接 E2E、setup E2E、人设包、多用户 Web、真实长跑观察、TTS 真实链路、相识编造守卫）、`npm run test:coverage`（行覆盖 56.0%，阈值守护） |
 | 结构化日志 | ✅ | 默认脱敏（消息只记长度/摘要，正文 `[redacted N chars]`；`LOG_CONTENT=1` 才输出 40 字预览）；TTY 可读，非 TTY JSON lines |
 | 健康检查 | ✅ | `GET http://127.0.0.1:18081/health`（仅本机；返回 ws/db/pending/成本/最近错误） |
 | 成本统计 | ✅ | `GET /cost` 7 日摘要；DeepSeek 峰谷价 + 缓存命中；主对话与旁路 LLM（事实抽取/独白/T3/视觉等）均按 `kind` 记账，Web 控制台可按模型/按用途查看 |
@@ -272,9 +272,9 @@ npm run dev
 3. **记忆深度仍不够**：真语义向量未启用（需 Qwen Key 或本地 embedding）；当前是 n-gram+FTS5+DeepSeek 重排（非真向量）；记忆相对时间感、事实变更历史、T3 摘要抽检、facts 超 20 条配额选择已完成；长期真实数据的摘要质量仍需按周抽检。
 4. **双管线仍是两份实现**：QQ 私聊流式与 CLI/群聊非流式行为已对齐（T1/T2/事实/反重复/重排均接入），但代码未抽共享 helper，后续改动需要双写。
 5. **主动消息/夜间行为仍需真机长跑**：已支持 `/pause`/`/resume` 与可配置免打扰时段（`quiet_hours_*`），单日 4 条上限 + 30 分钟最小间隔；长时间无人值守的补发/主动行为仍需观察。
-6. **发图图库有限**：贴纸 11 个内置 Twemoji（私聊+群聊可用）；发图 7 张本地兜底（配置 Unsplash Key 才走搜索）；群聊发照片需 `group_photo_enabled: true`（默认关，隐私保守）。
+6. **发图图库有限**：贴纸 11 个内置 Twemoji（私聊+群聊可用）；发图 15 张本地兜底 + 约 110 条配文（配置 Unsplash Key 才走搜索）；仍会出现「同一类场景」的重复感；群聊发照片需 `group_photo_enabled: true`（默认关，隐私保守）。
 7. **未实现**：语音 ASR（她听得懂文字/图片，但用户发来的语音只当 `[语音]` 占位）、微信桥接（无依赖占位桩）、图片生成；Web 控制台为只读。**语音消息本身只在 macOS 上真正发声**（依赖系统 `say`），其它平台自动降级为文字。年龄门已做一次性确认（自我声明，非身份证校验）。
-8. **测试覆盖仍不足**：76 文件 / 841 用例；已接入覆盖率基线（行 56.0%，`npm run test:coverage`，CI 阈值守护）与零新依赖 lint；有可复现记忆金标集（`scripts/memory-eval.ts`）、跨轮重复 A/B（`src/eval/repetition-eval.ts`）、检索增强评测（`src/eval/semantic-boost-eval.ts`）、30 轮真实长跑（`src/eval/longrun-sim.ts`）与 mock-OneBot 桥接 E2E（`src/eval/bridge-e2e.test.ts`，CI 跑）；但真实 QQ/NapCat 端到端（私有图片 URL、风控、网络抖动）仍需真机验证。
+8. **测试覆盖仍不足**：76 文件 / 842 用例；已接入覆盖率基线（行 56.0%，`npm run test:coverage`，CI 阈值守护）与零新依赖 lint；有可复现记忆金标集（`scripts/memory-eval.ts`）、跨轮重复 A/B（`src/eval/repetition-eval.ts`）、检索增强评测（`src/eval/semantic-boost-eval.ts`）、30 轮真实长跑（`src/eval/longrun-sim.ts`）与 mock-OneBot 桥接 E2E（`src/eval/bridge-e2e.test.ts`，CI 跑）；但真实 QQ/NapCat 端到端（私有图片 URL、风控、网络抖动）仍需真机验证。
 9. **人设字段消费不足**：创作者写的底线、软肋、人生目标等字段有一部分不进入 Prompt（审计 2.3）。
 10. **成本统计仍是估算**：主对话与旁路 LLM 都已记账（按 `kind` 拆分）；但峰谷价按「工作日/周末」近似（节假日白天可能按高峰计费、偏高），provider 不返回 usage 的调用不记录（不估算）。
 10. **平台风险**：产品命运绑定在非官方 QQ 协议上，封号/协议变更/客户端升级都可能让桥接失效。

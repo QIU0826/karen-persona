@@ -127,6 +127,102 @@ const PHOTOS: PhotoDef[] = [
       past: ["翻到以前在湖边拍的", "好几年前也看过这样的晚霞"],
     },
   },
+  {
+    id: "latte-plants",
+    file: "latte-plants.jpg",
+    tags: ["coffee", "cafe", "plants", "warm", "morning"],
+    scene: "morning",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["早上第一杯，拉花勉强能看", "桌上绿萝又长疯了", "开门前先给自己做一杯"],
+      yesterday: ["昨天早上拍的，阳光刚好", "昨天的拉花比今天好看", "店里早上就是这样，安安静静的"],
+      past: ["翻到刚学拉花那会儿", "以前拍的吧台，杯子还没换"],
+    },
+  },
+  {
+    id: "cat-sofa",
+    file: "cat-sofa.jpg",
+    tags: ["animal", "indoor", "cozy", "warm", "cat"],
+    scene: "indoor",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["它又占了我的位置", "刚睡醒，一脸不高兴", "今天一步都不肯挪"],
+      yesterday: ["昨天拍的，趴了一下午", "昨天它也这样，谁叫都不理", "昨天下班回来它就这样"],
+      past: ["翻到它刚来的时候，好小一只", "以前拍的，现在胖了一圈", "好久以前的照片了，那时候还怕人"],
+    },
+  },
+  {
+    id: "city-dusk",
+    file: "city-dusk.jpg",
+    tags: ["city", "dusk", "street", "night", "travel"],
+    scene: "dusk",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["下班路上，刚下过雨", "傍晚的街，灯全亮了", "今天走到这儿抬头看了一眼"],
+      yesterday: ["昨天路过拍的", "昨天的天比今天好看", "昨天走到这，正好赶上灯亮"],
+      past: ["以前下班也走这条路", "翻到刚来上海那会儿拍的", "好几年前了，那会儿还觉得新鲜"],
+    },
+  },
+  {
+    id: "rain-window",
+    file: "rain-window.jpg",
+    tags: ["rain", "window", "night", "quiet", "mood"],
+    scene: "night",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["下雨了，玻璃上全是水", "外面在下雨，店里没什么人", "今天这雨下得没完没了"],
+      yesterday: ["昨天也下了，拍到水珠", "昨天的雨比今天大", "昨天下班时拍的，伞都忘了带"],
+      past: ["翻到以前下雨拍的", "以前的雨季，好像也没这么烦", "好几年前的照片了"],
+    },
+  },
+  {
+    id: "dinner-table",
+    file: "dinner-table.jpg",
+    tags: ["food", "dinner", "indoor", "warm", "night"],
+    scene: "night",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["今天难得好好吃一顿", "下班晚了，随便找家店", "今天这顿算犒劳自己"],
+      yesterday: ["昨天和朋友吃的", "昨天的饭，比今天讲究", "昨天吃到一半才想起来拍"],
+      past: ["以前也来过这家", "翻到以前的照片，那会儿还挺能吃", "好几年前了"],
+    },
+  },
+  {
+    id: "three-lattes",
+    file: "three-lattes.jpg",
+    tags: ["coffee", "cafe", "hands", "work", "warm"],
+    scene: "day",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["一下做三杯，手都忙不过来", "今天客人点的，摆一起还挺好看", "忙起来就是这种时候"],
+      yesterday: ["昨天忙的时候拍的", "昨天也是三杯一起", "昨天下午那一波"],
+      past: ["翻到以前忙的时候", "以前也这样，一杯一杯地做", "好久前的班了"],
+    },
+  },
+  {
+    id: "cafe-sign",
+    file: "cafe-sign.jpg",
+    tags: ["cafe", "indoor", "evening", "warm", "work"],
+    scene: "dusk",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["打完烊拍的，灯还亮着", "今天收拾完抬头看了一眼", "这就是我每天待的地方"],
+      yesterday: ["昨天关门时拍的", "昨天走得晚，灯忘了关一半", "昨天的店里，就这个样子"],
+      past: ["翻到刚来店里那会儿", "以前拍的，牌子后来换过", "好几年前了"],
+    },
+  },
+  {
+    id: "poppy-field",
+    file: "poppy-field.jpg",
+    tags: ["flowers", "nature", "warm", "sunset", "golden"],
+    scene: "dusk",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["路过一片花，停下来看了会儿", "今天的风把花吹得乱七八糟", "回家路上顺手拍的"],
+      yesterday: ["昨天路过拍的", "昨天的光更好看", "昨天在这儿站了一会儿"],
+      past: ["翻到以前路过拍的", "以前也见过这么大一片", "好几年前了，那会儿还拍了照"],
+    },
+  },
 ];
 
 export function getPhotoCatalog(): readonly PhotoDef[] {
