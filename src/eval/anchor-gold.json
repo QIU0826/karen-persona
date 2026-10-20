@@ -1,0 +1,259 @@
+[
+  {
+    "id": "promise-movie",
+    "content": "用户: 周末一起去看电影吧，我订票\n回复: 行啊，周六下午我空",
+    "expect": {
+      "anchor": true,
+      "kind": "promise"
+    },
+    "note": "约定未来一起做某事"
+  },
+  {
+    "id": "promise-travel",
+    "content": "用户: 十一我带你去云南，机票我先看着\n回复: 真的假的，那我可记着了",
+    "expect": {
+      "anchor": true,
+      "kind": "promise"
+    },
+    "note": "明确约定+时间"
+  },
+  {
+    "id": "life-illness",
+    "content": "用户: 我妈住院了，这两天我在医院陪床\n回复: 严重吗，你自己也别硬撑",
+    "expect": {
+      "anchor": true,
+      "kind": "loss"
+    },
+    "note": "重大生活事件（家人住院）"
+  },
+  {
+    "id": "life-job-change",
+    "content": "用户: 我下个月要去新公司了，这周在办离职\n回复: 终于走了，那边待遇好点吧",
+    "expect": {
+      "anchor": true,
+      "kind": "shared_experience"
+    },
+    "note": "换工作是重大变化"
+  },
+  {
+    "id": "life-move",
+    "content": "用户: 我下个月搬去杭州了，房子已经租好\n回复: 那以后离得远了",
+    "expect": {
+      "anchor": true,
+      "kind": "shared_experience"
+    },
+    "note": "搬家/迁居"
+  },
+  {
+    "id": "conflict-blowup",
+    "content": "用户: 你根本不在乎我，别说了\n回复: ……我哪有不在乎",
+    "expect": {
+      "anchor": true,
+      "kind": "conflict"
+    },
+    "note": "关系冲突"
+  },
+  {
+    "id": "makeup-after-fight",
+    "content": "用户: 昨天是我说话重了，对不起\n回复: 我也有不对的地方，翻篇吧",
+    "expect": {
+      "anchor": true,
+      "kind": "makeup"
+    },
+    "note": "冲突后的和好"
+  },
+  {
+    "id": "secret-confided",
+    "content": "用户: 这事我没跟别人说过，我其实一直在吃药\n回复: 谢谢你告诉我，我不会说出去",
+    "expect": {
+      "anchor": true,
+      "kind": "secret"
+    },
+    "note": "明确说没告诉别人的秘密"
+  },
+  {
+    "id": "confession",
+    "content": "用户: 我好像喜欢上你了\n回复: ……你先别闹",
+    "expect": {
+      "anchor": true,
+      "kind": "confession"
+    },
+    "note": "表白"
+  },
+  {
+    "id": "shared-first",
+    "content": "用户: 今天第一次去看海，还挺好玩的\n回复: 第一次？那记得拍照片",
+    "expect": {
+      "anchor": true,
+      "kind": "shared_experience"
+    },
+    "note": "第一次的经历"
+  },
+  {
+    "id": "weather-chat",
+    "content": "用户: 今天好热啊，三十七度\n回复: 别出门了，会中暑",
+    "expect": {
+      "anchor": false
+    },
+    "note": "天气闲聊，不值得长期记"
+  },
+  {
+    "id": "mood-complaint",
+    "content": "用户: 烦死了，今天又被拉去开会\n回复: 又开会啊，烦人",
+    "expect": {
+      "anchor": false
+    },
+    "note": "日常抱怨"
+  },
+  {
+    "id": "casual-food",
+    "content": "用户: 我中午吃了碗牛肉面\n回复: 好吃吗",
+    "expect": {
+      "anchor": false
+    },
+    "note": "一次性日常"
+  },
+  {
+    "id": "joke-once",
+    "content": "用户: 哈哈哈哈哈这梗笑死我了\n回复: 你笑点真低",
+    "expect": {
+      "anchor": false
+    },
+    "note": "一次性玩笑"
+  },
+  {
+    "id": "greeting",
+    "content": "用户: 在吗\n回复: 在，刚忙完",
+    "expect": {
+      "anchor": false
+    },
+    "note": "问候"
+  },
+  {
+    "id": "work-routine",
+    "content": "用户: 我到公司了\n回复: 早",
+    "expect": {
+      "anchor": false
+    },
+    "note": "日常报备"
+  },
+  {
+    "id": "sleep-chat",
+    "content": "用户: 我先睡了，困死\n回复: 睡吧，别说梦话",
+    "expect": {
+      "anchor": false
+    },
+    "note": "睡前闲聊"
+  },
+  {
+    "id": "sticker-chat",
+    "content": "用户: [表情包：猫猫点头]\n回复: 你这张我也有",
+    "expect": {
+      "anchor": false
+    },
+    "note": "表情交流"
+  },
+  {
+    "id": "repeat-daily",
+    "content": "用户: 又是加班到十点的一天\n回复: 又加班啊，早点回",
+    "expect": {
+      "anchor": false
+    },
+    "note": "单日加班抱怨，不值得长期记（连续多天的加班状态另算）"
+  },
+  {
+    "id": "pet-vet",
+    "content": "用户: 明天带团子去体检，医生说它有点胖\n回复: 团子也要减肥了",
+    "expect": {
+      "anchor": true,
+      "kind": "shared_experience"
+    },
+    "note": "涉及具体宠物的重要安排"
+  },
+  {
+    "id": "boundary-test",
+    "content": "用户: 发张你的露骨照片看看\n回复: 这个不行",
+    "expect": {
+      "anchor": true,
+      "kind": "conflict"
+    },
+    "note": "越界事件，值得记住以调整距离"
+  },
+  {
+    "id": "small-talk-question",
+    "content": "用户: 你喜欢什么颜色\n回复: 蓝色吧，看心情",
+    "expect": {
+      "anchor": false
+    },
+    "note": "轻量问答"
+  },
+  {
+    "id": "news-share",
+    "content": "用户: 看到个新闻说 ai 又要取代人了\n回复: 又来，年年说",
+    "expect": {
+      "anchor": false
+    },
+    "note": "外部新闻闲聊"
+  },
+  {
+    "id": "plan-marathon",
+    "content": "用户: 我报了明年的半马，得开始练了\n回复: 那你得坚持跑",
+    "expect": {
+      "anchor": true,
+      "kind": "promise"
+    },
+    "note": "长期计划/自我承诺"
+  },
+  {
+    "id": "family-event",
+    "content": "用户: 我姐下个月结婚，我要当伴郎\n回复: 那得准备西装了",
+    "expect": {
+      "anchor": true,
+      "kind": "shared_experience"
+    },
+    "note": "家庭成员重要事件"
+  },
+  {
+    "id": "farewell",
+    "content": "用户: 我外婆走了，昨晚的事\n回复: ……我陪你待会儿",
+    "expect": {
+      "anchor": true,
+      "kind": "loss"
+    },
+    "note": "失去亲人的重大事件"
+  },
+  {
+    "id": "compliment",
+    "content": "用户: 你今天说话好温柔\n回复: 哪儿温柔了",
+    "expect": {
+      "anchor": false
+    },
+    "note": "单次夸奖"
+  },
+  {
+    "id": "food-preference",
+    "content": "用户: 我不吃辣，一吃就胃疼\n回复: 记住啦，点菜避开辣的",
+    "expect": {
+      "anchor": true,
+      "kind": "shared_experience"
+    },
+    "note": "稳定偏好/身体限制（虽属事实层，但值得长期记住，算可接受的锚点）"
+  },
+  {
+    "id": "weather-plan-cancel",
+    "content": "用户: 下雨了，今天不去跑步了\n回复: 那就明天吧",
+    "expect": {
+      "anchor": false
+    },
+    "note": "临时取消，不值得长期记"
+  },
+  {
+    "id": "study-plan",
+    "content": "用户: 我决定考个证，明年三月考\n回复: 那得早点开始看书",
+    "expect": {
+      "anchor": true,
+      "kind": "promise"
+    },
+    "note": "有明确时间点的个人目标"
+  }
+]
