@@ -118,6 +118,17 @@ my-persona/
 - 版本迁移：`schemaVersion` 升级时自动跑 `loader` 迁移（现有 `CURRENT_SCHEMA_VERSION` 机制）。
 - 分发：先支持「本地 zip / Git 仓库 URL」，不上市场（M3）。
 
+### 3.4 交付记录（2026-10-20）
+
+已实施最小可用版本：
+
+- `src/persona/pack.ts`：manifest/素材/记忆种子校验（id 规则、语义化版本、personaSchemaVersion、minEngineVersion、素材大小/类型/数量、seed JSONL 解析与条数限制）+ 安装（拒绝覆盖；`--force` 备份到 `personas/.backups/`）+ 列表（legacy 标记）；
+- `src/persona/pack-cli.ts` + npm 脚本：`persona:pack:validate` / `persona:pack:install`（`--force` / `--with-seeds`）/ `persona:pack:list`；
+- 规范与示例：[docs/PERSONA_PACK.md](PERSONA_PACK.md)（含 manifest/seed 示例）；
+- 测试：9 条（校验/安装/备份/种子/CLI 子进程）；全仓 63 文件 / 658 用例。
+
+**未做**：zip/tar 解压安装、素材自动接入头像/贴纸路径、分发审核（M3）。
+
 ### 3.3 验收 / 成本 / 风险
 
 - [ ] 生成一个示例包并安装、聊天、卸载；校验失败给出可读错误；

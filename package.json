@@ -21,7 +21,10 @@
     "setup": "tsx src/setup.ts",
     "doctor": "tsx src/doctor.ts",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "vitest run src/eval/bridge-e2e.test.ts"
+    "test:e2e": "vitest run src/eval/bridge-e2e.test.ts",
+    "persona:pack:validate": "tsx src/persona/pack-cli.ts validate",
+    "persona:pack:install": "tsx src/persona/pack-cli.ts install",
+    "persona:pack:list": "tsx src/persona/pack-cli.ts list"
   },
   "dependencies": {
     "axios": "^1.7.0",

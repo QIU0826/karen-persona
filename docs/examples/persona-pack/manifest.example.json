@@ -1,0 +1,10 @@
+{
+  "id": "my-persona",
+  "version": "1.0.0",
+  "name": "我的她",
+  "personaSchemaVersion": 1,
+  "minEngineVersion": "0.1.0",
+  "author": "你的名字",
+  "license": "CC-BY-4.0",
+  "description": "一句话介绍这个人设"
+}

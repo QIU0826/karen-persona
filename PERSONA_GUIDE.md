@@ -1,5 +1,7 @@
 # 人设创作指南
 
+> 想把自己的「她」打包分享给别人？见 [docs/PERSONA_PACK.md](docs/PERSONA_PACK.md)（manifest/素材/记忆种子/校验安装命令）。
+
 你不是在填表。你是在观察一个人。
 
 ## 目录

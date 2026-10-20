@@ -90,6 +90,15 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 M2-B 人设包 v2）
+
+- **包格式**：`manifest.json` + `persona.json` + 可选 `assets/`、`memories/seed.jsonl`（3–20 条）。
+- **校验**：id 规则、语义化版本、personaSchemaVersion 与引擎一致、minEngineVersion、素材类型/单文件/总量/数量、seed JSONL 合法性与条数。
+- **安装**：默认拒绝覆盖；`--force` 备份旧人设到 `personas/.backups/`（隐藏目录，不会出现在 setup 人设列表）；`--with-seeds` 才写 T2。
+- **CLI**：`npm run persona:pack:validate/install/list`；`list` 标注 legacy 历史人设。
+- **测试**：9 条（含子进程 CLI）；全仓 63 文件 / 658 用例，tsc 0、lint 0、覆盖率阈值通过（行 52.8%）。
+- **限制**：目录安装（无 zip）、素材不自动接入头像/贴纸路径、不做内容审核。
+
 ### ✅ 已完成（2026-10-20 M2-A 首次引导 2.0）
 
 - **方向确认**：目标场景「个人自用 + 朋友小范围」；第一方向 A（首次引导 2.0），见 `docs/M2_PRODUCT_PLAN.md`。
