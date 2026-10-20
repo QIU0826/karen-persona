@@ -182,6 +182,7 @@ npm run setup      # 交互式配置向导
 - [docs/TECH_RADAR_AI.md](docs/TECH_RADAR_AI.md) — AI/记忆/RAG/评测技术雷达（换什么/不换什么）
 - [docs/TECH_RADAR_INFRA.md](docs/TECH_RADAR_INFRA.md) — IM/多模态/前端/基础设施技术雷达
 - [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md) — 30 轮真实模型长跑回归（记忆/事实/AI 味/延迟/成本）
+- [docs/M2_PRODUCT_PLAN.md](docs/M2_PRODUCT_PLAN.md) — M2 产品化方案（首次引导 2.0 / 人设包 v2 / 多租户 Web，待拍板）
 - [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md) — mock-OneBot 桥接端到端测试（披露/年龄门/私聊/图片/群聊）
 - [docs/MEMORY_AI_TONE_AUDIT.md](docs/MEMORY_AI_TONE_AUDIT.md) — 记忆与 AI 味专项审计（存储/上下文/压力测试/优化点）
 - [README.md](README.md) — 对外介绍、功能状态表、隐私与安全、已知限制
