@@ -301,3 +301,9 @@ node node_modules/tsx/dist/cli.mjs scripts/prompt-budget.ts
 - 必须在仓库根目录运行（脚本会校验 `package.json` / `personas/xiaoya` / `src/pipeline`）；否则直接报错退出，避免读错路径。
 - 脚本固定随机种子与 fixture，重复运行结果一致；唯一会变的是 `data/memory.sqlite` 里新增的真实调用记录（§2 的数字会随使用增长）。
 - 改动 `buildPrompt` / `buildChatMessages` / 注入块后重跑本脚本，即可刷新 §3 的分段表；§2 的实测数据来自运行时库，不随代码变化。
+
+## 增量记录（v0.8.3）
+
+- 新增一条**表述层规则**（11 字提示 + 2 个例子）：说到对方告诉你的事时把具体实体说出来。
+  实测 `buildPrompt` 总长 2253 字符（约 1400 tokens），相对此前一次性 +约 110 字符；
+  换来 40 条金标 live 95–100%（原 85–92.5%），性价比极高。

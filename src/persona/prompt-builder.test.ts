@@ -416,6 +416,32 @@ describe("buildWorldPart", () => {
   });
 });
 
+describe("记忆表述层（v0.8.3）", () => {
+  it("prompt 要求把记得的实体说出来，而不是含糊带过", async () => {
+    const persona = await loadPersona("xiaoya");
+    const prompt = buildPrompt({
+      persona,
+      config: { location: "上海" } as unknown as AppConfig,
+      rules: persona.chainRules ?? [],
+      scripts: persona.behavioralScripts ?? [],
+      state: {
+        exposure: 0.3,
+        guilt: 0,
+        emotion: 0,
+        hour: 14,
+        mode: "neutral",
+        closeness: 3,
+      },
+      impulseIntensity: 0.2,
+      corrections: [],
+      tags: [],
+      userText: "我那个项目什么时候上线来着？",
+    });
+    expect(prompt).toContain("把具体的东西说出来");
+    expect(prompt).toContain("晚风信箱");
+  });
+});
+
 describe("反编造往事", () => {
   it("prompt 明确禁止编造「怎么认识 / 第一次见面」的具体场景", async () => {
     const persona = await loadPersona("xiaoya");
