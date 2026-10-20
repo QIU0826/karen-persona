@@ -25,6 +25,7 @@
  *   所以 cost_today 不再只是「下限」，按用途的拆分见 /cost 的 by_kind。
  */
 import { getVectorDb } from "../data/vector.js";
+import { dbPath } from "../data/paths.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("cost");
@@ -217,10 +218,13 @@ function computeCostBreakdown(input: {
 
 // ── SQLite 懒建表 / 写入 ────────────────────────
 
-let tableReady = false;
+// 建表缓存按「当前 SQLite 文件路径」记录：测试/评测会在同一进程切换 KAREN_DATA_DIR，
+// 进程级布尔会导致第二个库缺表（实测出现 "no such table: llm_usage" 警告）。
+let tableReadyForPath: string | null = null;
 
 function ensureTable(): void {
-  if (tableReady) return;
+  const currentPath = dbPath();
+  if (tableReadyForPath === currentPath) return;
   const db = getVectorDb();
   db.exec(`
     CREATE TABLE IF NOT EXISTS llm_usage (
@@ -239,7 +243,7 @@ function ensureTable(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage(created_at);
   `);
-  tableReady = true;
+  tableReadyForPath = currentPath;
 }
 
 /**

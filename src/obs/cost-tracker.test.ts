@@ -283,6 +283,26 @@ describe("recordLlmUsage + 摘要", () => {
     vector.closeVectorDb();
   });
 
+  it("同一进程切换 KAREN_DATA_DIR 后仍能建表记账（缓存按 DB 路径）", async () => {
+    const { cost, vector } = await loadModules();
+    const at = Date.now();
+    cost.recordLlmUsage({ model: "deepseek-flash", promptTokens: 10, completionTokens: 5, at });
+    vector.closeVectorDb();
+
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "karen-cost-switch-"));
+    process.env.KAREN_DATA_DIR = dir2;
+    try {
+      // 旧实现 tableReady 是进程级布尔 → 新库缺 llm_usage 表而静默失败
+      cost.recordLlmUsage({ model: "deepseek-flash", promptTokens: 20, completionTokens: 7, at });
+      const summary = cost.getTodayCostSummary(at);
+      expect(summary.calls).toBe(1);
+      expect(summary.prompt_tokens).toBe(20);
+    } finally {
+      vector.closeVectorDb();
+      fs.rmSync(dir2, { recursive: true, force: true });
+    }
+  });
+
   it("成本记录跨模块重载仍可见（SQLite 持久化）", async () => {
     const { cost, vector } = await loadModules();
     const at = Date.now();

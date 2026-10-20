@@ -38,6 +38,23 @@ const baseInput = {
 };
 
 describe("pending-queue 持久化延迟队列", () => {
+  it("同一进程切换 KAREN_DATA_DIR 后仍能建表入队（缓存按 DB 路径）", async () => {
+    const q = await import("./pending-queue.js");
+    const v = await import("./vector.js");
+    q.enqueuePendingReply({ ...baseInput, dueAt: Date.now() + 60_000 });
+    v.closeVectorDb();
+
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "karen-pending-switch-"));
+    process.env.KAREN_DATA_DIR = dir2;
+    try {
+      q.enqueuePendingReply({ ...baseInput, dueAt: Date.now() + 60_000 });
+      expect(q.listPendingReplies()).toHaveLength(1);
+    } finally {
+      v.closeVectorDb();
+      fs.rmSync(dir2, { recursive: true, force: true });
+    }
+  });
+
   it("入队后可按到期时间列出", async () => {
     const q = await import("./pending-queue.js");
     const id1 = q.enqueuePendingReply({ ...baseInput, dueAt: Date.now() + 60_000 });

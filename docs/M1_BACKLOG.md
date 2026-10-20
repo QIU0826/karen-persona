@@ -90,6 +90,14 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 延迟补发 E2E + 跨库表缓存修复）
+
+- **延迟补发端到端**：第二个 bridge 实例（免打扰时段覆盖当前小时）：
+  聊天消息断言不立即回复 → 数据库断言 `pending_replies` 落库 → 把 `due_at` 改到过去 → **重启 bridge 进程** → 恢复队列 ~2s 后补发（断言收到回复 + 队列行 `done`）。
+- **修掉全量测试的缺表警告**：`cost-tracker` / `pending-queue` 的懒建表缓存是进程级布尔，同一进程切换 `KAREN_DATA_DIR` 后第二个库缺表（`no such table: llm_usage`）→ 改为按当前 DB 路径缓存（与 user-facts 一致），并各加 1 条切库单测。
+- **E2E 稳定性**：断言「消息已发送但 DB 尚未落库」的窗口增加轮询；延迟场景 6/6 通过。
+- **测试**：59 文件 / 634 用例，tsc 0、lint 0、覆盖率阈值通过（行 52.1%）。
+
 ### ✅ 已完成（2026-10-20 多用户 prompt 隔离修复 + E2E 安全场景）
 
 - **严重隐私 bug（E2E 发现）**：`src/evolution/style-reference.ts` 的 `retrieveStyleReference` 查 `t2_episodes` 时没有 `persona_id` 过滤，第二个用户的 system prompt 里混入了第一个用户的历史对话片段（「动态风格参考」）。

@@ -12,6 +12,7 @@
  * - 单用户多条待补发时，仅保留最新一条（与内存 timer 语义一致）。
  */
 import { getVectorDb } from "./vector.js";
+import { dbPath } from "./paths.js";
 
 export interface PendingReply {
   id: number;
@@ -36,10 +37,12 @@ export interface EnqueuePendingReplyInput {
   dueAt: number;
 }
 
-let tableReady = false;
+// 建表缓存按当前 SQLite 路径记录（测试/评测会切换 KAREN_DATA_DIR，避免第二个库缺表）
+let tableReadyForPath: string | null = null;
 
 function ensureTable(): void {
-  if (tableReady) return;
+  const currentPath = dbPath();
+  if (tableReadyForPath === currentPath) return;
   const db = getVectorDb();
   db.exec(`
     CREATE TABLE IF NOT EXISTS pending_replies (
@@ -58,7 +61,7 @@ function ensureTable(): void {
     CREATE INDEX IF NOT EXISTS idx_pending_status_due ON pending_replies(status, due_at);
     CREATE INDEX IF NOT EXISTS idx_pending_platform_user ON pending_replies(platform, user_id);
   `);
-  tableReady = true;
+  tableReadyForPath = currentPath;
 }
 
 function rowToPending(row: Record<string, unknown>): PendingReply {

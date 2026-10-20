@@ -337,6 +337,22 @@ function groupEvent(text: string, messageId: number, userId: number = TEST_QQ): 
   };
 }
 
+/** 轮询只读查询直到满足条件（发送消息先于落库，避免时序 flake）。 */
+async function pollReadonlyDb<T>(
+  dbPath: string,
+  fn: (db: BetterSqlite3.Database) => T,
+  accept: (value: T) => boolean,
+  timeoutMs = 5000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  let last = await withReadonlyDb(dbPath, fn);
+  while (!accept(last) && Date.now() < deadline) {
+    await wait(100);
+    last = await withReadonlyDb(dbPath, fn);
+  }
+  return last;
+}
+
 /**
  * 只读打开临时数据库并执行查询；bridge 正在运行时偶发 SQLITE_BUSY，
  * 重试几次（测试稳定性；不影响断言内容）。
@@ -659,14 +675,256 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
     expect(owners).toContain(`qq:${TEST_QQ}`);
     expect(owners).toContain(`qq:${TEST_QQ2}`);
 
-    const personas = await withReadonlyDb(dbPath, (db) =>
-      (
-        db
-          .prepare("SELECT DISTINCT persona_id FROM t2_episodes WHERE source = 'chat'")
-          .all() as Array<{ persona_id: string }>
-      ).map((row) => row.persona_id),
+    const personas = await pollReadonlyDb(
+      dbPath,
+      (db) =>
+        (
+          db
+            .prepare("SELECT DISTINCT persona_id FROM t2_episodes WHERE source = 'chat'")
+            .all() as Array<{ persona_id: string }>
+        ).map((row) => row.persona_id),
+      (rows) => rows.length >= 2 && rows.some((id) => id.includes("qq-100000002")),
     );
     expect(personas.length).toBeGreaterThanOrEqual(2);
     expect(personas.some((id) => id.includes("qq-100000002"))).toBe(true);
   }, 90000);
+});
+
+// ── 延迟补发：免打扰门控 → pending 落库 → 断线重连后补发 ─────────────
+
+/** 可写打开临时数据库（重试 SQLITE_BUSY），用于模拟「时间到了」。 */
+async function withWritableDb<T>(
+  dbPath: string,
+  fn: (db: BetterSqlite3.Database) => T,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    let db: BetterSqlite3.Database | null = null;
+    try {
+      const Database = (await import("better-sqlite3")).default;
+      db = new Database(dbPath);
+      db.pragma("busy_timeout = 5000");
+      return fn(db);
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/busy|locked/i.test(message)) throw error;
+      await wait(150);
+    } finally {
+      try {
+        db?.close();
+      } catch {
+        // ignore
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+describe("延迟补发（免打扰门控 + 重连恢复）", () => {
+  let fake: FakeOpenAi;
+  let workDir: string;
+  let dataDir: string;
+  let bridge: ChildProcess | null = null;
+  let client: OneBotClient | null = null;
+  let port = 0;
+  let bridgeEnv: NodeJS.ProcessEnv;
+
+  async function launchBridge(): Promise<void> {
+    bridgeOutputTail = "";
+    bridge = spawn(
+      process.execPath,
+      [
+        path.join(REPO_ROOT, "node_modules/tsx/dist/cli.mjs"),
+        path.join(REPO_ROOT, "src/bridge/qq.ts"),
+      ],
+      { cwd: workDir, env: bridgeEnv, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    currentBridge = bridge;
+    const appendOutput = (chunk: Buffer): void => {
+      bridgeOutputTail = (bridgeOutputTail + chunk.toString()).slice(-4000);
+    };
+    bridge.stdout?.on("data", appendOutput);
+    bridge.stderr?.on("data", appendOutput);
+    await waitForPort(port, 30000, bridge);
+  }
+
+  async function stopBridge(): Promise<void> {
+    if (!bridge || bridge.exitCode !== null) return;
+    bridge.kill("SIGTERM");
+    const deadline = Date.now() + 10000;
+    while (bridge.exitCode === null && Date.now() < deadline) {
+      await wait(100);
+    }
+    if (bridge.exitCode === null) bridge.kill("SIGKILL");
+    currentBridge = null;
+  }
+
+  beforeAll(async () => {
+    fake = await startFakeOpenAi();
+    workDir = fs.mkdtempSync(path.join(os.tmpdir(), "karen-e2e-delay-"));
+    dataDir = path.join(workDir, "data");
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.cpSync(path.join(REPO_ROOT, "personas"), path.join(workDir, "personas"), {
+      recursive: true,
+    });
+    port = await freePort();
+    // 免打扰时段覆盖「当前小时」，让聊天消息必然被门控延迟（可确定地构造 pending）
+    const hour = new Date().getHours();
+    const endHour = (hour + 1) % 24;
+    fs.writeFileSync(
+      path.join(workDir, "config.yaml"),
+      [
+        'persona: "xiaoya"',
+        'her_name: "小雅"',
+        'your_name: "你"',
+        'location: "上海"',
+        "tags: []",
+        `allowed_users: [${TEST_QQ}]`,
+        'one_bot_ws_host: "127.0.0.1"',
+        `one_bot_ws_port: ${port}`,
+        `one_bot_ws_path: "${WS_PATH}"`,
+        `one_bot_token: "${WS_TOKEN}"`,
+        `quiet_hours_start: ${hour}`,
+        `quiet_hours_end: ${endHour}`,
+        "photo_share_min_closeness: 10",
+        "photo_share_probability: 0",
+        "age_gate_enabled: true",
+        "ai_disclosure: true",
+        "health_port: 0",
+        "web_port: 0",
+      ].join("\n"),
+      "utf8",
+    );
+
+    bridgeEnv = { ...process.env };
+    delete bridgeEnv.QWEN_VL_API_KEY;
+    delete bridgeEnv.UNSPLASH_ACCESS_KEY;
+    delete bridgeEnv.OPENWEATHER_API_KEY;
+    delete bridgeEnv.KAREN_DATA_DIR;
+    Object.assign(bridgeEnv, {
+      DEEPSEEK_API_KEY: "sk-e2e-test",
+      DEEPSEEK_BASE_URL: fake.baseUrl,
+      KAREN_DATA_DIR: dataDir,
+      LOG_LEVEL: "warn",
+      LOG_FORMAT: "text",
+      NO_COLOR: "1",
+    });
+
+    currentBridge = null;
+    await launchBridge();
+    client = await connectOneBot(port);
+  }, 60000);
+
+  afterAll(async () => {
+    try {
+      client?.close();
+    } catch {
+      // ignore
+    }
+    await stopBridge();
+    await fake?.close();
+    try {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  }, 30000);
+
+  it(
+    "免打扰延迟 → pending 落库 → 桥接重启后到点补发",
+    async () => {
+      const c1 = client!;
+      const actions = c1.actions;
+
+      // 新用户：披露 + 年龄门 → 确认
+      let before = actions.length;
+      c1.send(privateEvent("你好呀", 1));
+      await c1.waitFor(
+        (action, index) =>
+          index >= before &&
+          action.action === "send_private_msg" &&
+          messageText(action).includes("AI") &&
+          messageText(action).includes("18"),
+        30000,
+      );
+      await c1.waitFor(
+        (action, index) =>
+          index >= before &&
+          action.action === "send_private_msg" &&
+          messageText(action).includes("我成年了"),
+        30000,
+      );
+      c1.send(privateEvent("我成年了", 2));
+      await c1.waitFor(
+        (action, index) =>
+          index >= before &&
+          action.action === "send_private_msg" &&
+          messageText(action).includes("好，确认了"),
+        30000,
+      );
+
+      // 免打扰时段内的聊天消息 → 不立即回复，进入 pending 队列
+      await wait(300);
+      before = actions.length;
+      c1.send(privateEvent("今天想跟你说个事", 3));
+      await wait(2000);
+      expect(
+        actions
+          .slice(before)
+          .filter((action) => action.action === "send_private_msg")
+          .map((action) => messageText(action)),
+      ).toEqual([]);
+
+      const dbPath = path.join(dataDir, "memory.sqlite");
+      const pendingRows = await withReadonlyDb(
+        dbPath,
+        (db) =>
+          db
+            .prepare(
+              "SELECT id, due_at, status, user_id FROM pending_replies WHERE platform = 'qq-private' AND status = 'pending'",
+            )
+            .all() as Array<{ id: number; due_at: number; status: string; user_id: string }>,
+      );
+      expect(pendingRows.length).toBeGreaterThan(0);
+      expect(pendingRows.some((row) => row.user_id === String(TEST_QQ))).toBe(true);
+      const pendingRow = pendingRows[pendingRows.length - 1];
+
+      // 模拟「时间到了 + 桥接重启（真实场景：NapCat 掉线/进程重启后恢复）」
+      await withWritableDb(dbPath, (db) =>
+        db
+          .prepare("UPDATE pending_replies SET due_at = ? WHERE status = 'pending'")
+          .run(Date.now() - 1000),
+      );
+
+      c1.close();
+      await wait(400);
+      await stopBridge();
+      await launchBridge();
+      const c2 = await connectOneBot(port);
+      client = c2;
+      await c2.waitFor(
+        (action) => action.action === "send_private_msg" && messageText(action).includes("嗯我在听"),
+        20000,
+      );
+
+      // 补发成功 → 队列行标记 done（发送消息先于 DB 标记，轮询最多 5s）
+      let doneStatus = "pending";
+      const doneDeadline = Date.now() + 5000;
+      while (Date.now() < doneDeadline) {
+        const doneRow = await withReadonlyDb(
+          dbPath,
+          (db) =>
+            db.prepare("SELECT status FROM pending_replies WHERE id = ?").get(pendingRow.id) as {
+              status: string;
+            },
+        );
+        doneStatus = doneRow.status;
+        if (doneStatus === "done") break;
+        await wait(100);
+      }
+      expect(doneStatus).toBe("done");
+    },
+    90000,
+  );
 });
