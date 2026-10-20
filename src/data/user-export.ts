@@ -41,7 +41,33 @@ interface ExportedEpisode {
   last_recalled_at: number | null;
 }
 
-export function exportUserData(input: ExportInput): UserExportResult {
+export interface UserExportPayload {
+  exportedAt: string;
+  personaId: string;
+  personaName: string;
+  storageKey: string;
+  session: ConversationSession;
+  personaState: unknown;
+  t2Episodes: ExportedEpisode[];
+}
+
+/** 导出文件名（/export 落盘；可含中文人设名）。 */
+export function exportUserDataFilename(personaName: string, storagePersona: string): string {
+  return `export-${safeFileStem(personaName)}-${ownerSlug(storagePersona)}-${Date.now()}.json`;
+}
+
+/** Web 下载用的 ASCII 安全文件名（HTTP header 不允许中文等非 ASCII 字符）。 */
+export function exportDownloadFilename(storagePersona: string): string {
+  return `karen-export-${ownerSlug(storagePersona)}-${Date.now()}.json`;
+}
+
+/**
+ * 组装导出 payload（只读，不落盘）。/export 命令落盘保存，Web 控制台直接下载。
+ */
+export function buildUserExportPayload(input: ExportInput): {
+  payload: UserExportPayload;
+  counts: UserExportResult["counts"];
+} {
   const { personaName, storagePersona, storageKey, session } = input;
   const personaState = loadPersonaState(personaName, input.initialCloseness ?? 3, storageKey);
 
@@ -60,7 +86,7 @@ export function exportUserData(input: ExportInput): UserExportResult {
     episodes = [];
   }
 
-  const payload = {
+  const payload: UserExportPayload = {
     exportedAt: new Date().toISOString(),
     personaId: storagePersona,
     personaName,
@@ -70,16 +96,20 @@ export function exportUserData(input: ExportInput): UserExportResult {
     t2Episodes: episodes,
   };
 
-  const filename = `export-${safeFileStem(personaName)}-${ownerSlug(storagePersona)}-${Date.now()}.json`;
-  const path = dataFile(filename);
-  fs.writeFileSync(path, JSON.stringify(payload, null, 2), { mode: 0o600 });
-
   return {
-    path,
+    payload,
     counts: {
       messages: session.messages.length,
       memories: episodes.length,
       relationshipEvents: personaState?.relationship.events.length ?? 0,
     },
   };
+}
+
+export function exportUserData(input: ExportInput): UserExportResult {
+  const { payload, counts } = buildUserExportPayload(input);
+  const filename = exportUserDataFilename(input.personaName, input.storagePersona);
+  const path = dataFile(filename);
+  fs.writeFileSync(path, JSON.stringify(payload, null, 2), { mode: 0o600 });
+  return { path, counts };
 }

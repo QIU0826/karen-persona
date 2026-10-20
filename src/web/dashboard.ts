@@ -384,6 +384,7 @@ a { color: var(--accent2); }
 .topbar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .persona { color: var(--accent); font-weight: 600; }
 .owner-select { background: var(--bg2); color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; font: inherit; font-size: 12px; max-width: 220px; }
+.btn-link { text-decoration: none; display: inline-flex; align-items: center; font-size: 13px; }
 .wrap { max-width: 980px; margin: 0 auto; padding: 16px 16px 48px; }
 .tabs { display: flex; gap: 8px; overflow-x: auto; padding: 14px 0 10px; position: sticky; top: 53px; background: linear-gradient(var(--bg) 70%, transparent); z-index: 5; }
 .tab {
@@ -965,6 +966,15 @@ const CLIENT_JS = `
         refresh();
       });
     }
+    var exportLink = $("export-owner");
+    if (exportLink) {
+      exportLink.addEventListener("click", function (event) {
+        event.preventDefault();
+        var url = "/api/export" + (currentOwner ? "?owner=" + encodeURIComponent(currentOwner) : "");
+        if (TOKEN) url += (url.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(TOKEN);
+        window.location.href = url;
+      });
+    }
     var toggle = $("refresh-toggle");
     if (toggle) {
       toggle.addEventListener("click", function () {
@@ -1016,6 +1026,7 @@ export function renderDashboard(data: DashboardData): string {
     `<div class="brand"><span class="brand-dot"></span><span class="brand-name">Karen</span><span class="brand-sub">本地控制台 · 只读</span></div>` +
     `<div class="topbar-right">` +
     `<select class="owner-select" id="owner-select" aria-label="切换用户" style="display:none"></select>` +
+    `<a class="btn btn-link" id="export-owner" href="#">导出当前用户</a>` +
     `<span class="persona" id="persona-name">${escapeHtml(herName)}</span>` +
     `<span class="muted small" id="updated">更新于 ${escapeHtml(time(overview.generated_at))}</span>` +
     `<span class="chip online" id="conn">在线</span>` +

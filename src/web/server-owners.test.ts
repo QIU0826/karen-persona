@@ -119,6 +119,11 @@ async function start(core: Core, allOwners: boolean): Promise<{ port: number }> 
   return { port };
 }
 
+async function getRaw(port: number, pathname: string): Promise<{ status: number; headers: Headers; text: string }> {
+  const res = await fetch(`http://127.0.0.1:${port}${pathname}`);
+  return { status: res.status, headers: res.headers, text: await res.text() };
+}
+
 async function getJson(port: number, pathname: string): Promise<{ status: number; json: Record<string, unknown> }> {
   const res = await fetch(`http://127.0.0.1:${port}${pathname}`);
   const text = await res.text();
@@ -167,11 +172,23 @@ describe("Web 多用户只读视图", () => {
     expect(invalid.status).toBe(400);
     expect(invalid.json.error).toBe("invalid_owner");
 
-    // 页面含 owner 选择器 + 客户端拉取 /api/owners
+    // 单 owner 导出（JSON 下载，不落盘）
+    const exported = await getRaw(port, "/api/export?owner=qq:100000002");
+    expect(exported.status).toBe(200);
+    expect(exported.headers.get("content-type")).toContain("application/json");
+    expect(exported.headers.get("content-disposition")).toContain("attachment");
+    expect(exported.text).toContain("第二用户的消息");
+    expect(exported.text).toContain("-qq-100000002");
+    expect(exported.text).toContain("xiaoya@qq-100000002");
+    expect(fs.readdirSync(dir).some((file) => file.startsWith("export-"))).toBe(false);
+
+    // 页面含 owner 选择器 + 导出按钮 + 客户端拉取 /api/owners
     const page = await fetch(`http://127.0.0.1:${port}/`);
     const html = await page.text();
     expect(html).toContain('id="owner-select"');
+    expect(html).toContain('id="export-owner"');
     expect(html).toContain("/api/owners");
+    expect(html).toContain("/api/export");
   });
 
   it("默认（web_all_owners=false）只展示主用户，跨 owner 请求 403", async () => {
@@ -195,9 +212,15 @@ describe("Web 多用户只读视图", () => {
     expect(otherFacts.status).toBe(200);
     expect(JSON.stringify(otherFacts.json)).toContain("王五");
 
-    // 不带 owner 仍能拿到主用户
+    const exportDenied = await getRaw(port, "/api/export?owner=qq:100000002");
+    expect(exportDenied.status).toBe(403);
+
+    // 不带 owner 仍能拿到主用户；导出主用户 OK
     const primary = await getJson(port, "/api/session?limit=30");
     expect(primary.status).toBe(200);
     expect(JSON.stringify(primary.json)).toContain("主用户的秘密");
+    const exportPrimary = await getRaw(port, "/api/export");
+    expect(exportPrimary.status).toBe(200);
+    expect(exportPrimary.text).toContain("主用户的秘密");
   });
 });

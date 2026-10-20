@@ -54,6 +54,8 @@ import {
   type WebPersonaContext,
   type WebPersonaOverride,
 } from "./data.js";
+import { loadSession } from "../data/history.js";
+import { buildUserExportPayload, exportDownloadFilename } from "../data/user-export.js";
 import {
   isOwnerAllowed,
   listKnownOwners,
@@ -406,6 +408,43 @@ async function handleRequest(
         return;
       }
       sendJson(res, 200, getTimeline(scoped.override, options.initialCloseness ?? 3));
+      return;
+    }
+
+    // 单 owner 数据导出（JSON 下载；不落盘）。默认只能导出主用户，开启 web_all_owners 后可导出其他 owner。
+    if (pathname === "/api/export") {
+      const scoped = resolveOwnerRequest(url, options, override);
+      if (!scoped.ok) {
+        sendJson(res, scoped.status, { ok: false, error: scoped.error });
+        return;
+      }
+      const personaName = options.personaName ?? "unknown";
+      const storagePersona = scoped.override.id ?? options.personaId ?? "unknown";
+      const storageKey = scoped.override.storageKey ?? "";
+      let payload: ReturnType<typeof buildUserExportPayload>["payload"];
+      try {
+        const session = loadSession(personaName, storageKey);
+        payload = buildUserExportPayload({
+          personaName,
+          storagePersona,
+          storageKey,
+          session,
+          initialCloseness: options.initialCloseness ?? 3,
+        }).payload;
+      } catch (err) {
+        log.error("web.export_failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        sendJson(res, 500, { ok: false, error: "export_failed" });
+        return;
+      }
+      const filename = exportDownloadFilename(storagePersona);
+      res.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+        "content-disposition": `attachment; filename="${filename}"`,
+        "cache-control": "no-store",
+      });
+      res.end(JSON.stringify(payload, null, 2));
       return;
     }
 

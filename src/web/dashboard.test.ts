@@ -401,3 +401,11 @@ describe("多用户只读切换", () => {
     expect(html).toContain("owner=");
   });
 });
+
+describe("多用户导出按钮", () => {
+  it("页面含导出当前用户按钮与 /api/export 逻辑", () => {
+    const html = renderFixture();
+    expect(html).toContain('id="export-owner"');
+    expect(html).toContain("/api/export");
+  });
+});

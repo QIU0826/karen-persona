@@ -157,7 +157,9 @@ my-persona/
 - 配置：`web_all_owners`（config.yaml / `WEB_ALL_OWNERS`，默认 false）；桥接注入 primaryOwner。
 - 测试：owner 映射/汇总 4 条、多用户 API（200/400/403/页面选择器）2 条、dashboard 渲染 1 条。
 
-**未做**：写操作（删除/导出/暂停）、admin token 区分、跨人设映射（`user_personas` 不同好友不同人设的 Web 展示）。
+**已追加：单 owner 导出（2026-10-20）**——`GET /api/export?owner=` 直接下载 JSON（会话/人格状态/T2 记忆），不落盘；ASCII 安全文件名；默认仅主用户，`web_all_owners` 开启后可导出其他 owner；前端「导出当前用户」按钮。
+
+**未做**：删除/暂停等写操作、admin token 区分、跨人设映射（`user_personas` 不同好友不同人设的 Web 展示）。
 
 ### 4.2 验收 / 成本 / 风险
 

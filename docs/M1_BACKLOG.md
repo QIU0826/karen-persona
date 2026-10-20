@@ -90,6 +90,13 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 M2-C 单 owner 导出）
+
+- `user-export.ts` 拆出 `buildUserExportPayload`（只读组装，不落盘）/ `exportDownloadFilename`（ASCII 安全）。
+- `GET /api/export?owner=`：JSON 附件下载（会话/人格状态/T2 记忆）；默认仅主用户，开启 `web_all_owners` 后可导出其他 owner；非法 owner 400、越权 403；`Content-Disposition` 用 ASCII 文件名（避免中文头报错）。
+- 前端顶栏「导出当前用户」按钮（自动带 token/owner）。
+- 测试：+3 条（导出内容/不落盘/越权/按钮）；全仓 65 文件 / 666 用例，tsc 0、lint 0、覆盖率阈值通过（行 53.3%）。
+
 ### ✅ 已完成（2026-10-20 M2-C 多租户 Web 最小只读版）
 
 - **数据层**：`src/web/owner-view.ts` —— owner↔storageKey/persona 映射、会话文件扫描 + facts/consent 汇总已知 owner（主用户排第一）。
