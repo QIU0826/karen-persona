@@ -8,6 +8,7 @@ import { describeEmotion } from "../persona/emotion.js";
 import { closenessLabel } from "../persona/relationship.js";
 import { getStateSummary, type ConversationState } from "../pipeline/orchestrator.js";
 import { buildAboutText } from "../persona/disclosure.js";
+import { getConsent } from "../data/consent.js";
 
 export interface ExportSummary {
   path: string;
@@ -95,6 +96,7 @@ export function buildHelpText(): string {
     "/resume: 恢复主动消息",
     "/export: 导出你们的对话与记忆备份（JSON）",
     "/about: AI 披露、数据去向、年龄与安全说明",
+    "/age: 查看年龄确认状态",
     "/help: 这条帮助",
   ].join("\n");
 }
@@ -139,6 +141,20 @@ export async function handleControlCommand(
     case "about":
       deps.reply(buildAboutText());
       return true;
+    case "age": {
+      const owner = (state as unknown as { owner?: string }).owner ?? "";
+      const consent = owner ? getConsent(owner) : null;
+      if (consent?.ageConfirmedAt) {
+        deps.reply(
+          `【年龄确认】已确认（${new Date(consent.ageConfirmedAt).toLocaleString("zh-CN", {
+            hour12: false,
+          })}）。`,
+        );
+      } else {
+        deps.reply("【年龄确认】尚未确认：继续聊之前回复「我成年了」。");
+      }
+      return true;
+    }
     case "help":
       deps.reply(buildHelpText());
       return true;

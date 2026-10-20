@@ -70,6 +70,15 @@ import { describeImage } from "../ai/vision.js";
 import { handleControlCommand } from "../commands/control.js";
 import { exportUserData } from "../data/user-export.js";
 import { buildFirstContactDisclosure } from "../persona/disclosure.js";
+import {
+  buildAgeConfirmedText,
+  buildAgeDeclinedText,
+  buildAgeGatePrompt,
+  buildAgeGateReminder,
+  evaluateAgeGate,
+  shouldEnforceAgeGate,
+} from "../persona/age-gate.js";
+import { ackDisclosure, confirmAge, hasAgeConfirmation } from "../data/consent.js";
 import { ownerForQq } from "../data/owner.js";
 import { pickSticker, toStickerCqCode } from "../impulse/stickers.js";
 import { buildGroupReplyPlan } from "./group-reply.js";
@@ -168,6 +177,9 @@ interface SharedBase {
 
 const userStates = new Map<number, ConversationState>();
 const userLastActive = new Map<number, number>();
+/** 年龄门提醒节流（同一用户 5 分钟内最多提醒一次，避免刷屏） */
+const ageGateReminderAt = new Map<number, number>();
+const AGE_GATE_REMINDER_INTERVAL_MS = 5 * 60 * 1000;
 /** 缓存已加载的人设（personaId → Persona） */
 const personaCache = new Map<string, Persona>();
 /** 每用户中断计数：新消息到达 +1，用于打断正在发送的 burst */
@@ -1223,7 +1235,11 @@ async function handlePrivateBatch(
       st.stickerMode = "qqface";
       userStates.set(userId, st);
       if (sharedBase.config.ai_disclosure && st.session.messages.length === 0) {
-        sendPrivateMsg(userId, buildFirstContactDisclosure());
+        const gatePending =
+          shouldEnforceAgeGate(st.owner, sharedBase.config.age_gate_enabled) &&
+          !hasAgeConfirmation(st.owner);
+        sendPrivateMsg(userId, buildFirstContactDisclosure({ ageGate: gatePending }));
+        ackDisclosure(st.owner);
         log.info("compliance.disclosure_sent", { user_id: userId });
       }
     }
@@ -1255,15 +1271,53 @@ async function handlePrivateBatch(
     st.stickerMode = "qqface";
     userStates.set(userId, st);
     log.info("session.created", { user_id: userId, persona: persona.name });
+    const gatePending =
+      shouldEnforceAgeGate(st.owner, sharedBase.config.age_gate_enabled) &&
+      !hasAgeConfirmation(st.owner);
     // 合规：首次对话披露（AI 身份 + 数据去向 + 18+），仅新会话发一次
     if (sharedBase.config.ai_disclosure && st.session.messages.length === 0) {
-      sendPrivateMsg(userId, buildFirstContactDisclosure());
+      sendPrivateMsg(userId, buildFirstContactDisclosure({ ageGate: gatePending }));
+      ackDisclosure(st.owner);
       log.info("compliance.disclosure_sent", { user_id: userId });
+    }
+    if (gatePending) {
+      sendPrivateMsg(userId, buildAgeGatePrompt());
+      ageGateReminderAt.set(userId, Date.now());
+      log.info("compliance.age_gate_prompt", { user_id: userId });
+      return;
     }
   }
 
   userLastActive.set(userId, Date.now());
   const state = userStates.get(userId)!;
+
+  // 合规：年龄门（未确认前不进入角色对话；确认消息本身不当作聊天内容）
+  const ageGateAction = evaluateAgeGate({
+    text,
+    owner: state.owner,
+    enabled: sharedBase.config.age_gate_enabled,
+    confirmed: hasAgeConfirmation(state.owner),
+  });
+  if (ageGateAction === "declined") {
+    sendPrivateMsg(userId, buildAgeDeclinedText());
+    log.info("compliance.age_gate_declined", { user_id: userId });
+    return;
+  }
+  if (ageGateAction === "confirmed") {
+    confirmAge(state.owner);
+    sendPrivateMsg(userId, buildAgeConfirmedText());
+    log.info("compliance.age_gate_confirmed", { user_id: userId });
+    return;
+  }
+  if (ageGateAction === "ask") {
+    const lastPromptAt = ageGateReminderAt.get(userId) ?? 0;
+    if (Date.now() - lastPromptAt >= AGE_GATE_REMINDER_INTERVAL_MS) {
+      sendPrivateMsg(userId, buildAgeGateReminder());
+      ageGateReminderAt.set(userId, Date.now());
+      log.info("compliance.age_gate_remind", { user_id: userId });
+    }
+    return;
+  }
 
   // 频率限制（放在门控/LLM 之前，省成本）
   const freqLimit = sharedBase.config.message_frequency_limit;
@@ -1394,6 +1448,14 @@ async function handleGroupMessage(
   }
 
   const state = userStates.get(userId)!;
+  // 合规：未确认 18+ 的用户不在群里回复（避免在多人场合诱导未成年人互动）
+  if (
+    shouldEnforceAgeGate(state.owner, state.config.age_gate_enabled) &&
+    !hasAgeConfirmation(state.owner)
+  ) {
+    log.info("compliance.age_gate_group_blocked", { group_id: groupId, user_id: userId });
+    return;
+  }
   userLastActive.set(userId, Date.now());
 
   try {

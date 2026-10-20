@@ -11,13 +11,19 @@
 
 export const DISCLOSURE_VERSION = 1;
 
-/** 首次对话披露文案（短版，发一条消息）。 */
-export function buildFirstContactDisclosure(): string {
+/**
+ * 首次对话披露文案（短版，发一条消息）。
+ * @param options.ageGate 开启年龄门时，把最后一句改成「确认 18+」的指引（QQ 正式发布默认）
+ */
+export function buildFirstContactDisclosure(options: { ageGate?: boolean } = {}): string {
+  const lastLine = options.ageGate
+    ? "继续聊之前，请先确认你已满 18 岁（回复「我成年了」）。"
+    : "想继续聊就直接发消息吧。";
   return [
     "先说明一下：我是小雅，一个 AI 扮演的虚拟角色，不是真人。",
     "我们的聊天内容存在本机，但生成回复时会把对话（以及你发的图片）发送给 AI 服务；语义记忆若启用还会用到向量服务。",
     "本服务面向 18 岁以上用户；如果你未满 18 岁，请在监护人陪同下使用。",
-    "想继续聊就直接发消息吧。",
+    lastLine,
   ].join("\n");
 }
 
@@ -42,7 +48,9 @@ export function buildAboutText(): string {
     "· 删除数据：停掉程序后删除 data/ 目录（建议先 /export 备份）",
     "",
     "【年龄与安全】",
-    "· 面向 18 岁以上用户；未成年人需监护人陪同。",
+    "· 面向 18 岁以上用户；首次使用需确认已满 18 岁（回复「我成年了」）。",
+    "· /age：查看年龄确认状态。",
+    "· 未成年人需监护人陪同。",
     "· 她不是专业心理咨询师/医生；遇到严重情绪困扰请联系 12356（全国心理援助热线）或 110/120。",
     "",
     "【局限】",

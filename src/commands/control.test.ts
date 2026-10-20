@@ -98,6 +98,14 @@ describe("handleControlCommand", () => {
     expect(text).toContain("18 岁");
   });
 
+  it("/age 在未传 owner 时提示尚未确认", async () => {
+    const deps = { reply: vi.fn(), persist: vi.fn(), exportData: vi.fn() };
+    const handled = await handleControlCommand("/age", makeState() as never, deps);
+    expect(handled).toBe(true);
+    expect(deps.reply).toHaveBeenCalledTimes(1);
+    expect(String(deps.reply.mock.calls[0][0])).toContain("尚未确认");
+  });
+
   it("/help 与未知指令", async () => {
     const deps = { reply: vi.fn(), persist: vi.fn(), exportData: vi.fn() };
     expect(await handleControlCommand("/help", makeState() as never, deps)).toBe(true);

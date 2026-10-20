@@ -52,6 +52,12 @@ export interface AppConfig {
    */
   ai_disclosure: boolean;
   /**
+   * 是否要求 QQ 用户确认已满 18 岁后才能对话（默认 true）。
+   * 仅对 owner=qq:* 生效（CLI 开发者模式不强制）；个人自用可设 false。
+   * 注意：这是自我声明式年龄门，不是身份证/生日校验。
+   */
+  age_gate_enabled?: boolean;
+  /**
    * 主动发图调试覆盖（不设置则用人设 photoShare 里的值）：
    * 亲密度门槛 / 概率（0-1） / 冷却分钟数。仅建议测试期使用。
    */
@@ -406,6 +412,12 @@ export function loadConfig(): AppConfig {
     ? parseBooleanOption(disclosurePicked.value, disclosurePicked.source)
     : true;
 
+  // 年龄门（18+ 确认）：默认开启（合规）；个人自用可 AGE_GATE=false 关闭
+  const ageGatePicked = pickOption(raw, "age_gate_enabled", "AGE_GATE");
+  const ageGateEnabled = ageGatePicked
+    ? parseBooleanOption(ageGatePicked.value, ageGatePicked.source)
+    : true;
+
   // 主动发图调试覆盖（可选；不设置时用人设 photoShare 的值）
   const photoMinClosenessPicked = pickOption(raw, "photo_share_min_closeness", "PHOTO_SHARE_MIN_CLOSENESS");
   const photoShareMinCloseness = photoMinClosenessPicked
@@ -453,6 +465,7 @@ export function loadConfig(): AppConfig {
     photo_share_cooldown_minutes: photoShareCooldownMinutes,
     group_photo_enabled: groupPhotoEnabled,
     ai_disclosure: aiDisclosure,
+    age_gate_enabled: ageGateEnabled,
   };
 }
 

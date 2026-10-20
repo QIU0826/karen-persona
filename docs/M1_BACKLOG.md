@@ -90,6 +90,15 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 年龄门 18+ 确认）
+
+- **合规升级（已完成）**：`src/data/consent.ts`（`user_consent` 表，按 owner 隔离、跨重启持久化）+ `src/persona/age-gate.ts`（`detectAgeConfirmation` / `detectUnderageDecline` / `evaluateAgeGate` / 文案）。
+- **QQ 私聊**：首次对话发「AI 披露（含 18+ 指引）+ 确认请求」，未确认前不进入角色对话（5 分钟内最多提醒一次）；回复「我成年了」记录并放行；明确表示未成年则拒绝服务；首条消息不会在确认前落库/回复。
+- **群聊**：未确认用户 @ 她也不会回复（避免多人场合诱导未成年人互动）。
+- **/age**：查看年龄确认状态（已确认时间 / 尚未确认）。
+- **配置**：`age_gate_enabled` 默认 true（config.yaml 或 `AGE_GATE=false` 关闭）；CLI 开发者模式不强制；仍是自我声明式年龄门，非身份证/生日校验。
+- **测试**：consent 4 条 + age-gate 9 条 + `/age` 1 条；全仓 53 文件 / 596 用例，tsc 0。
+
 ### ✅ 已完成（2026-10-20 群聊贴纸/发图）
 
 - **群聊出站计划（已完成）**：新增 `src/bridge/group-reply.ts` 纯函数 `buildGroupReplyPlan`——文字气泡按换行拆分 → QQ 表情 →（可选）照片+配文；5 条单测（拆行/表情/默认不发图/显式开启/只有图）。
