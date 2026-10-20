@@ -52,6 +52,10 @@ jobs:
 
       # 离线评测守门（Linux 一次即可）：不改代码也能发现检索/注入链路退化——
       # 单元测试只验证结构，这个步骤真的跑指标并卡阈值（阈值在 scripts/eval-offline.ts）
+      - name: Initiative simulation redlines (Linux)
+        if: runner.os == 'Linux'
+        run: npm run initiative:sim
+
       - name: Offline eval gate (Linux)
         if: runner.os == 'Linux'
         run: npm run eval:offline

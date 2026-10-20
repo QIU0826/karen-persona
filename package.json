@@ -37,6 +37,7 @@
     "media:start": "tsx scripts/media-setup.ts start",
     "media:purge": "tsx scripts/media-setup.ts purge",
     "eval:offline": "tsx scripts/eval-offline.ts",
+    "initiative:sim": "tsx scripts/initiative-sim.ts",
     "eval:memory": "tsx scripts/memory-eval.ts",
     "eval:anchor": "tsx scripts/anchor-eval.ts",
     "eval:live": "tsx scripts/memory-eval.ts --live --limit=40 && tsx scripts/anchor-eval.ts"
