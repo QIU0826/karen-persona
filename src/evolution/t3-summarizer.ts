@@ -19,11 +19,60 @@ import { generateEmbedding } from "../data/embedding.js";
 
 // ── 阈值 ──────────────────────────────────────
 
-/** 每积累多少条未压缩的 T2 片段触发一次压缩 */
-const COMPRESSION_BATCH_SIZE = 80;
+/**
+ * 每积累多少条未压缩的 T2 片段触发一次压缩。
+ * 原 80 太高：线上长期 0 条摘要（42 条对话一直不压缩），旧对话停留在生片段里，
+ * 跨会话长期记忆实际没跑起来。改为 40 条一次。
+ */
+export const COMPRESSION_BATCH_SIZE = 40;
+
+/** 触发时间兜底：距上一次摘要 ≥1 天且积累了 ≥20 条，也压缩一次（低频聊天也能沉淀） */
+export const COMPRESSION_MIN_COUNT = 20;
+export const COMPRESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** T3 摘要的半衰期（天）——比普通记忆更持久 */
 const T3_HALF_LIFE_DAYS = 90;
+
+/** 压缩触发判定输入 */
+export interface T3CompressDecisionInput {
+  /** 当前未压缩的普通片段条数 */
+  uncompressedCount: number;
+  /** 上次摘要的时间戳（ms）；从未压缩过为 null */
+  lastSummaryAtMs: number | null;
+  /** 当前时间戳（ms），便于测试注入假时钟 */
+  nowMs: number;
+}
+
+/**
+ * 是否需要触发 T3 压缩（纯函数，可单测）。
+ *
+ * 规则（满足任一）：
+ * 1. 未压缩片段 ≥40 条；
+ * 2. 距上次摘要 ≥1 天，且未压缩片段 ≥20 条；
+ * 3. 从未压缩过，且片段 ≥40 条（同 1）。
+ */
+export function shouldCompressT3(input: T3CompressDecisionInput): boolean {
+  const count = Number.isFinite(input.uncompressedCount) ? input.uncompressedCount : 0;
+  if (count >= COMPRESSION_BATCH_SIZE) return true;
+  if (count < COMPRESSION_MIN_COUNT) return false;
+  if (input.lastSummaryAtMs === null || !Number.isFinite(input.lastSummaryAtMs)) return false;
+  return input.nowMs - input.lastSummaryAtMs >= COMPRESSION_MAX_AGE_MS;
+}
+
+/** 读取某个 persona 上次 T3 摘要的时间戳（ms）；没有返回 null。 */
+function getLastSummaryAtMs(pid: string): number | null {
+  const d = getVectorDb();
+  const row = d
+    .prepare(
+      `SELECT CAST(strftime('%s', created_at) AS INTEGER) AS ts
+       FROM t2_episodes
+       WHERE persona_id = ? AND source = 't3_summary'
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(pid) as { ts: number | null } | undefined;
+  const seconds = row?.ts ?? null;
+  return seconds && Number.isFinite(seconds) ? seconds * 1000 : null;
+}
 
 // ── 压缩逻辑 ──────────────────────────────────
 
@@ -52,29 +101,57 @@ export function maybeCompressToT3(): void {
        AND strength > 0.1`
   ).get(pid) as { cnt: number };
 
-  if (countRow.cnt < COMPRESSION_BATCH_SIZE) return;
+  const lastSummaryAtMs = getLastSummaryAtMs(pid);
+  const shouldCompress = shouldCompressT3({
+    uncompressedCount: countRow.cnt,
+    lastSummaryAtMs,
+    nowMs: Date.now(),
+  });
+  if (!shouldCompress) return;
+
+  // 干跑模式：只打印将要压缩的候选，不调 LLM、不改数据（运维/真数据核对用）
+  if (process.env.KAREN_T3_DRY_RUN === "1") {
+    const candidates = d.prepare(
+      `SELECT id, created_at, substr(content, 1, 60) AS preview FROM t2_episodes
+       WHERE persona_id = ?
+         AND source IN ('chat', 'event', 'causal_chain', 'user_trace')
+         AND strength > 0.1
+       ORDER BY created_at ASC
+       LIMIT ${COMPRESSION_BATCH_SIZE}`,
+    ).all(pid) as Array<{ id: number; created_at: string; preview: string }>;
+    console.log(
+      `[T3][dry-run] 将压缩 ${candidates.length} 条（未压缩 ${countRow.cnt} 条，上次摘要 ${lastSummaryAtMs ? new Date(lastSummaryAtMs).toISOString() : "无"}）`,
+    );
+    for (const item of candidates.slice(0, 5)) {
+      console.log(`  - #${item.id} ${item.created_at} ${item.preview.replace(/\s+/g, " ")}`);
+    }
+    return;
+  }
 
   // 异步执行压缩，不阻塞
-  console.log(`[T3] 触发压缩: ${countRow.cnt} 条未压缩片段 (${pid})`);
-  runT3Compression(pid).catch((err) => {
+  console.log(
+    `[T3] 触发压缩: ${countRow.cnt} 条未压缩片段 (${pid}, 上次摘要 ${lastSummaryAtMs ? "有" : "无"})`,
+  );
+  runT3Compression(pid, countRow.cnt).catch((err) => {
     console.log(`[T3] 压缩失败: ${err instanceof Error ? err.message : err}`);
   });
 }
 
-async function runT3Compression(pid: string): Promise<void> {
+async function runT3Compression(pid: string, uncompressedCount: number): Promise<void> {
   const d = getVectorDb();
 
-  // 取最旧的未压缩片段
+  // 取最旧的未压缩片段：时间兜底触发时可能不足一个整批，按实际条数取
+  const batchLimit = Math.min(Math.max(uncompressedCount, 1), COMPRESSION_BATCH_SIZE);
   const episodes = d.prepare(
     `SELECT id, content, source, emotional_weight, created_at FROM t2_episodes
      WHERE persona_id = ?
        AND source IN ('chat', 'event', 'causal_chain', 'user_trace')
        AND strength > 0.1
      ORDER BY created_at ASC
-     LIMIT ${COMPRESSION_BATCH_SIZE}`
+     LIMIT ${batchLimit}`
   ).all(pid) as RawEpisode[];
 
-  if (episodes.length < 20) return; // 太少不值得压缩
+  if (episodes.length < COMPRESSION_MIN_COUNT) return; // 太少不值得压缩
 
   const summary = await generateT3Summary(episodes, pid);
   if (!summary) return;

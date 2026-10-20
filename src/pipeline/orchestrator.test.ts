@@ -170,6 +170,7 @@ describe("跨轮反重复与用户事实注入", () => {
     const { loadPersona } = await import("../persona/loader.js");
     const { initConversation, processMessage } = await import("./orchestrator.js");
     const { upsertUserFacts } = await import("../data/user-facts.js");
+    const { insertT1Snapshot } = await import("../data/vector.js");
 
     const persona = await loadPersona("xiaoya");
     const state = await initConversation(persona, makeConfig());
@@ -177,6 +178,9 @@ describe("跨轮反重复与用户事实注入", () => {
     upsertUserFacts(state.owner, [
       { key: "job", value: "在嘉兴做咖啡店", category: "work" },
     ]);
+    // 造两条 T1 快照，验证「最近状态弧」注入
+    insertT1Snapshot({ content: "旧", emotionVector: 0.1, closeness: 2.9, guilt: 0, summary: "[stream]" });
+    insertT1Snapshot({ content: "新", emotionVector: 0.4, closeness: 3.2, guilt: 0, summary: "[stream]" });
     captured.chatCalls.length = 0;
 
     await processMessage(state, "我今天好累", { bypassGate: true });
@@ -190,6 +194,11 @@ describe("跨轮反重复与用户事实注入", () => {
     expect(system).toContain("这个开头你最近连着用了");
     expect(system).not.toContain("哈哈是吗 我记性不太行");
     expect(system).toContain("在嘉兴做咖啡店");
+    // T1 状态弧：只注入数值趋势，不引用快照正文
+    expect(system).toContain("## 你最近几轮的状态");
+    // 同文件较早的用例也会写 T1 快照，这里只断言趋势方向与结构，不断言具体起点
+    expect(system).toMatch(/亲密度 \d\.\d{2} → \d\.\d{2}（升温）/);
+    expect(system).not.toContain("旧\n");
   });
 
   it("processMessageStream 也注入用户事实与反重复块（QQ 私聊主路径）", async () => {
@@ -203,6 +212,9 @@ describe("跨轮反重复与用户事实注入", () => {
     upsertUserFacts(state.owner, [
       { key: "job", value: "在嘉兴做咖啡店", category: "work" },
     ]);
+    const { insertT1Snapshot } = await import("../data/vector.js");
+    insertT1Snapshot({ content: "旧", emotionVector: 0.1, closeness: 2.9, guilt: 0, summary: "[stream]" });
+    insertT1Snapshot({ content: "新", emotionVector: 0.4, closeness: 3.2, guilt: 0, summary: "[stream]" });
     captured.chatStreamCalls.length = 0;
 
     for await (const _fragment of processMessageStream(state, "在干嘛", { bypassGate: true })) {
@@ -217,5 +229,6 @@ describe("跨轮反重复与用户事实注入", () => {
     expect(system).toContain("你确定记得的关于对方的事");
     expect(system).toContain("在嘉兴做咖啡店");
     expect(system).toContain("这个开头你最近连着用了");
+    expect(system).toContain("## 你最近几轮的状态");
   });
 });

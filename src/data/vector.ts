@@ -596,15 +596,15 @@ export function insertT1Snapshot(snap: T1Snapshot): number {
   return Number(r.lastInsertRowid);
 }
 
-/** 获取当前人设最近 N 条 T1 快照 */
-export function getRecentSnapshots(limit: number = 20): T1Snapshot[] {
+/** 获取当前人设最近 N 条 T1 快照（可显式指定 personaId，供 Web/评测等非当前会话场景） */
+export function getRecentSnapshots(limit: number = 20, personaId: string = getCurrentPersona()): T1Snapshot[] {
   const d = getVectorDb();
   return d.prepare(
     `SELECT content, emotion_vector as emotionVector, closeness, guilt, summary, created_at
      FROM t1_snapshots
      WHERE persona_id = ?
-     ORDER BY created_at DESC LIMIT ?`
-  ).all(getCurrentPersona(), limit) as T1Snapshot[];
+     ORDER BY created_at DESC, id DESC LIMIT ?`
+  ).all(personaId, limit) as T1Snapshot[];
 }
 
 // ── T2 经历记忆 ──────────────────────────────────

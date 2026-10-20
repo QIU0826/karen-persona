@@ -53,6 +53,7 @@ import { renderExpression } from "../impulse/renderer.js";
 import { trySharePhoto } from "../impulse/unsplash-trigger.js";
 import { resolveOwnerScope, OWNER_CLI } from "../data/owner.js";
 import { extractUserFactsAsync, getUserFactsContext } from "../data/user-facts.js";
+import { getT1ArcContext } from "../data/t1-injection.js";
 import {
   detectCrisis,
   crisisSafetyNote,
@@ -962,6 +963,9 @@ export async function processMessage(
   const conflictNote = buildConflictNote(state);
   const crisisNote = crisis ? crisisSafetyNote() : "";
   const factsContext = getUserFactsContext(state.owner);
+  // T1 快照 → 最近状态弧（只用数值趋势，不引用对话正文）
+  const t1ArcContext = getT1ArcContext(state.storagePersona);
+  if (t1ArcContext) logs.push("[T1] 注入最近状态弧");
   // 跨轮反重复：最近几条她自己的话（prompt 注入与回复后检测共用同一份）
   const recentReplies = extractRecentReplies(session.messages);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
@@ -970,6 +974,7 @@ export async function processMessage(
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
     conflictNote +
     crisisNote +
+    t1ArcContext +
     factsContext +
     avoidRepeatNote +
     `\n${momentTag}`;
@@ -1390,6 +1395,9 @@ export async function* processMessageStream(
   const ragContext = buildRagContext(memories);
   // 结构化事实（与非流式对齐）：此前流式主路径漏注入，QQ 私聊里「记得对方说过的事」会失效
   const factsContext = getUserFactsContext(state.owner);
+  // T1 快照 → 最近状态弧（与非流式对齐）
+  const t1ArcContext = getT1ArcContext(state.storagePersona);
+  if (t1ArcContext) console.log("  [T1] 注入最近状态弧");
   // 跨轮反重复（与非流式对齐）
   const recentReplies = extractRecentReplies(session.messages);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
@@ -1398,6 +1406,7 @@ export async function* processMessageStream(
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
     buildConflictNote(state) +
     (crisis ? crisisSafetyNote() : "") +
+    t1ArcContext +
     factsContext +
     avoidRepeatNote +
     `\n${momentTag}`;
@@ -1809,7 +1818,10 @@ export async function processProactive(
   // 跨轮反重复：主动消息同样别和上一轮开口一样
   const recentReplies = extractRecentReplies(session.messages);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
-  const fullSystem = systemPrompt + proactiveInject + avoidRepeatNote;
+  // T1 快照 → 最近状态弧（主动消息也从最近的关系走势出发）
+  const t1ArcContext = getT1ArcContext(state.storagePersona);
+  if (t1ArcContext) logs.push("[T1] 注入最近状态弧");
+  const fullSystem = systemPrompt + proactiveInject + t1ArcContext + avoidRepeatNote;
   const messages = buildChatMessages(session, fullSystem);
 
   // LLM 调用

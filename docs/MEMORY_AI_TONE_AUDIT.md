@@ -50,9 +50,9 @@
 | 层 | 位置 | 线上实际数据（2026-10-20） | 是否进 prompt |
 |---|---|---|---|
 | T0 会话 | `data/小雅-session.json` | 86 条消息（滚动窗口 200） | ✅ 最近 15 条直接进 messages；更早 10 条压缩成"聊过的大概" |
-| T1 人格快照 | `t1_snapshots`（SQLite） | 42 条（情绪/亲密度/负债/摘要） | ❌ 当前没有注入（潜在优化点） |
+| T1 人格快照 | `t1_snapshots`（SQLite） | 每轮 1 条（情绪/亲密度/负债+摘要） | ✅ 最近 8 条压成「最近几轮的状态」注入（数值趋势，不引用对话正文） |
 | T2 情节记忆 | `t2_episodes`（SQLite）+ `t2_fts` + `t2_vec` | 88 条：chat 42 / 独白 42 / 日记 4 | ✅ 每轮检索 top 8，经 RRF 后作为「你突然想起来」注入 |
-| T3 长期摘要 | 写回 `t2_episodes(source=t3_summary)` | 0 条（未到阈值） | ✅ 通过 T2 检索间接生效 |
+| T3 长期摘要 | 写回 `t2_episodes(source=t3_summary)` | 1 条（阈值调优后真实跑通：40 条旧片段 → 1 条摘要） | ✅ 通过 T2 检索间接生效 |
 | 用户事实 | `user_facts`（SQLite，本轮新增） | 重启后随对话累积 | ✅ 每轮以「你确定记得的关于对方的事」注入 |
 | 她眼中的你 | `persona-state-小雅.json` → `herView` | 1 条（已生成） | ✅ 拼进「你和对方的关系」 |
 | 人格/关系/情绪 | `persona-state-小雅.json` | 亲密度 3.21、9 个关系事件、叙事阶段 `noticing` | ✅ 结构化标签注入 |
@@ -157,10 +157,13 @@
 | `src/pipeline/orchestrator.ts`（补） | reply/stream/proactive 三条路径都注入反重复块；**流式路径补注入用户事实块**（此前 QQ 私聊主路径漏注入）；回复后记 `[重复]` 日志 |
 | `src/data/vector.ts` | FTS5 查询从隐式 AND 改 `OR` + BM25 IDF 排序（去重、截断 48 token），修复自然问句 0 命中 |
 | `src/eval/repetition-eval.ts`（新） | 跨轮重复 A/B 脚本（baseline/openers/full；3 轮 × 6 句；真实 DeepSeek） |
+| `src/data/t1-injection.ts`（新） | T1 快照 → 「最近几轮的状态」状态弧（亲密度/情绪/负债趋势；不引用对话正文） |
+| `src/evolution/t3-summarizer.ts` | T3 压缩阈值 80 → 40 条；新增「≥20 条且距上次摘要 ≥1 天」时间兜底；`KAREN_T3_DRY_RUN=1` 干跑；批量按实际条数 |
+| `src/pipeline/orchestrator.ts`（补） | reply/stream/proactive 注入 T1 状态弧 |
 | `src/impulse/renderer.ts` | burst 分条去尾部软标点；压缩连续空行 |
 | `src/impulse/photo-library.ts`（上一轮） | 照片时间关系模型（今天/昨天/以前 + 亲密度门槛） |
 
-验证：`tsc` 0 错误；**46 文件 / 540 用例全绿**（2026-10-20 记忆评测 + 反重复 + Web 面板后）。
+验证：`tsc` 0 错误；**48 文件 / 552 用例全绿**（2026-10-20 记忆评测 + 反重复 + Web 面板 + T1/T3 后）。
 记忆评测：`docs/MEMORY_EVAL_REPORT.md`（20 条金标集；修复 FTS 后 T2 recall@8 85%、facts 100%）。
 
 ---
@@ -173,16 +176,19 @@
    - 行动：配置 `QWEN_VL_API_KEY` → 自动走语义 + BM25 混合；或上本地 embedding（M2）。
 2. ~~**跨轮回复去重**~~ **已完成（2026-10-20）**：`anti-repetition.ts` + 三条管线注入；
    默认 `openers` 模式（A/B 见 §4.1）。剩余：语义级重复（换汤不换药的句式）未覆盖，见 P2。
-3. **T1 未使用**：42 条情绪/关系快照完全没进 prompt；长期关系缺少"最近情绪弧线"。
-   - 行动：把最近 3–5 条 T1 压缩成一句"最近几天你们的状态"，注入关系块。
+3. ~~**T1 未使用**~~ **已完成（2026-10-20）**：`src/data/t1-injection.ts` 把最近 8 条
+   快照压成「最近几轮的状态」（亲密度/情绪/负债趋势，不引用对话正文），reply/stream/proactive
+   三条路径都注入；DB 读取支持显式 personaId（Web/评测/多用户安全）。
 4. ~~**记忆评测缺失**~~ **已完成（2026-10-20）**：`src/eval/memory-gold.json`（20 条）
    + `src/eval/memory-eval.ts` + `scripts/memory-eval.ts`；报告见 `docs/MEMORY_EVAL_REPORT.md`。
    复跑：`tsx scripts/memory-eval.ts --offline`（CI 可跑）/ `--live`（真实模型，≤20 条）。
 
 ### P1（表达与记忆深度）
 
-5. **T3 压缩未跑起来**：80 条才触发，线上 0 条；旧对话会一直停留在 T2 原始事件里。
-   - 行动：降低阈值/改按 token 预算触发；压缩后做质量抽检。
+5. ~~**T3 压缩未跑起来**~~ **已完成（2026-10-20）**：阈值 80 → 40，新增「≥20 条且距上次
+   摘要 ≥1 天」时间兜底；真实数据（42 条未压缩）跑通一次：40 条 → 1 条摘要（id=89），
+   摘要保留「新公司/加班攒彩礼/猫表情包/没好好吃饭」等事实与情绪；旧片段 strength ×0.3。
+   `KAREN_T3_DRY_RUN=1` 可只看候选不写库。
 6. **事实抽取的冲突消解**：同 key 直接覆盖，换工作/换城市正确，但"以前/现在"的时间关系没保留。
    - 行动：facts 加 `valid_from/valid_to` 或"历史值"列表。
 7. **记忆召回没有"时间感"**：注入的 T2 都是 `[对话]` 文本，没有"多久以前"。
