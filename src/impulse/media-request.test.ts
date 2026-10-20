@@ -15,6 +15,7 @@ describe("detectMediaRequest 明确索要多媒体", () => {
       "能不能自拍一张",
       "看看你店里现在什么样",
       "来张你那边天空的图",
+      "店里忙完可以随手拍两张给我看看嘛",
     ]) {
       expect(detectMediaRequest(text).photo, text).toBe(true);
     }
