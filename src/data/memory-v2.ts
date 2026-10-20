@@ -110,6 +110,12 @@ export function ensureMemoryV2Schema(db: Database): void {
       created_at INTEGER NOT NULL,
       UNIQUE(persona_id, owner_id, week_start)
     );
+    CREATE TABLE IF NOT EXISTS getting_to_know (
+      owner_id TEXT NOT NULL,
+      topic TEXT NOT NULL,
+      asked_at INTEGER NOT NULL,
+      PRIMARY KEY (owner_id, topic)
+    );
     CREATE TABLE IF NOT EXISTS job_runs (
       job TEXT NOT NULL,
       period TEXT NOT NULL,
@@ -463,3 +469,27 @@ export function initMemoryV2(db: Database): Database {
 
 /** 便于调用方构造类型（导出 Database 类型别名，避免各自 import better-sqlite3 类型）。 */
 export type { DatabaseType };
+
+// ── 认识初期：她主动了解你 ─────────────────────
+
+/** 已经问过的主题（按 owner 记录，避免反复问同一个问题）。 */
+export function listAskedTopics(db: Database, ownerId: string): Array<{ topic: string; asked_at: number }> {
+  try {
+    return db
+      .prepare(`SELECT topic, asked_at FROM getting_to_know WHERE owner_id = ? ORDER BY asked_at DESC`)
+      .all(ownerId) as Array<{ topic: string; asked_at: number }>;
+  } catch {
+    return [];
+  }
+}
+
+export function markTopicAsked(db: Database, ownerId: string, topic: string, now = Date.now()): void {
+  try {
+    db.prepare(
+      `INSERT INTO getting_to_know (owner_id, topic, asked_at) VALUES (?, ?, ?)
+       ON CONFLICT(owner_id, topic) DO UPDATE SET asked_at = excluded.asked_at`,
+    ).run(ownerId, topic, now);
+  } catch {
+    // 忽略
+  }
+}

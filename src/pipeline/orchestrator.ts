@@ -21,6 +21,8 @@ import {
 } from "../data/memory-v2.js";
 import { buildMemoryContext } from "./memory-context.js";
 import { computeDueJobs, runDailyDigest, runWeeklyRollup } from "../schedule/jobs.js";
+import { buildGetToKnowNote, pickGetToKnowAsk } from "../persona/get-to-know.js";
+import { listAskedTopics, markTopicAsked } from "../data/memory-v2.js";
 import { summarizeDayWithLLM } from "../schedule/digest-llm.js";
 import { generateEmbedding } from "../data/embedding.js";
 import { buildRagContext, storeConversationEpisode } from "../data/retriever.js";
@@ -93,6 +95,7 @@ import {
   getUserFactsContext,
   buildFactConflictNote,
   getFactsNeedingConfirmation,
+  listUserFacts,
   markFactsChallenged,
 } from "../data/user-facts.js";
 import { getT1ArcContext } from "../data/t1-injection.js";
@@ -778,6 +781,43 @@ export function updateRelationshipAfterTurn(
 
 
 
+// ── 她主动了解你（v0.5）─────────────────────
+
+/** 每个 owner 的轮次计数与上次主动提问的轮次（进程内即可，重启最多少问一轮） */
+const getToKnowState = new Map<string, { turn: number; lastAskedTurn: number | null }>();
+
+/**
+ * 认识初期主动问一句（"你是做什么的"）。
+ *
+ * 为什么：真实会话里用户从不主动说自己的事，事实层会一直是空的。
+ * 只在亲密度 <5、该主题没问过、且距上次提问 ≥4 轮时触发；每次只问一个主题。
+ */
+function buildGetToKnowInjection(state: ConversationState): string {
+  try {
+    const entry = getToKnowState.get(state.owner) ?? { turn: 0, lastAskedTurn: null };
+    entry.turn += 1;
+    getToKnowState.set(state.owner, entry);
+
+    const db = getVectorDb();
+    const asked = listAskedTopics(db, state.owner);
+    const knownKeys = listUserFacts(state.owner).map((f) => f.key);
+    const decision = pickGetToKnowAsk({
+      knownFactKeys: knownKeys,
+      askedTopics: asked.map((a) => a.topic),
+      closeness: state.persona.relationship.closeness,
+      turnIndex: entry.turn,
+      lastAskedTurn: entry.lastAskedTurn,
+    });
+    if (!decision) return "";
+    markTopicAsked(db, state.owner, decision.topic);
+    entry.lastAskedTurn = entry.turn;
+    console.log(`  [了解你] 主动问一句：${decision.hint}`);
+    return buildGetToKnowNote(decision);
+  } catch {
+    return "";
+  }
+}
+
 // ── 事实质疑（v0.5）──────────────────────────
 
 /**
@@ -1198,6 +1238,7 @@ export async function processMessage(
     t1ArcContext +
     factsContext +
     buildFactConflictInjection(state) +
+    buildGetToKnowInjection(state) +
     buildMemoryInjection(state) +
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
@@ -1678,6 +1719,7 @@ export async function* processMessageStream(
     t1ArcContext +
     factsContext +
     buildFactConflictInjection(state) +
+    buildGetToKnowInjection(state) +
     buildMemoryInjection(state) +
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
