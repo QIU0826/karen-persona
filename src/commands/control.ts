@@ -124,14 +124,15 @@ function previewMemory(content: string, max = 60): string {
  * - 默认只预览，必须显式带 `--yes` 才真正删除（避免误删）；
  * - 一次最多 20 条；只删 T2，不动会话 JSON / 人格状态。
  */
-export function forgetMemories(rawArg: string | undefined): ForgetResult {
+export function forgetMemories(rawArg: string | undefined, personaId?: string): ForgetResult {
   const text = (rawArg ?? "").trim();
   const requiresConfirmFlag = /(^|\s)--yes$/i.test(text);
   const keyword = text.replace(/(^|\s)--yes$/i, "").trim();
   if (!keyword) {
     return { keyword: "", matched: 0, deleted: 0, previews: [], requiresConfirm: false };
   }
-  const hits = searchEpisodesByKeyword(keyword, FORGET_MAX_MATCHES);
+  // 多用户场景：命令处理时全局 current persona 可能停在别的用户身上，必须用本 state 的存储 persona
+  const hits = searchEpisodesByKeyword(keyword, FORGET_MAX_MATCHES, personaId);
   if (!requiresConfirmFlag) {
     return {
       keyword,
@@ -169,7 +170,7 @@ export async function handleControlCommand(
         deps.reply("用法：/forget 关键词 [--yes]（先预览，确认后加 --yes 才删除）");
         return true;
       }
-      const result = forgetMemories(cmd.arg);
+      const result = forgetMemories(cmd.arg, (state as unknown as { storagePersona?: string }).storagePersona);
       if (!result.keyword) {
         deps.reply("用法：/forget 关键词 [--yes]（先预览，确认后加 --yes 才删除）");
         return true;

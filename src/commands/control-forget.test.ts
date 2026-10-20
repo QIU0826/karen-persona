@@ -71,4 +71,16 @@ describe("/forget", () => {
     await control.handleControlCommand("/forget --yes", {} as never, deps);
     expect(replies[2]).toContain("用法：/forget 关键词");
   });
+
+  it("多用户：/forget 只操作本 state 的存储 persona，不受全局 current persona 影响", async () => {
+    const { vector, control, replies, deps } = await setup();
+    // 给 xiaoya 留一条；把全局 current 切到 suchi（模拟刚处理过其他用户）
+    vector.setCurrentPersona("xiaoya");
+    vector.insertEpisode("xiaoya 的私密记忆 雨天", "chat", 0.3);
+    vector.setCurrentPersona("suchi");
+    const state = { storagePersona: "xiaoya" };
+    await control.handleControlCommand("/forget 私密 --yes", state as never, deps);
+    expect(replies[0]).toContain("已删除 1 条");
+    expect(vector.searchEpisodesByKeyword("私密", 10, "xiaoya")).toHaveLength(0);
+  });
 });

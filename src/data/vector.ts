@@ -660,7 +660,8 @@ export function updateStrength(id: number, newStrength: number): void {
 /** 关键词搜索当前人设的 T2（legacy LIKE；混合检索请用 searchEpisodesByFts） */
 export function searchEpisodesByKeyword(
   keyword: string,
-  limit: number = 5
+  limit: number = 5,
+  personaId: string = getCurrentPersona()
 ): Array<{ id: number; content: string; strength: number; emotional_weight: number }> {
   const d = getVectorDb();
   return d.prepare(
@@ -669,7 +670,7 @@ export function searchEpisodesByKeyword(
      WHERE persona_id = ? AND content LIKE ?
      ORDER BY strength DESC, last_recalled_at DESC
      LIMIT ?`
-  ).all(getCurrentPersona(), `%${keyword}%`, limit) as Array<{
+  ).all(personaId, `%${keyword}%`, limit) as Array<{
     id: number; content: string; strength: number; emotional_weight: number;
   }>;
 }

@@ -24,7 +24,7 @@ M2 产品化 + 真实 QQ 首轮验证修复。
 
 ### Testing
 
-- 69 个测试文件 / 686 个用例；`tsc --noEmit` 0 错误；`npm run lint` 0 违规；行覆盖率 54.3%（CI 阈值守护）。
+- 69 个测试文件 / 687 个用例；`tsc --noEmit` 0 错误；`npm run lint` 0 违规；行覆盖率 54.5%（CI 阈值守护）。
 - 干净 checkout（`git archive` 到临时目录）复验通过；`doctor` 在缺 config/.env 时给出可执行修复指引。
 
 ### Upgrade notes
