@@ -9,7 +9,7 @@
 
 QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、情绪、记忆和社交圈的人」，而不是一个问答助手。
 
-当前阶段：**v0.3.0 已发布（2026-10-20，main + tag 待推送）——「更像真人」一版：语音消息、打错字撤回、打字节奏、被点名要媒体时真的会给、宣传页重做**。M0 地基已修复完成（新装可用、不丢消息、安全加固、文档真话）；M1 核心体验闭环主要项已完成（状态持久化、关系成长、演化可见化、多用户隔离、双管线对齐、检索增强）；M2-A 首次引导 2.0、M2-B 人设包 v2、M2-C 多用户只读 Web + 导出、M2-D 真实长跑工具已实施；发布检查见 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（已 push main + tag v0.2.0）。M1/M2 路线见审计报告第 5 节。
+当前阶段：**v0.3.1 已发布（2026-10-20）——v0.3.0「更像真人」（语音消息、打错字撤回、打字节奏、被点名要媒体会真给、宣传页重做）+ v0.3.1 修复 15 轮真实验证暴露的 P0/P1/P2（编造相识场景、多媒体内容错位、情绪承接、嘲讽话术、图片跨轮复用）**。M0 地基已修复完成（新装可用、不丢消息、安全加固、文档真话）；M1 核心体验闭环主要项已完成（状态持久化、关系成长、演化可见化、多用户隔离、双管线对齐、检索增强）；M2-A 首次引导 2.0、M2-B 人设包 v2、M2-C 多用户只读 Web + 导出、M2-D 真实长跑工具已实施；发布检查见 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（已 push main + tag v0.2.0）。M1/M2 路线见审计报告第 5 节。
 
 ## 技术栈（如实）
 
@@ -42,7 +42,7 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 | 7 | 外部世界 `src/world` | ✅/🚧 | 天气 API（M0 已修复中英文 condition 映射与缓存）与时间感知可用；热点为硬编码话题池；信息圈层穿透是死代码 |
 | 8 | AI 引擎 `src/ai` | ✅/🚧 | DeepSeek 非流式/流式、复杂度路由、Flash 多模态视觉可用；M0 已加固超时/429/5xx 指数退避重试/usage 记录；M1 关闭思考模式（修复空回复）、模型名 canonical、旁路 LLM 调用统一 thinking 参数；语义嵌入已接线（双列，需 Qwen Key 实跑）；**TTS 已落地**（macOS say→SILK，`src/ai/tts.ts`）、即梦 🗺 |
 | 9 | 记忆与数据 `src/data` | ✅/🚧 | SQLite 存储 + 艾宾浩斯衰减可用；M1 完成检索 P0：**n-gram + FTS5 BM25 混合检索（RRF，FTS5 用 OR+BM25 IDF）→ DeepSeek 候选重排**（默认开启，非真向量；异常/超时降级）、sqlite-vec 启用、双列 embedding、schema v2/v3 幂等迁移、用户事实层、T1 状态弧、T3 压缩（40 条/隔天兜底 + `t3_compressed` 防重复）；**语义 embedding 代码就绪但需 Qwen Key 才能实跑**（无 Key 自动降级）；延迟补发队列已持久化；**多用户隔离已实现**（owner=人设+用户+平台） |
-| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 75 个测试文件 / 823 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入（typecheck/lint/test/覆盖率）；**新增 mock-OneBot 桥接端到端测试**（真实 bridge 子进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊/命令/危机/多用户隔离，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）、可复现记忆金标集（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B（`src/eval/repetition-eval.ts`）；真实 QQ/NapCat 端到端仍需真机；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
+| 10 | 质量评估 `src/eval` + 测试 | ✅/🚧 | 76 个测试文件 / 841 个用例通过（M0/M1 新增 data/pipeline/bridge/weather/relationship/state/journal/ai/记忆评测测试），`tsc --noEmit` 0 错误，CI 已接入（typecheck/lint/test/覆盖率）；**新增 mock-OneBot 桥接端到端测试**（真实 bridge 子进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊/命令/危机/多用户隔离，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）、可复现记忆金标集（20 条 case，`scripts/memory-eval.ts --offline`，报告 [docs/MEMORY_EVAL_REPORT.md](docs/MEMORY_EVAL_REPORT.md)）与跨轮重复 A/B（`src/eval/repetition-eval.ts`）；真实 QQ/NapCat 端到端仍需真机；历史对外指标（99/100、Recall 99.4% 等）**不可复现，禁止再引用** |
 
 ## 启动与开发命令
 
@@ -66,7 +66,7 @@ npm run setup      # 交互式配置向导
 - **工程化**：`.github/workflows/ci.yml`（Node 22 + ubuntu/macOS/Windows 三平台矩阵 + `npm ci` + typecheck + test）、`.dockerignore`、Dockerfile 改为 node:22-slim / Asia/Shanghai / 非 root、`ecosystem.config.js` 补 `cwd` 与启动方式说明
 - **开发者体验**：新增 `npm run doctor`（Node/config/Key/人设/数据目录/SQLite 六项检查 + 修复建议）；`engines` 已收紧为 `>=22.12`
 - **地基修复（M0-1/2/3）**：数据目录自动创建与 embedding 列迁移、`KAREN_DATA_DIR`；`loadConfig` 返回并校验 `user_personas` / `one_bot_*` / `allowed_users`，端口统一 18080；消息门延迟消息落库与到点补发（新消息取消待补发）、连续沉默 3 次强制回复；主动消息单日上限 4 条 + 最小间隔 30 分钟；LLM 显式超时 + 仅 429/5xx 指数退避重试 + usage 记录；天气中英文映射与 30 分钟缓存；WS 默认回环 + token/path 校验 + 白名单 + CQ 转义 + 去重 + 异常兜底
-- **验证**：`npm run typecheck` 0 错误；`npm run lint` 0 违规；`npm test` 75 文件 / 823 用例通过（审计基线为 11 文件 / 178 用例）
+- **验证**：`npm run typecheck` 0 错误；`npm run lint` 0 违规；`npm test` 76 文件 / 841 用例通过（审计基线为 11 文件 / 178 用例）
 
 ### M1 落地内容（2026-10 进行中）
 
@@ -113,6 +113,13 @@ npm run setup      # 交互式配置向导
   - **流式气泡边界修复**：`sentReply` 之前把多条气泡无分隔拼接后写入会话/记忆，导致「多句粘成一句」；改为按 `\n` 保留边界（影响风格参考与检索质量）。
   - 测试 75 文件 / 823 用例；行覆盖 55.9%。
 
+- **v0.3.1 真实验证驱动修复（2026-10-20）**：
+  - **P0 编造相识**：新增 `src/persona/meeting-guard.ts`（`isAskingHowWeMet` / `hasMeetingGrounding` / `stripFabricatedMeeting` / `pickMeetingFallback`）——只在「用户在问相识 + 人设 howWeMet/用户事实/T2 记忆都无依据」时启用，删掉具体场景分句；全删空则用含糊回应。两条管线都接入（流式逐条过滤 + 全篇编造兜底）。
+  - **P0 多媒体错位**：`detectPhotoSceneTags` 把用户说的场景映射到图库标签（sunset/snow/cafe/animal/mountain/lake…），点名要照片时按场景挑图；点名要语音时不再被「本轮已发照片/贴纸」拦截，且没有合格句子时从正文截短句兜底合成（修「说发了语音其实没发」）。
+  - **P1 情绪承接**：prompt 增加「对方讲糟心事时先接情绪，不立刻转到自己」。
+  - **P2**：记忆防御嘲讽变体（才说的就忘/才两句就忘/这就忘了）纳入 `reply-guard`；本地图库按 persona 记住最近 3 张、选图排除（全排除时宁可不发）。
+  - 测试 76 文件 / 841 用例；行覆盖 56.0%。
+
 - **v0.2.1 Windows 安装与 CI 修复（2026-10-20）**：`.npmrc ignore-scripts=true` 避免 npm 对 better-sqlite3 自动跑 node-gyp（Windows 无 VS 失败）；Windows 跳过 POSIX 0600 断言；通过临时诊断 workflow + check-run annotations 定位后删除诊断分支；CI ubuntu/macOS/Windows 全绿（run 39382097271）。
 - **发布准备（2026-10-20）**：干净 checkout（`git archive` → 临时目录 + 软链 node_modules）复验通过：typecheck 0、687 用例全绿、doctor 在缺 config/.env 时给出可执行指引；仓库卫生检查（无 .env/config.yaml/data/coverage 入库、无真实密钥、跟踪文件 257 个约 12.6MB）；新增 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（检查结果 + 发布步骤 + Release Note）与 [CHANGELOG.md](CHANGELOG.md)；用户已拍板：升级 **v0.2.0** 并 push + tag（远端 `master` 是上游旧历史，不 force push，推本地 `main` 新分支）。
 - **M2-D 真实 QQ 长跑工具 + 首轮真机修复（2026-10-20）**：新增 `src/eval/qq-realrun.ts`（只读快照/回合延迟/重复空回复/成本/事实/同意 → 报告）+ `scripts/qq-longrun-watch.ts` + `npm run qq:watch`，结束写 `data/realrun-*.md`（含对话原文，600 权限）；支持 `--once --since <时间>` 随时复盘历史并标记「AI 披露未确认/空回复/重复/无成本记录」。首轮真机（3 轮）暴露并修复：①老用户 session 非空导致 AI 披露被跳过 → 改为按 `user_consent.disclosure_acked_at` 补发（`shouldSendDisclosure`），披露/`/about` 文案改用当前人设名；②消息门未把当前消息计入「5 分钟连续跟进」，18s 后的追问被随机延迟 31 分钟 → `buildGateContext` 修正并补回归测试；③第二轮真机发现「问怎么认识」时编造具体场景 → prompt 增加确定性反编造规则 + 单测。测试 69 文件 / 687 用例。
@@ -146,7 +153,7 @@ npm run setup      # 交互式配置向导
 - 语音：只有 TTS（她发语音），**没有 ASR**（用户发来的语音只当 `[语音]` 占位）；TTS 依赖 macOS `say`（Linux/Windows 自动降级为文字）；群聊语音未接线（`voice_group_enabled` 目前只影响决策层，私聊才真正发送）；QQ 真实语音条（SILK）只在真实 QQ 上验证过一次手工链路，mock OneBot 已覆盖协议形态
 - 打错字撤回：依赖 NapCat 对 `send_private_msg` 的 echo（拿 message_id）；echo 丢失/旧版本可能降级为「错字+更正」并存；群聊未接线
 - 多实例商用托管待做
-- 测试覆盖率有基线但仍偏低（行 55.9%，`npm run test:coverage` 阈值守护）；lint 是 tsc 未使用代码检查（零依赖），不是完整 ESLint 规则集
+- 测试覆盖率有基线但仍偏低（行 56.0%，`npm run test:coverage` 阈值守护）；lint 是 tsc 未使用代码检查（零依赖），不是完整 ESLint 规则集
 - QQ 桥接跨平台验证不完整（Windows 曾验，macOS 已实机验证；CI 现已三平台跑单测，但真实 QQ 端到端仍只在 macOS 跑过）；平台/封号风险是结构性风险
 - 依赖：vitest 5 暂缓（rolldown 平台包解析慢）；`node-cron`/`wechaty` 已从依赖移除
 - 合规为最小版：**AI 披露能力保留但默认关闭**（用户明确要求聊天里不出现 AI 披露；个人自用优先，公开发布/商用建议显式 `ai_disclosure: true`）；**年龄门已升级为一次性确认**（QQ 用户回复「我成年了」才进入对话，`/age` 查看，`age_gate_enabled` 可关；仍是自我声明、无身份证校验）；危机检测是关键词兜底（非临床评估，可能漏判/误判）

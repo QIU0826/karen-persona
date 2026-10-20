@@ -1310,7 +1310,8 @@ async function maybeSendVoice(
   if (!config.voice_enabled) return;
   if (outcome.safetySent || outcome.interrupted) return;
   // 同一轮已经发过照片/贴纸就不再补语音：真人不会连发三种形态
-  if (outcome.photoSent || opts.mediaSentThisTurn) return;
+  // （但用户点名要语音时例外——他明确想听，就给一条）
+  if (!opts.requested && (outcome.photoSent || opts.mediaSentThisTurn)) return;
   if (!outcome.sentText.trim()) return;
   if (!(await isSpeechReady())) return;
 
@@ -1341,9 +1342,21 @@ async function maybeSendVoice(
       speechAvailable: true,
     },
   );
-  if (!decision.speak || !decision.line) return;
+  // 点名要语音但这一轮没有「适合念出来的句子」时，从回复里截一段短的兜底，
+  // 避免出现「嘴上说发了语音、实际什么都没发」的言行不一致。
+  let line = decision.line;
+  if (!line && opts.requested) {
+    line = outcome.sentText
+      .replace(/\[CQ:[^\]]+\]/g, "")
+      .replace(/[^\p{Script=Han}A-Za-z0-9，、。！？\s]/gu, "")
+      .replace(/\s+/g, "")
+      .slice(0, 24)
+      .trim();
+    if (Array.from(line).length < 4) line = undefined;
+  }
+  if (!line) return;
 
-  const speech = await synthesizeSpeech(decision.line, { maxChars: settings.maxChars });
+  const speech = await synthesizeSpeech(line, { maxChars: settings.maxChars });
   if (!speech) {
     log.warn("voice.synth_failed", { user_id: userId });
     return;
@@ -1507,7 +1520,14 @@ async function handlePrivateBatch(
       sendPrivateMsg(userId, buildAgeGatePrompt());
       ageGateReminderAt.set(userId, Date.now());
       log.info("compliance.age_gate_prompt", { user_id: userId });
-      return;
+      // 如果用户的第一条消息本身就是「我成年了」，不要吞掉这条：继续往下走由 evaluateAgeGate 确认
+      const earlyAction = evaluateAgeGate({
+        text,
+        owner: st.owner,
+        enabled: sharedBase.config.age_gate_enabled,
+        confirmed: hasAgeConfirmation(st.owner),
+      });
+      if (earlyAction !== "confirmed") return;
     }
   }
 

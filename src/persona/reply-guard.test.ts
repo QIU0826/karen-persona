@@ -6,9 +6,9 @@ import { stripMemoryDeflection } from "./reply-guard.js";
 
 describe("stripMemoryDeflection", () => {
   it("删除含「我记性没那么差」的分句，保留同句其他内容", () => {
-    const result = stripMemoryDeflection("接着 林哲啊 才聊过就忘，我记性没那么差");
+    const result = stripMemoryDeflection("接着 林哲啊，我记性没那么差");
     expect(result.changed).toBe(true);
-    expect(result.text).toBe("接着 林哲啊 才聊过就忘");
+    expect(result.text).toBe("接着 林哲啊");
     expect(result.fallback).toBe(false);
   });
 
@@ -17,6 +17,12 @@ describe("stripMemoryDeflection", () => {
     expect(stripMemoryDeflection("我是那种会查岗的人吗，今天挺热").text).toBe("今天挺热");
     expect(stripMemoryDeflection("抽查一下，你昨天干嘛去了").text).toBe("你昨天干嘛去了");
     expect(stripMemoryDeflection("行吧，考考你").text).toBe("行吧");
+  });
+
+  it("嘲讽式记忆防御（才说的就忘/才两句就忘）也会被清掉", () => {
+    expect(stripMemoryDeflection("才说的就忘啦").fallback).toBe(true);
+    expect(stripMemoryDeflection("才两句就忘啦").fallback).toBe(true);
+    expect(stripMemoryDeflection("这就忘了？我叫阿哲").text).toBe("我叫阿哲");
   });
 
   it("整条都是防御话术时退化为「嗯」", () => {

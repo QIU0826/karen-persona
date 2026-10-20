@@ -127,12 +127,26 @@ function hasUnsplashKey(): boolean {
 }
 
 /** 挑选本地兜底图并发图；资源缺失返回 null。 */
-function shareLocalPhoto(state: ConversationState): PhotoShareResult | null {
+/** 每个用户最近发过的本地图（避免同一张图连着复用） */
+const recentLocalPhotoIds = new Map<string, string[]>();
+/** 每个用户最近用过的配文（避免同一句话反复出现） */
+const recentPhotoCaptions = new Map<string, string[]>();
+
+function shareLocalPhoto(
+  state: ConversationState,
+  preferredTags?: string[],
+): PhotoShareResult | null {
+  const personaKey = state.storagePersona ?? state.persona.name;
+  const recentIds = recentLocalPhotoIds.get(personaKey) ?? [];
+  const recentCaptions = recentPhotoCaptions.get(personaKey) ?? [];
   // 时间关系不是硬过滤：早上可以发「昨天的晚霞」，亲密度够了才会分享「以前的照片」
   const choice = pickPhotoShare({
     emotion: state.emotionState.vector,
     hour: new Date().getHours(),
     closeness: state.persona.relationship.closeness,
+    ...(preferredTags && preferredTags.length > 0 ? { tags: preferredTags } : {}),
+    excludeIds: recentIds,
+    excludeCaptions: recentCaptions,
   });
   if (!choice) return null;
   const imageFile = photoFilePath(choice.photo);
@@ -140,10 +154,13 @@ function shareLocalPhoto(state: ConversationState): PhotoShareResult | null {
     log.warn("photo.local_missing", { photo_id: choice.photo.id });
     return null;
   }
+  recentLocalPhotoIds.set(personaKey, [...recentIds, choice.photo.id].slice(-3));
+  recentPhotoCaptions.set(personaKey, [...recentCaptions, choice.caption].slice(-5));
   log.info("photo.local", {
     photo_id: choice.photo.id,
     era: choice.era,
     caption_chars: choice.caption.length,
+    scene_matched: Boolean(preferredTags && preferredTags.length > 0),
   });
   return { imageFile, caption: choice.caption, source: "local" };
 }
@@ -161,6 +178,8 @@ export interface PhotoShareOptions {
    * 不熟的时候她仍会婉拒，符合真人边界。
    */
   requested?: boolean;
+  /** 用户提到的场景（晚霞/雪/咖啡/猫…），用于本地图库内容匹配 */
+  preferredTags?: string[];
 }
 
 export async function trySharePhoto(
@@ -196,7 +215,7 @@ export async function trySharePhoto(
 
   // ── 无 Key：本地图库兜底 ─────────────────────
   if (!hasUnsplashKey()) {
-    return shareLocalPhoto(state);
+    return shareLocalPhoto(state, options.preferredTags);
   }
 
   // ── query 生成 + 搜索 ────────────────────────

@@ -437,6 +437,26 @@ ${parts.corrections}
 
 // ── Builders ──────────────────────────────────
 
+/**
+ * 相识背景：只有「用户自己写/说过」的才算已知事实。
+ *
+ * 人设包里的 howWeMet 往往是一个完整故事（xiaoya 的就写着「每周来三四次、下雨借伞、坐吧台」），
+ * 但用户从没这样说过——真机/验证里她照着这段背，用户感受就是「编造」。
+ * 所以：用户没提供 relationship_background 时，只给一句模糊背景，不投喂具体细节，
+ * 让模型没有可抄的素材（配合 meeting-guard 双保险）。
+ */
+function buildMeetingBackground(
+  persona: { relationship?: { howWeMet?: string } },
+  config: { relationship_background?: string },
+): string {
+  const userProvided = (config.relationship_background ?? "").trim();
+  if (userProvided) return userProvided;
+  const story = (persona.relationship?.howWeMet ?? "").trim();
+  const looksSpecific = /(伞|下雨|周.{0,3}次|吧台|每次|那天|有一次|第一面|门口)/.test(story);
+  if (story && story.length <= 24 && !looksSpecific) return story;
+  return "你们是在咖啡店认识的，但具体怎么熟起来、以前聊过什么，记忆里没有明确记录（不要编造细节）";
+}
+
 export function buildIdentityPart(persona: Persona): string {
   const id = persona.identity;
   const app = id.appearance;
@@ -499,9 +519,6 @@ export function buildRelationshipPart(persona: Persona, state: InnerState, herVi
     `- 吃醋时：${rel.jealousyMode}`,
     `- 道歉方式：${rel.apologyStyle}`,
   ];
-  if (rel.howWeMet) {
-    lines.push(`- 你们怎么认识的：${rel.howWeMet}`);
-  }
   if (herViewOfYou) {
     lines.push(`- 她眼里你是什么样的人：${herViewOfYou}`);
   }
@@ -568,7 +585,7 @@ function getStaticCache(persona: Persona, config: AppConfig): StaticCache {
     tags,
     ``,
     `## 你在和谁聊天`,
-    `对方叫"${config.your_name}"，${persona.relationship.howWeMet || "你们认识"}。`,
+    `对方叫"${config.your_name}"，${buildMeetingBackground(persona, config) || "你们认识"}。`,
     personProfile(persona, config),
     ``,
     `## 重要提示`,
@@ -587,7 +604,8 @@ function getStaticCache(persona: Persona, config: AppConfig): StaticCache {
     `- 每条消息不要以逗号、顿号结尾；宁可短一点，也不要用套话凑长度。`,
     `- 少用“其实、好像、感觉”开头，避免每句都自我分析。`,
     `- 不要编造没有发生过的具体往事（例如“上次给你买了奶茶”“那天你去了哪”）。只有「你确定记得的事实」、最近对话、记忆块里出现过的才能引用；不确定就模糊带过（“好像”“记不太清”）。`,
-    `- 对方问「我们怎么认识的 / 第一次见面」而记忆里没有明确记录时，不要编造具体场景（在哪、点了什么、坐在哪）；可以含糊带过，或让对方提醒你。`,
+    `- 对方问「我们怎么认识的 / 第一次见面 / 认识多久」而记忆里没有明确记录时，不要编造具体场景或细节——地点（吧台/店门口/地铁口）、天气（下雨/借伞）、频率（每周来几次/天天来）、动作（点了什么/递给你什么）都算编造。直接说记不清，让他提醒你。`,
+    `- 对方在讲自己的糟心事（被骂、加班、难受、丧）时，先用一句话接住他的情绪（认同、追问一句都行），不要立刻把话题转到你自己的经历上。`,
     `- 用中文回复，偶尔可以带方言。`,
   ].join("\n");
 

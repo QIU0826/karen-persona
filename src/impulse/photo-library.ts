@@ -183,6 +183,10 @@ export interface PickPhotoInput {
   closeness: number;
   /** 额外偏好标签（如天气/话题） */
   tags?: string[];
+  /** 最近已经发过的图片 id（避免同一张图连着复用；全被排除时返回 null，宁可不发） */
+  excludeIds?: string[];
+  /** 最近已经用过的配文（避免「今天下班路上拍的」这类句子反复出现） */
+  excludeCaptions?: string[];
   /** 可注入随机源（测试用；返回 0..1） */
   random?: () => number;
 }
@@ -223,7 +227,11 @@ export function pickPhotoShare(input: PickPhotoInput): PhotoShareChoice | null {
         .filter((item) => item.eras.length > 0);
   if (pool.length === 0) return null;
 
-  const chosen = pickOne(pool, random);
+  // 跨轮去重：最近发过的图优先排除；如果排除后没有可用图，就退回完整池（宁可不发也不重复）
+  const exclude = new Set(input.excludeIds ?? []);
+  const deduped = exclude.size > 0 ? pool.filter((item) => !exclude.has(item.photo.id)) : pool;
+  if (deduped.length === 0) return null;
+  const chosen = pickOne(deduped, random);
   const eras = chosen.eras;
 
   // era 偏好：优先 today；否则 yesterday；past 只在可分享「以前」时按概率出现
@@ -241,7 +249,10 @@ export function pickPhotoShare(input: PickPhotoInput): PhotoShareChoice | null {
 
   const captionsForEra = chosen.photo.captions[era];
   const captions = captionsForEra.length > 0 ? captionsForEra : chosen.photo.captions.yesterday;
-  const caption = pickOne(captions, random);
+  // 配文去重：最近说过的句子优先排除；全被排除时退回原池（宁可重复也别空着）
+  const usedCaptions = new Set(input.excludeCaptions ?? []);
+  const freshCaptions = captions.filter((c) => !usedCaptions.has(c));
+  const caption = pickOne(freshCaptions.length > 0 ? freshCaptions : captions, random);
   return { photo: chosen.photo, era, caption };
 }
 

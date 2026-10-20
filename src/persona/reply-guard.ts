@@ -10,7 +10,10 @@
  */
 
 /** 记忆防御/考试话术（与 prompt 里的禁用词保持一致）。 */
-const DEFLECTION_SOURCE = "记性没那么差|记性没那么好|我记性不好|考考你|考我|查岗|抽查";
+const DEFLECTION_SOURCE =
+  "记性没那么差|记性没那么好|我记性不好|考考你|考我|查岗|抽查" +
+  // 15 轮验证里出现的嘲讽式记忆防御：「才说的就忘啦」「才两句就忘啦」
+  "|才说的就忘|才聊过就忘|才两句就忘|这么快就忘|这就忘了|这就忘啦";
 const DEFLECTION_TEST = new RegExp(DEFLECTION_SOURCE);
 const DEFLECTION_REPLACE = new RegExp(DEFLECTION_SOURCE, "g");
 

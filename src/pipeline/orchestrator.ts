@@ -46,7 +46,17 @@ import { deriveStance } from "../world/stance.js";
 import { perceiveTime, buildMomentTag } from "../world/time-awareness.js";
 import { renderExpression } from "../impulse/renderer.js";
 import { trySharePhoto } from "../impulse/unsplash-trigger.js";
-import { buildMediaRequestNote, detectMediaRequest } from "../impulse/media-request.js";
+import {
+  buildMediaRequestNote,
+  detectMediaRequest,
+  detectPhotoSceneTags,
+} from "../impulse/media-request.js";
+import {
+  hasMeetingGrounding,
+  isAskingHowWeMet,
+  pickMeetingFallback,
+  stripFabricatedMeeting,
+} from "../persona/meeting-guard.js";
 import { resolveOwnerScope, OWNER_CLI } from "../data/owner.js";
 import { extractUserFactsAsync, getUserFactsContext } from "../data/user-facts.js";
 import { getT1ArcContext } from "../data/t1-injection.js";
@@ -1000,6 +1010,21 @@ export async function processMessage(
     rawReply = guarded.text;
     logs.push("[去AI味] 移除记忆防御话术");
   }
+  // 相识场景守卫：用户问「怎么认识的」且记忆里没有任何依据时，删掉编造的具体场景
+  const meetingUngrounded =
+    isAskingHowWeMet(userInput) &&
+    !hasMeetingGrounding({
+      userBackground: state.config.relationship_background,
+      factsText: factsContext,
+      memoryText: ragContext,
+    });
+  if (meetingUngrounded) {
+    const meetingGuard = stripFabricatedMeeting(rawReply, true);
+    rawReply = meetingGuard.removedAll
+      ? pickMeetingFallback(userInput)
+      : meetingGuard.text;
+    if (meetingGuard.changed) logs.push("[相识] 拦截编造的具体相识场景");
+  }
   noteRepetitionIfAny(rawReply, recentReplies, (line) => logs.push(line));
 
   // N. 表达渲染
@@ -1120,7 +1145,12 @@ export async function processMessage(
     // 群聊默认 skipPhoto：多人群里不发她的生活照（隐私保守，group_photo_enabled 才开）
     const photo = opts.skipPhoto
       ? null
-      : await trySharePhoto(state, rawReply, { requested: mediaRequest.photo });
+      : await trySharePhoto(state, rawReply, {
+          requested: mediaRequest.photo,
+          // 用户点名要照片时，尽量按他说的场景挑图（要晚霞就别发山/花）
+          // 点名叫他看什么就发什么；普通聊天里提到晚霞/雪/咖啡/猫等强场景词，也顺手匹配
+          preferredTags: detectPhotoSceneTags(userInput),
+        });
     if (photo) {
       imageUrl = photo.imageUrl;
       imageFile = photo.imageFile;
@@ -1422,6 +1452,16 @@ export async function* processMessageStream(
   const recentReplies = extractRecentReplies(session.messages);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
   const mediaRequest = detectMediaRequest(userInput);
+  // 相识守卫：用户问「怎么认识」且无依据 → 逐条过滤编造场景
+  const meetingUngrounded =
+    isAskingHowWeMet(userInput) &&
+    !hasMeetingGrounding({
+      userBackground: state.config.relationship_background,
+      factsText: factsContext,
+      memoryText: ragContext,
+    });
+  if (meetingUngrounded) console.log("  [相识] 无可靠依据：过滤编造场景");
+
   const fullSystem =
     systemPrompt +
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
@@ -1464,9 +1504,15 @@ export async function* processMessageStream(
             const safe = stripMemoryDeflection(frag);
             if (safe.changed) deflected = true;
             if (safe.text) {
-              sentReply += (sentReply ? "\n" : "") + safe.text;
-              yieldedAny = true;
-              yield { text: safe.text };
+              const meetingSafe = stripFabricatedMeeting(safe.text, meetingUngrounded);
+              if (meetingSafe.changed && !meetingSafe.removedAll) {
+                console.log("  [相识] 拦截编造的具体相识场景");
+              }
+              if (meetingSafe.text) {
+                sentReply += (sentReply ? "\n" : "") + meetingSafe.text;
+                yieldedAny = true;
+                yield { text: meetingSafe.text };
+              }
             }
           }
           buffer = "";
@@ -1479,9 +1525,12 @@ export async function* processMessageStream(
         const safe = stripMemoryDeflection(tail);
         if (safe.changed) deflected = true;
         if (safe.text) {
-          sentReply += (sentReply ? "\n" : "") + safe.text;
-          yieldedAny = true;
-          yield { text: safe.text };
+          const meetingSafe = stripFabricatedMeeting(safe.text, meetingUngrounded);
+          if (meetingSafe.text) {
+            sentReply += (sentReply ? "\n" : "") + meetingSafe.text;
+            yieldedAny = true;
+            yield { text: meetingSafe.text };
+          }
         }
       }
     } catch (err) {
@@ -1496,9 +1545,11 @@ export async function* processMessageStream(
           const safe = stripMemoryDeflection(frag);
           if (safe.changed) deflected = true;
           if (!safe.text) continue;
-          sentReply += (sentReply ? "\n" : "") + safe.text;
+          const meetingSafe = stripFabricatedMeeting(safe.text, meetingUngrounded);
+          if (!meetingSafe.text) continue;
+          sentReply += (sentReply ? "\n" : "") + meetingSafe.text;
           yieldedAny = true;
-          yield { text: safe.text };
+          yield { text: meetingSafe.text };
         }
       } else {
         console.log(
@@ -1508,6 +1559,15 @@ export async function* processMessageStream(
     }
 
     if (deflected) console.log("  [去AI味] 移除记忆防御话术");
+
+    // 相识守卫把整条都删空了（全在编场景）→ 换成一句含糊的真人式回应
+    if (meetingUngrounded && !sentReply.trim()) {
+      const fallback = pickMeetingFallback(userInput);
+      sentReply = fallback;
+      yieldedAny = true;
+      console.log("  [相识] 全篇编造，改用含糊回应");
+      yield { text: fallback };
+    }
 
     // 后处理：QQ 表情
     const rendered = renderExpression(fullReply, {
@@ -1533,7 +1593,10 @@ export async function* processMessageStream(
     // 主动发图：流式路径也触发（无 Key 时本地图库兜底；超时/失败静默跳过）
     try {
       const photo = await Promise.race([
-        trySharePhoto(state, fullReply, { requested: mediaRequest.photo }).catch(() => null),
+        trySharePhoto(state, fullReply, {
+          requested: mediaRequest.photo,
+          preferredTags: detectPhotoSceneTags(userInput),
+        }).catch(() => null),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
       ]);
       if (photo) {

@@ -31,6 +31,8 @@ const PHOTO_PATTERNS: readonly RegExp[] = [
   // 只认「样子类」问法；「你那边天气怎么样」不算要照片
   /你(那边|现在|店里|家)[^。！？\n]{0,6}(啥样|什么样|什么样子|长啥样)/,
   /(自拍|拍张|拍一张|拍个|发张图|发个图|来张图)/,
+  // 「发张你那边晚霞看看」这类没有「照片/图」字样的说法
+  /(发|拍|来)(一)?张/,
 ];
 
 /** 明确索要表情包/表情 */
@@ -94,4 +96,33 @@ export function buildMediaRequestNote(request: MediaRequest): string {
   }
   if (lines.length === 0) return "";
   return `\n[本条内部提示，不要照抄] ${lines.join(" ")}`;
+}
+
+/** 用户提到的场景 → 本地图库标签（用于「要晚霞别发花/山」这类内容错位修复） */
+const SCENE_TAG_MAP: ReadonlyArray<{ re: RegExp; tags: string[] }> = [
+  { re: /(晚霞|日落|夕阳|黄昏|粉色的天)/, tags: ["sunset"] },
+  { re: /(下雪|雪|冬天|冷得)/, tags: ["snow", "winter"] },
+  { re: /(咖啡|拿铁|美式|店里|吧台|杯子)/, tags: ["cafe", "coffee", "warm"] },
+  { re: /(猫|狗|动物|五花|年糕)/, tags: ["animal"] },
+  { re: /(山|爬山|旅行|风景|天空)/, tags: ["mountain", "travel", "sky"] },
+  { re: /(花|植物|绿植|阳台)/, tags: ["plants"] },
+  { re: /(早上|早晨|清晨)/, tags: ["morning"] },
+  { re: /(湖水|湖边|码头|河边)/, tags: ["lake", "pier"] },
+];
+
+/**
+ * 从用户这句话里推断「他想看什么」，返回图库标签（可能为空）。
+ * 只做内容匹配，不改变发不发的决策。
+ */
+export function detectPhotoSceneTags(text: string | null | undefined): string[] {
+  const raw = typeof text === "string" ? text : "";
+  const normalized = raw.replace(/\[CQ:[^\]]+\]/g, " ").trim();
+  if (!normalized) return [];
+  const tags: string[] = [];
+  for (const entry of SCENE_TAG_MAP) {
+    if (entry.re.test(normalized)) {
+      for (const tag of entry.tags) if (!tags.includes(tag)) tags.push(tag);
+    }
+  }
+  return tags;
 }

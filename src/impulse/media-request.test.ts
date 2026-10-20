@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildMediaRequestNote, detectMediaRequest, hasAnyMediaRequest } from "./media-request.js";
+import {
+  buildMediaRequestNote,
+  detectMediaRequest,
+  detectPhotoSceneTags,
+  hasAnyMediaRequest,
+} from "./media-request.js";
 
 describe("detectMediaRequest 明确索要多媒体", () => {
   it("要照片的常见说法都能识别", () => {
@@ -74,5 +79,27 @@ describe("buildMediaRequestNote 让语气和动作对齐", () => {
     expect(note).toContain("表情包");
     expect(note).toContain("语音");
     expect(note.startsWith("\n[")).toBe(true);
+  });
+});
+
+describe("detectPhotoSceneTags 让照片内容对上他说的场景", () => {
+  it("要晚霞 → sunset；要雪 → snow；要咖啡/店 → cafe", () => {
+    expect(detectPhotoSceneTags("你那边晚霞好看吗，拍张看看")).toContain("sunset");
+    expect(detectPhotoSceneTags("下雪了吗，拍一张")).toContain("snow");
+    expect(detectPhotoSceneTags("店里现在什么样")).toEqual(
+      expect.arrayContaining(["cafe"]),
+    );
+  });
+
+  it("要猫/山/湖也能对上", () => {
+    expect(detectPhotoSceneTags("你那只猫在干嘛，拍张")).toContain("animal");
+    expect(detectPhotoSceneTags("你那边有山吗")).toContain("mountain");
+    expect(detectPhotoSceneTags("湖边拍一张看看")).toContain("lake");
+  });
+
+  it("普通聊天不产生标签", () => {
+    expect(detectPhotoSceneTags("今天好累啊")).toEqual([]);
+    expect(detectPhotoSceneTags("")).toEqual([]);
+    expect(detectPhotoSceneTags(null)).toEqual([]);
   });
 });

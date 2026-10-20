@@ -89,6 +89,23 @@ describe("photo-library 时间关系模型", () => {
     expect(low!.caption.length).toBeGreaterThan(0);
   });
 
+  it("excludeIds 排除最近发过的图（跨轮去重）", () => {
+    // 先取一张，拿到它的 id
+    const first = pickPhotoShare({ emotion: 0, hour: 20, closeness: 5, random: () => 0.1 });
+    expect(first).not.toBeNull();
+    const id = first!.photo.id;
+    // 排除后再选，应该拿到别的图
+    const second = pickPhotoShare({
+      emotion: 0,
+      hour: 20,
+      closeness: 5,
+      random: () => 0.1,
+      excludeIds: [id],
+    });
+    expect(second).not.toBeNull();
+    expect(second!.photo.id).not.toBe(id);
+  });
+
   it("资源缺失时返回 null", () => {
     expect(
       photoFilePath({
