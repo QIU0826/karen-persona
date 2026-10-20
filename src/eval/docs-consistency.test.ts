@@ -132,3 +132,19 @@ describe("能力总表（docs/CAPABILITY_MATRIX.md）", () => {
     expect(md).toContain("59.21%");
   });
 });
+
+describe("版本号一致性（v0.8.13 补的护栏）", () => {
+  it("package.json 版本 == CHANGELOG 最新一条 == README/CLAUDE 的当前阶段", () => {
+    const changelog = fs.readFileSync(path.join(ROOT, "CHANGELOG.md"), "utf-8");
+    const top = changelog.match(/^## v(\d+\.\d+\.\d+)/m);
+    expect(top, "CHANGELOG 顶部应有 ## vX.Y.Z").toBeTruthy();
+    const changelogVersion = top![1];
+
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf-8")) as {
+      version: string;
+    };
+    expect(pkg.version, `package.json=${pkg.version} 与 CHANGELOG=${changelogVersion} 不一致`).toBe(
+      changelogVersion,
+    );
+  });
+});
