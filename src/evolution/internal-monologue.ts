@@ -12,6 +12,7 @@
  */
 import OpenAI from "openai";
 import { withThinking } from "../ai/chat.js";
+import { recordAuxUsage } from "../ai/aux-usage.js";
 import { getChatModel } from "../ai/router.js";
 import { insertEpisodeWithEmbedding } from "../data/vector.js";
 import { generateEmbedding } from "../data/embedding.js";
@@ -85,6 +86,7 @@ export async function generateMonologue(params: MonologueParams): Promise<Monolo
     `\n你的内心独白：`,
   ].join("\n");
 
+  const startedAtMs = Date.now();
   try {
     const response = await client.chat.completions.create(withThinking({
       model: modelConfig.model,
@@ -96,6 +98,7 @@ export async function generateMonologue(params: MonologueParams): Promise<Monolo
       max_tokens: 300,
     }));
 
+    recordAuxUsage({ kind: "monologue", model: modelConfig.model, startedAtMs }, response.usage);
     const text = response.choices[0]?.message?.content?.trim() ?? "";
     if (!text) {
       return { text: "", selfAware: false, driftPressure: 0, driftDirection: null };
@@ -189,6 +192,7 @@ export async function generateNightMonologue(
     `内心独白：`,
   ].join("\n");
 
+  const startedAtMs = Date.now();
   try {
     const response = await client.chat.completions.create(withThinking({
       model: modelConfig.model,
@@ -200,6 +204,7 @@ export async function generateNightMonologue(
       max_tokens: 240,
     }));
 
+    recordAuxUsage({ kind: "monologue", model: modelConfig.model, startedAtMs }, response.usage);
     const text = response.choices[0]?.message?.content?.trim() ?? "";
     return text || null;
   } catch {

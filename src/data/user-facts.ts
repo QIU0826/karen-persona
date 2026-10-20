@@ -18,6 +18,7 @@ import { getVectorDb } from "./vector.js";
 import { dbPath } from "./paths.js";
 import { getChatModel } from "../ai/router.js";
 import { withThinking } from "../ai/chat.js";
+import { recordAuxUsage } from "../ai/aux-usage.js";
 
 export type FactCategory =
   | "profile"
@@ -404,6 +405,7 @@ export function extractUserFactsAsync(ownerId: string, userInput: string, reply:
       timeout: 8000,
       maxRetries: 0,
     });
+    const startedAtMs = Date.now();
     client.chat.completions
       .create(
         withThinking({
@@ -421,6 +423,7 @@ export function extractUserFactsAsync(ownerId: string, userInput: string, reply:
         }) as never,
       )
       .then((resp) => {
+        recordAuxUsage({ kind: "fact_extraction", model: modelConfig.model, startedAtMs }, resp.usage);
         const content = resp.choices[0]?.message?.content;
         if (!content) return;
         const facts = parseFactsJson(content);

@@ -15,6 +15,7 @@
  * - Qwen / DashScope Key 不再用于视觉，仅保留给语义嵌入（见 router.getEmbeddingConfig）。
  */
 import OpenAI from "openai";
+import { recordAuxUsage } from "./aux-usage.js";
 
 /** 官方推荐模型名（2026-10）；旧名 deepseek-v4-flash-vision-exp 已下线，服务端会映射到该模型。 */
 const DEFAULT_VISION_MODEL = "deepseek-flash";
@@ -147,6 +148,7 @@ export async function describeImage(imageUrl: string): Promise<string | null> {
       : await downloadAsDataUrl(imageUrl);
     const imagePayload = dataUrl ?? imageUrl;
 
+    const startedAtMs = Date.now();
     const response = await client.chat.completions.create({
       model,
       messages: [
@@ -167,6 +169,8 @@ export async function describeImage(imageUrl: string): Promise<string | null> {
       // DeepSeek 扩展字段：关闭思考模式（视觉描述不需要思维链）
       thinking: { type: "disabled" },
     } as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
+
+    recordAuxUsage({ kind: "vision", model, startedAtMs }, response.usage);
 
     const content = response.choices[0]?.message?.content;
     if (!content) return null;

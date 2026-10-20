@@ -209,10 +209,10 @@ npm run dev
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
-| 类型检查 + 单元测试 | ✅ | `npm run typecheck`、`npm test`（53 文件 / 596 用例） |
+| 类型检查 + 单元测试 | ✅ | `npm run typecheck`、`npm test`（54 文件 / 600 用例） |
 | 结构化日志 | ✅ | 默认脱敏（消息只记长度/摘要）；TTY 可读，非 TTY JSON lines |
 | 健康检查 | ✅ | `GET http://127.0.0.1:18081/health`（仅本机；返回 ws/db/pending/成本/最近错误） |
-| 成本统计 | ✅ | `GET /cost` 7 日摘要；DeepSeek 峰谷价 + 缓存命中；仅主聊天路径（旁路未计入） |
+| 成本统计 | ✅ | `GET /cost` 7 日摘要；DeepSeek 峰谷价 + 缓存命中；主对话与旁路 LLM（事实抽取/独白/T3/视觉等）均按 `kind` 记账，Web 控制台可按模型/按用途查看 |
 | PM2 守护 | ✅ | 改跑 `dist/bridge/qq.js`，部署前需 `npm run build` |
 | CI（GitHub Actions） | ✅ | push/PR：Node 22 + `npm ci` + typecheck + test；**ubuntu / macOS / Windows 三平台矩阵** |
 | 环境体检 | ✅ | `npm run doctor` |
@@ -268,7 +268,7 @@ npm run dev
 7. **未实现**：TTS/语音 ASR、微信桥接（无依赖占位桩）、图片生成、撤回；Web 控制台为只读。年龄门已做一次性确认（自我声明，非身份证校验）。
 8. **测试覆盖仍不足**：53 文件 / 596 用例，并有可复现记忆金标集（`scripts/memory-eval.ts`）、跨轮重复 A/B（`src/eval/repetition-eval.ts`）、检索增强评测（`src/eval/semantic-boost-eval.ts`），但真实 QQ 端到端没有自动化集成测试，也没有覆盖率统计。
 9. **人设字段消费不足**：创作者写的底线、软肋、人生目标等字段有一部分不进入 Prompt（审计 2.3）。
-10. **成本统计是下限**：主对话与检索重排走 `chat()` 已记账；事实抽取/独白/T3/视觉等旁路调用未计入，`cost_today` 偏小。
+10. **成本统计仍是估算**：主对话与旁路 LLM 都已记账（按 `kind` 拆分）；但峰谷价按「工作日/周末」近似（节假日白天可能按高峰计费、偏高），provider 不返回 usage 的调用不记录（不估算）。
 10. **平台风险**：产品命运绑定在非官方 QQ 协议上，封号/协议变更/客户端升级都可能让桥接失效。
 
 ---

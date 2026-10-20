@@ -9,6 +9,7 @@
 import OpenAI from "openai";
 import { getChatModel } from "../ai/router.js";
 import { withThinking } from "../ai/chat.js";
+import { recordAuxUsage } from "../ai/aux-usage.js";
 import { fetchUnsplashPhoto } from "../ai/image-gen.js";
 import { describeEmotion } from "../persona/emotion.js";
 import { pickPhotoShare, photoFilePath } from "./photo-library.js";
@@ -65,6 +66,7 @@ async function generateQuery(
       apiKey: modelConfig.apiKey,
       baseURL: modelConfig.baseUrl,
     });
+    const startedAtMs = Date.now();
     const response = await Promise.race([
       client.chat.completions.create(withThinking({
         model: modelConfig.model,
@@ -82,6 +84,8 @@ async function generateQuery(
         setTimeout(() => reject(new Error("QUERY_TIMEOUT")), QUERY_TIMEOUT_MS),
       ),
     ]);
+
+    recordAuxUsage({ kind: "photo_query", model: modelConfig.model, startedAtMs }, response.usage);
 
     const content = response.choices[0]?.message?.content;
     if (!content || content.trim().length === 0) return null;

@@ -14,6 +14,7 @@
 
 import OpenAI from "openai";
 import { withThinking } from "../ai/chat.js";
+import { recordAuxUsage } from "../ai/aux-usage.js";
 import { getChatModel } from "../ai/router.js";
 import type { Persona } from "../persona/loader.js";
 
@@ -114,6 +115,7 @@ export async function generateHerView(input: HerViewInput): Promise<string | nul
       baseURL: modelConfig.baseUrl,
     });
 
+    const startedAtMs = Date.now();
     const response = await client.chat.completions.create(withThinking({
       model: modelConfig.model,
       messages: [
@@ -124,6 +126,7 @@ export async function generateHerView(input: HerViewInput): Promise<string | nul
       max_tokens: 300,
     }));
 
+    recordAuxUsage({ kind: "her_view", model: modelConfig.model, startedAtMs }, response.usage);
     const content = response.choices[0]?.message?.content;
     if (!content || content.trim().length === 0) return null;
 

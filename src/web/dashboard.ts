@@ -29,6 +29,22 @@ import type {
 import { FACT_CATEGORY_LABELS, FACT_CATEGORY_ORDER, MEMORY_PROBE_SAMPLE_QUERY } from "./data.js";
 import { formatLocalTime } from "../evolution/journal-view.js";
 
+/** 用量用途 → 中文标签（/cost「按用途」展示；含主对话与旁路调用）。 */
+export const COST_KIND_LABELS: Record<string, string> = {
+  chat: "对话",
+  chatStream: "对话（流式）",
+  fact_extraction: "事实抽取",
+  monologue: "内心独白",
+  t3_summary: "长期摘要",
+  her_view: "她眼中的你",
+  journal: "进化日志",
+  narrative: "叙事重构",
+  vision: "图片识别",
+  photo_query: "配图搜索词",
+  memory_eval: "记忆评测",
+  other: "其他",
+};
+
 /** HTML 转义（服务端首屏渲染用）。 */
 export function escapeHtml(value: unknown): string {
   const text = value === null || value === undefined ? "" : String(value);
@@ -495,6 +511,7 @@ const CLIENT_JS = `
   var REFRESH_MS = 5000;
   var FACT_LABELS = BOOT.fact_labels || { profile: "基本信息", work: "工作", pet: "宠物", relationship: "关系", plan: "最近计划", preference: "偏好", other: "其他" };
   var FACT_ORDER = ["profile", "work", "pet", "relationship", "plan", "preference", "other"];
+  var COST_KIND_LABELS = { chat: "对话", chatStream: "对话（流式）", fact_extraction: "事实抽取", monologue: "内心独白", t3_summary: "长期摘要", her_view: "她眼中的你", journal: "进化日志", narrative: "叙事重构", vision: "图片识别", photo_query: "配图搜索词", memory_eval: "记忆评测", other: "其他" };
   var view = { paused: false, memorySearchActive: false, herName: BOOT.persona_name || "她" };
 
   function $(id) { return document.getElementById(id); }
@@ -811,9 +828,15 @@ const CLIENT_JS = `
         : week.by_model.map(function (model) {
             return '<div class="kv"><span>' + esc(model.model) + "</span><b>" + esc(fmtCny(model.cost_cny)) + " · " + fmtInt(model.calls) + " 次</b></div>";
           }).join("");
+      var kinds = !week.by_kind || week.by_kind.length === 0
+        ? '<p class="empty">还没有按用途拆分的数据。</p>'
+        : week.by_kind.map(function (bucket) {
+            var label = COST_KIND_LABELS[bucket.kind] || bucket.kind;
+            return '<div class="kv"><span>' + esc(label) + "</span><b>" + esc(fmtCny(bucket.cost_cny)) + " · " + fmtInt(bucket.calls) + " 次</b></div>";
+          }).join("");
       weekCard.innerHTML =
         '<div class="card-head"><h2>最近 ' + fmtInt(week.window_days) + ' 天成本</h2><span class="muted small">合计 ' + esc(fmtCny(week.total.cost_cny)) + " · " + fmtInt(week.total.calls) + ' 次调用</span></div>' +
-        '<div class="cost-list">' + rows + '</div><h3>按模型</h3>' + models;
+        '<div class="cost-list">' + rows + '</div><h3>按模型</h3>' + models + '<h3>按用途</h3>' + kinds;
     }
   }
 
@@ -1092,10 +1115,19 @@ function renderWeekCostCard(cost: CostData): string {
               `<div class="kv"><span>${escapeHtml(model.model)}</span><b>${escapeHtml(fmtCny(model.cost_cny))} · ${fmtInt(model.calls)} 次</b></div>`,
           )
           .join("");
+  const kindRows = (week.by_kind ?? []).length === 0
+    ? `<p class="empty">还没有按用途拆分的数据。</p>`
+    : (week.by_kind ?? [])
+        .map(
+          (bucket) =>
+            `<div class="kv"><span>${escapeHtml(COST_KIND_LABELS[bucket.kind] ?? bucket.kind)}</span><b>${escapeHtml(fmtCny(bucket.cost_cny))} · ${fmtInt(bucket.calls)} 次</b></div>`,
+        )
+        .join("");
   return (
     `<div class="card-head"><h2>最近 ${fmtInt(week.window_days)} 天成本</h2>` +
     `<span class="muted small">合计 ${escapeHtml(fmtCny(week.total.cost_cny))} · ${fmtInt(week.total.calls)} 次调用</span></div>` +
     `<div class="cost-list">${dayRows}</div>` +
-    `<h3>按模型</h3>${modelRows}`
+    `<h3>按模型</h3>${modelRows}` +
+    `<h3>按用途</h3>${kindRows}`
   );
 }

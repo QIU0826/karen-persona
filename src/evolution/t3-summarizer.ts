@@ -13,6 +13,7 @@
  */
 import OpenAI from "openai";
 import { withThinking } from "../ai/chat.js";
+import { recordAuxUsage } from "../ai/aux-usage.js";
 import { getChatModel } from "../ai/router.js";
 import { getVectorDb, getCurrentPersona, insertEpisode, updateStrength } from "../data/vector.js";
 import { generateEmbedding } from "../data/embedding.js";
@@ -252,6 +253,7 @@ async function generateT3Summary(episodes: RawEpisode[], personaId: string): Pro
 
   const { system: systemPrompt, user: userPrompt } = buildT3SummaryPrompts(episodes, personaId);
 
+  const startedAtMs = Date.now();
   try {
     const response = await client.chat.completions.create(withThinking({
       model: modelConfig.model,
@@ -263,6 +265,7 @@ async function generateT3Summary(episodes: RawEpisode[], personaId: string): Pro
       max_tokens: 400,
     }));
 
+    recordAuxUsage({ kind: "t3_summary", model: modelConfig.model, startedAtMs }, response.usage);
     const text = response.choices[0]?.message?.content?.trim() ?? "";
     return text || null;
   } catch (err) {

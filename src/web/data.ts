@@ -814,7 +814,7 @@ export interface CostData {
   week: CostReport;
 }
 
-/** 今日 + 最近 N 天成本（复用 cost-tracker；旁路 LLM 未计入，见其文件注释）。 */
+/** 今日 + 最近 N 天成本（复用 cost-tracker；chat 与旁路 LLM 均按 kind 记账）。 */
 export function getCostData(days: number = 7): CostData {
   const windowDays = normalizeLimit(days, 7, 31);
   return {

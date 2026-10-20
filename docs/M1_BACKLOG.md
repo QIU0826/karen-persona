@@ -90,6 +90,13 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 成本统计覆盖旁路 LLM）
+
+- **统一记账（已完成）**：新增 `src/ai/aux-usage.ts`（`recordAuxUsage`）——事实抽取/内心独白/深夜独白/T3 摘要/herView/进化日志/叙事重构/视觉描述/配图搜索词全部写入 `llm_usage`，带 `kind` 标签；无 usage 不记录（不估算）。
+- **报表**：`getCostReport` 新增 `by_kind`；`/cost` 与 Web 控制台新增「按用途」拆分（对话/事实抽取/独白/长期摘要/图片识别/配图搜索词…）。
+- **真实验证**：一次真实事实抽取调用 → `llm_usage` 出现 `kind=fact_extraction, model=deepseek-flash, prompt 234, completion 63, ¥0.000486`，同时抽出 4 条用户事实。
+- **测试**：cost by_kind 1 条、aux-usage 2 条、dashboard「按用途」1 条；全仓 54 文件 / 600 用例，tsc 0。
+
 ### ✅ 已完成（2026-10-20 年龄门 18+ 确认）
 
 - **合规升级（已完成）**：`src/data/consent.ts`（`user_consent` 表，按 owner 隔离、跨重启持久化）+ `src/persona/age-gate.ts`（`detectAgeConfirmation` / `detectUnderageDecline` / `evaluateAgeGate` / 文案）。

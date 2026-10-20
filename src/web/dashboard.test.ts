@@ -168,6 +168,10 @@ function costFixture(): CostData {
         { date: "2026-10-19", calls: 3, cost_cny: 0.001, prompt_tokens: 3000, completion_tokens: 500, cached_tokens: 1200, reasoning_tokens: 0 },
       ],
       by_model: [{ model: "deepseek-flash", calls: 3, cost_cny: 0.001 }],
+      by_kind: [
+        { kind: "chat", calls: 2, cost_cny: 0.0008 },
+        { kind: "fact_extraction", calls: 1, cost_cny: 0.0002 },
+      ],
     },
   };
 }
@@ -377,5 +381,13 @@ describe("renderDashboard 首屏", () => {
     expect(html).toContain("她还没把对你的看法写下来");
     expect(html).toContain("还没有里程碑");
     expect(html).toContain("还没有演化状态");
+  });
+});
+
+describe("成本按用途展示", () => {
+  it("最近 7 天成本卡片展示「按用途」中文标签", () => {
+    const html = renderFixture();
+    expect(html).toContain("按用途");
+    expect(html).toContain("事实抽取");
   });
 });

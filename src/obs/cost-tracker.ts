@@ -18,9 +18,11 @@
  * - 缓存命中 token 来自 `prompt_cache_hit_tokens`，未命中 = prompt - hit；
  * - provider 不返回 usage 时不记录（不估算、不造假数据）。
  *
- * ⚠️ 当前只统计 ai/chat.ts 的 chat / chatStream 主路径。
- * 旁路 LLM 调用（内心独白 / T3 摘要 / herView / 进化日志 / 热点 / 视觉描述等）
- * 尚未接入统计，后续统一封装时再补（见 task 后续步骤）。
+ * 覆盖范围：
+ * - 主路径：ai/chat.ts 的 chat / chatStream（kind = chat / chatStream）；
+ * - 旁路调用经 ai/aux-usage.ts 统一记账（kind = fact_extraction / monologue /
+ *   t3_summary / her_view / journal / narrative / vision / photo_query），
+ *   所以 cost_today 不再只是「下限」，按用途的拆分见 /cost 的 by_kind。
  */
 import { getVectorDb } from "../data/vector.js";
 import { createLogger } from "./logger.js";
@@ -30,10 +32,29 @@ const log = createLogger("cost");
 /** 北京时间相对 UTC 的偏移（无夏令时）。 */
 const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
 
+/**
+ * 用量用途（用于 /cost 的按用途拆分）：
+ * - chat / chatStream：主对话；
+ * - 其余：旁路 LLM 调用，经 ai/aux-usage.ts 统一记录。
+ */
+export type LlmUsageKind =
+  | "chat"
+  | "chatStream"
+  | "fact_extraction"
+  | "monologue"
+  | "t3_summary"
+  | "her_view"
+  | "journal"
+  | "narrative"
+  | "vision"
+  | "photo_query"
+  | "memory_eval"
+  | "other";
+
 export interface LlmUsageInput {
   /** 实际请求的模型名，例如 deepseek-flash / deepseek-v4-pro */
   model: string;
-  kind?: "chat" | "chatStream" | "other";
+  kind?: LlmUsageKind;
   promptTokens?: number;
   completionTokens?: number;
   /** prompt_cache_hit_tokens（DeepSeek 扩展字段） */
@@ -75,12 +96,20 @@ export interface CostModelBucket {
   cost_cny: number;
 }
 
+/** 按用途拆分（chat / fact_extraction / monologue / t3_summary / ...）。 */
+export interface CostKindBucket {
+  kind: LlmUsageKind;
+  calls: number;
+  cost_cny: number;
+}
+
 export interface CostReport {
   generated_at: string;
   window_days: number;
   total: Omit<TodayCostSummary, "date">;
   by_day: CostDayBucket[];
   by_model: CostModelBucket[];
+  by_kind: CostKindBucket[];
 }
 
 // ── 价格表 ──────────────────────────────────────
@@ -289,6 +318,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 interface UsageAggregateRow {
   created_at: number;
   model: string;
+  kind: string;
   prompt_tokens: number;
   completion_tokens: number;
   cached_tokens: number;
@@ -300,7 +330,7 @@ function queryUsageRows(start: number, end: number): UsageAggregateRow[] {
   ensureTable();
   return getVectorDb()
     .prepare(
-      `SELECT created_at, model, prompt_tokens, completion_tokens, cached_tokens,
+      `SELECT created_at, model, kind, prompt_tokens, completion_tokens, cached_tokens,
               reasoning_tokens, cost_cny
        FROM llm_usage
        WHERE created_at >= ? AND created_at < ?
@@ -368,6 +398,7 @@ export function getCostReport(days: number = 7, at: number = Date.now()): CostRe
   }
 
   const modelIndex = new Map<string, CostModelBucket>();
+  const kindIndex = new Map<string, CostKindBucket>();
   const total = {
     calls: 0,
     cost_cny: 0,
@@ -403,6 +434,16 @@ export function getCostReport(days: number = 7, at: number = Date.now()): CostRe
       modelBucket.calls += 1;
       modelBucket.cost_cny += row.cost_cny;
       modelIndex.set(modelKey, modelBucket);
+
+      const kindKey = String(row.kind ?? "chat");
+      const kindBucket = kindIndex.get(kindKey) ?? {
+        kind: kindKey as LlmUsageKind,
+        calls: 0,
+        cost_cny: 0,
+      };
+      kindBucket.calls += 1;
+      kindBucket.cost_cny += row.cost_cny;
+      kindIndex.set(kindKey, kindBucket);
     }
   } catch (err) {
     log.warn("cost.report_failed", {
@@ -419,6 +460,9 @@ export function getCostReport(days: number = 7, at: number = Date.now()): CostRe
     total,
     by_day: byDay,
     by_model: [...modelIndex.values()]
+      .map((bucket) => ({ ...bucket, cost_cny: roundCny(bucket.cost_cny) }))
+      .sort((a, b) => b.cost_cny - a.cost_cny),
+    by_kind: [...kindIndex.values()]
       .map((bucket) => ({ ...bucket, cost_cny: roundCny(bucket.cost_cny) }))
       .sort((a, b) => b.cost_cny - a.cost_cny),
   };

@@ -13,6 +13,7 @@
 
 import OpenAI from "openai";
 import { withThinking } from "../ai/chat.js";
+import { recordAuxUsage } from "../ai/aux-usage.js";
 import { getChatModel } from "../ai/router.js";
 import { getVectorDb, getCurrentPersona, insertEpisode, getRecentSnapshots, type T1Snapshot } from "../data/vector.js";
 import { generateEmbedding } from "../data/embedding.js";
@@ -135,6 +136,7 @@ async function generateJournalNarrative(
     `写一段 4-6 句的日记：`,
   ].filter(Boolean).join("\n");
 
+  const startedAtMs = Date.now();
   try {
     const response = await client.chat.completions.create(withThinking({
       model: modelConfig.model,
@@ -146,6 +148,7 @@ async function generateJournalNarrative(
       max_tokens: 400,
     }));
 
+    recordAuxUsage({ kind: "journal", model: modelConfig.model, startedAtMs }, response.usage);
     const text = response.choices[0]?.message?.content?.trim() ?? "";
     return text || null;
   } catch (err) {

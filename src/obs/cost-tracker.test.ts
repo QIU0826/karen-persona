@@ -262,6 +262,27 @@ describe("recordLlmUsage + 摘要", () => {
     vector.closeVectorDb();
   });
 
+  it("getCostReport 的 by_kind：主对话与旁路调用按用途拆分", async () => {
+    const { cost, vector } = await loadModules();
+    const at = Date.now();
+    cost.recordLlmUsage({ model: "deepseek-flash", kind: "chat", promptTokens: 100, completionTokens: 20, at });
+    cost.recordLlmUsage({ model: "deepseek-flash", kind: "fact_extraction", promptTokens: 300, completionTokens: 30, at });
+    cost.recordLlmUsage({ model: "deepseek-flash", kind: "fact_extraction", promptTokens: 200, completionTokens: 20, at });
+    cost.recordLlmUsage({ model: "deepseek-flash", kind: "vision", promptTokens: 500, completionTokens: 50, at });
+
+    const report = cost.getCostReport(7, at);
+    const kinds = new Map(report.by_kind.map((bucket) => [bucket.kind, bucket]));
+    expect(kinds.get("chat")?.calls).toBe(1);
+    expect(kinds.get("fact_extraction")?.calls).toBe(2);
+    expect(kinds.get("vision")?.calls).toBe(1);
+    expect(report.by_kind.reduce((sum, bucket) => sum + bucket.calls, 0)).toBe(report.total.calls);
+    expect(report.by_kind.reduce((sum, bucket) => sum + bucket.cost_cny, 0)).toBeCloseTo(
+      report.total.cost_cny,
+      6,
+    );
+    vector.closeVectorDb();
+  });
+
   it("成本记录跨模块重载仍可见（SQLite 持久化）", async () => {
     const { cost, vector } = await loadModules();
     const at = Date.now();
