@@ -5,7 +5,7 @@ import { loadPersona } from "./persona/loader.js";
 
 async function main() {
   console.log("╔══════════════════════════════════════╗");
-  console.log("║  微信 AI 虚拟人设聊天系统 v0.1.0    ║");
+  console.log("║  微信 AI 虚拟人设聊天系统 v0.2.0    ║");
   console.log("╚══════════════════════════════════════╝\n");
 
   const config = loadConfig();
