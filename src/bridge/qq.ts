@@ -39,6 +39,7 @@ import {
   processMessageStream,
   processProactive,
   persistRuntimeState,
+  runMemoryJobsIfDue,
   type ConversationState,
   type PipelineResult,
 } from "../pipeline/orchestrator.js";
@@ -801,6 +802,9 @@ async function main() {
       try {
         // /pause：暂停主动消息（用户主动发消息仍会正常回）
         if (state.proactivePaused) continue;
+
+        // 记忆 v2：到期的日记忆/周汇总（没有到期任务时几乎零成本）
+        await runMemoryJobsIfDue(state);
 
         // 频率限制
         const freqLimit = sharedBase.config.message_frequency_limit;

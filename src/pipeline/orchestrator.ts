@@ -3,7 +3,25 @@ import { chat, chatStream } from "../ai/chat.js";
 import { classifyComplexity } from "../ai/router.js";
 import { addMessage, buildChatMessages, loadSession, type ConversationSession } from "../data/history.js";
 import { decideGate, getBusyLevel, type GateAction, type GateContext } from "../impulse/message-gate.js";
-import { insertT1Snapshot, insertEpisode, setCurrentPersona, backfillEpisodeVectors } from "../data/vector.js";
+import {
+  insertT1Snapshot,
+  insertEpisode,
+  setCurrentPersona,
+  backfillEpisodeVectors,
+  getVectorDb,
+} from "../data/vector.js";
+import {
+  addAnchor,
+  inferAnchorKind,
+  listAnchors,
+  listRecentDigests,
+  scoreSalience,
+  summarizeAnchor,
+  touchAnchors,
+} from "../data/memory-v2.js";
+import { buildMemoryContext } from "./memory-context.js";
+import { computeDueJobs, runDailyDigest, runWeeklyRollup } from "../schedule/jobs.js";
+import { summarizeDayWithLLM } from "../schedule/digest-llm.js";
 import { generateEmbedding } from "../data/embedding.js";
 import { buildRagContext, storeConversationEpisode } from "../data/retriever.js";
 import { retrieveWithLlmBoost } from "../data/retrieval-boost.js";
@@ -754,6 +772,117 @@ export function updateRelationshipAfterTurn(
 
 
 
+// ── 记忆 v2：锚点与日记忆（v0.5）────────────
+
+/** 锚点/日记忆注入预算（字符）与条数上限 */
+const MEMORY_ANCHOR_LIMIT = 5;
+const MEMORY_DIGEST_LIMIT = 3;
+
+/**
+ * 把「锚点 + 最近几天日记忆」注入 prompt。`KAREN_MEMORY_V2=off` 可整体回退。
+ * 任何 DB 异常都静默降级为空（聊天不能因为记忆层挂了而报错）。
+ */
+function buildMemoryInjection(state: ConversationState): string {
+  if (process.env.KAREN_MEMORY_V2 === "off") return "";
+  try {
+    const db = getVectorDb();
+    const anchors = listAnchors(db, state.storagePersona, state.owner, MEMORY_ANCHOR_LIMIT);
+    const digests = listRecentDigests(db, state.storagePersona, state.owner, MEMORY_DIGEST_LIMIT);
+    if (anchors.length === 0 && digests.length === 0) return "";
+    const ctx = buildMemoryContext({ anchors, digests });
+    if (ctx.usedAnchorIds.length > 0) touchAnchors(db, ctx.usedAnchorIds);
+    if (ctx.chars > 0) {
+      console.log(
+        `  [记忆] 注入锚点 ${ctx.usedAnchorIds.length} 条 / 日记忆 ${digests.length} 天（${ctx.chars} 字符）`,
+      );
+    }
+    return ctx.text;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 回合结束时判定这段对话值不值得成为「锚点」。
+ *
+ * 规则打分（无额外 LLM 调用）：情绪强度/承诺/冲突/道歉/自我披露/共同经历/秘密/表白/失去。
+ * 阈值 0.75——宁可少记，也不要什么都记（锚点是"永远不会忘"的那类事）。
+ */
+function maybeRecordAnchor(state: ConversationState, userInput: string, reply: string): void {
+  if (process.env.KAREN_MEMORY_V2 === "off") return;
+  try {
+    const combined = `${userInput}\n${reply}`;
+    const salience = scoreSalience({
+      content: combined,
+      source: "chat",
+      emotionVector: state.emotionState.vector,
+    });
+    if (salience.score < 0.75) return;
+    const db = getVectorDb();
+    const id = addAnchor(db, {
+      personaId: state.storagePersona,
+      ownerId: state.owner,
+      kind: inferAnchorKind(combined),
+      summary: summarizeAnchor(userInput, 30) || summarizeAnchor(reply, 30),
+      quote: combined.slice(0, 200),
+      strength: salience.score,
+    });
+    if (id !== null) {
+      console.log(`  [记忆] 新增锚点 #${id}（显著度 ${salience.score}：${salience.reasons.join("、")}）`);
+    }
+  } catch {
+    // 记忆层失败不影响对话
+  }
+}
+
+/**
+ * 到期的记忆任务（日记忆 / 周汇总）。
+ *
+ * 由桥接心跳每 15 分钟调用一次：没有到期任务时只做几次 DB 查询，几乎零成本；
+ * 关机错过的日期会在下次启动后补跑（computeDueJobs 负责回看）。
+ */
+export async function runMemoryJobsIfDue(state: ConversationState): Promise<void> {
+  if (process.env.KAREN_MEMORY_V2 === "off") return;
+  try {
+    const db = getVectorDb();
+    const due = computeDueJobs({
+      db,
+      personaId: state.storagePersona,
+      ownerId: state.owner,
+    });
+    for (const day of due.dailyDigestDays) {
+      const result = await runDailyDigest({
+        db,
+        personaId: state.storagePersona,
+        ownerId: state.owner,
+        dayKey: day,
+        messages: state.session.messages,
+        chatFn: async (prompt) => {
+          const text = await summarizeDayWithLLM(prompt);
+          if (!text) throw new Error("llm_null");
+          return text;
+        },
+      });
+      if (result.ok) {
+        console.log(`  [日记忆] ${day} 已生成`);
+      } else if (result.reason !== "no_messages") {
+        console.log(`  [日记忆] ${day} 未生成（${result.reason}）`);
+      }
+    }
+    for (const week of due.weeklyRollupWeeks) {
+      const result = runWeeklyRollup({
+        db,
+        personaId: state.storagePersona,
+        ownerId: state.owner,
+        weekStart: week,
+      });
+      if (result.ok) console.log(`  [周汇总] ${week} 已生成`);
+    }
+  } catch {
+    // 记忆任务失败不影响聊天
+  }
+}
+
 // ── 说话动作（v0.3.3：主动/共情小改造）──────
 
 /** 最近几轮做过的说话动作（按 owner + 存储人设隔离，进程内即可） */
@@ -1044,6 +1173,7 @@ export async function processMessage(
     crisisNote +
     t1ArcContext +
     factsContext +
+    buildMemoryInjection(state) +
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
     buildTalkMoveInjection(state, userInput, crisis) +
@@ -1111,6 +1241,7 @@ export async function processMessage(
   // O. 保存 + 记忆
   addMessage(session, "assistant", rawReply);
   storeConversationEpisode(userInput, rawReply, session.t3.emotionVector);
+  maybeRecordAnchor(state, userInput, rawReply);
   maybeCompressToT3();
   maybeGenerateJournal();
   // P1-c: T1 人格快照写入
@@ -1521,6 +1652,7 @@ export async function* processMessageStream(
     (crisis ? crisisSafetyNote() : "") +
     t1ArcContext +
     factsContext +
+    buildMemoryInjection(state) +
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
     buildTalkMoveInjection(state, userInput, crisis) +
@@ -1674,6 +1806,7 @@ export async function* processMessageStream(
       noteRepetitionIfAny(persisted, recentReplies, (line) => console.log(`  ${line}`));
       addMessage(session, "assistant", persisted);
       storeConversationEpisode(userInput, persisted, emotionState.vector);
+      maybeRecordAnchor(state, userInput, persisted);
       maybeCompressToT3();
       maybeGenerateJournal();
       insertT1Snapshot({

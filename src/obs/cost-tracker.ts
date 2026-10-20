@@ -49,6 +49,7 @@ export type LlmUsageKind =
   | "narrative"
   | "vision"
   | "photo_query"
+  | "daily_digest"
   | "memory_eval"
   | "other";
 
