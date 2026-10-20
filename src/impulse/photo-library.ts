@@ -20,6 +20,8 @@ export interface PhotoDef {
   tags: string[];
   /** 配文候选（轻描淡写，符合人物「随手分享」的语气） */
   captions: string[];
+  /** 适合发送的时段 [起始小时, 结束小时)，如晚霞图只在 17-21 点发 */
+  hours: [number, number];
 }
 
 const PHOTO_DIR = assetDir("assets/photos");
@@ -29,43 +31,50 @@ const PHOTOS: PhotoDef[] = [
     id: "snow-forest",
     file: "snow-forest.jpg",
     tags: ["snow", "forest", "quiet", "nature", "winter"],
-    captions: ["早上出门拍的，路上一个人都没有", "雪把树都盖住了，安静得有点不真实"],
+    captions: ["路上拍的，雪把树都盖住了", "今天路上一个人都没有"],
+    hours: [6, 19],
   },
   {
     id: "bear",
     file: "bear.jpg",
     tags: ["animal", "funny", "nature"],
     captions: ["笑死，刷到一只熊", "这熊的表情，跟我今天心情一模一样"],
+    hours: [0, 24],
   },
   {
     id: "cafe",
     file: "cafe.jpg",
     tags: ["cafe", "indoor", "plants", "warm", "work"],
-    captions: ["店里今天摆了几盆花", "下午没什么人，就我和这些花"],
+    captions: ["店里今天摆了几盆花", "没客人的时候就擦擦杯子"],
+    hours: [7, 22],
   },
   {
     id: "mug-desk",
     file: "mug-desk.jpg",
     tags: ["coffee", "mug", "morning", "cozy", "desk"],
-    captions: ["刚泡的，今天换了个杯子", "早上第一杯，坐窗边喝的"],
+    captions: ["刚泡的，今天换了个杯子", "第一杯，坐窗边喝的"],
+    hours: [6, 15],
   },
   {
     id: "sunset-plants",
     file: "sunset-plants.jpg",
     tags: ["sunset", "golden", "nature", "warm"],
     captions: ["下班路上看到的光", "路边这些草被照得金灿灿的"],
+    hours: [17, 21],
   },
   {
     id: "mountain",
     file: "mountain.jpg",
     tags: ["mountain", "travel", "nature", "sky"],
     captions: ["翻到上次出去玩拍的照片", "远处的山和云，看着就舒服"],
+    hours: [7, 19],
   },
   {
     id: "sunset-pier",
     file: "sunset-pier.jpg",
     tags: ["sunset", "lake", "pier", "sky", "calm"],
     captions: ["今天的晚霞", "湖边这个码头，站了一会儿"],
+    hours: [17, 21],
   },
 ];
 
@@ -89,24 +98,37 @@ export interface PickPhotoInput {
 }
 
 /** 按情绪/时段挑选一张本地图；不适合发时返回 null。 */
-export function pickPhoto(input: PickPhotoInput): PhotoDef | null {
-  let candidates: PhotoDef[];
-  if (input.tags && input.tags.length > 0) {
-    candidates = photosByTags(input.tags);
-  } else if (input.hour >= 21 || input.hour < 7) {
-    candidates = photosByTags(["sunset", "cozy", "mug", "cafe"]);
-  } else if (input.emotion <= -0.3) {
-    candidates = photosByTags(["nature", "quiet", "calm", "mountain"]);
-  } else if (input.emotion >= 0.3) {
-    candidates = photosByTags(["warm", "sunset", "cafe", "animal"]);
-  } else {
-    candidates = PHOTOS;
-  }
-  if (candidates.length === 0) return null;
+/** 图库时段过滤：晚霞/夜景图只有对应时段才允许发。 */
+function inHours(hours: [number, number], hour: number): boolean {
+  const [start, end] = hours;
+  if (start === 0 && end === 24) return true;
+  return hour >= start && hour < end;
+}
 
+function pickFrom(list: PhotoDef[], random: () => number): PhotoDef | null {
+  if (list.length === 0) return null;
+  const index = Math.min(list.length - 1, Math.floor(random() * list.length));
+  return list[index];
+}
+
+export function pickPhoto(input: PickPhotoInput): PhotoDef | null {
+  const hourSafe = PHOTOS.filter((p) => inHours(p.hours, input.hour));
   const random = input.random ?? Math.random;
-  const index = Math.min(candidates.length - 1, Math.floor(random() * candidates.length));
-  return candidates[index];
+
+  let category: PhotoDef[];
+  if (input.tags && input.tags.length > 0) {
+    category = photosByTags(input.tags);
+  } else if (input.emotion <= -0.3) {
+    category = photosByTags(["nature", "quiet", "calm", "mountain"]);
+  } else if (input.emotion >= 0.3) {
+    category = photosByTags(["warm", "sunset", "cafe", "animal"]);
+  } else {
+    category = PHOTOS;
+  }
+
+  // 1) 类别 ∩ 时段；2) 时段内任意图；3) 兜底全图库
+  const preferred = category.filter((p) => inHours(p.hours, input.hour));
+  return pickFrom(preferred, random) ?? pickFrom(hourSafe, random) ?? pickFrom(PHOTOS, random);
 }
 
 /** 返回本地图片绝对路径；文件不存在返回 null。 */

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200" viewBox="0 0 800 1200">
+  <rect width="800" height="1200" fill="#f2ede4"/>
+  <text x="70" y="120" fill="#8a857b" font-family="Inter Tight, PingFang SC, sans-serif" font-size="20" letter-spacing="6">KAREN / ARCHIVE 02</text>
+  <line x1="70" y1="150" x2="730" y2="150" stroke="#d9d2c5" stroke-width="1"/>
+  <text x="70" y="520" fill="#14140f" font-family="Inter Tight, PingFang SC, sans-serif" font-size="150" font-weight="500" letter-spacing="-8">第 37 天</text>
+  <text x="70" y="640" fill="#5f5a50" font-family="Inter Tight, PingFang SC, sans-serif" font-size="26" letter-spacing="2">关系不是数字，是时间。</text>
+  <text x="70" y="1120" fill="#8a857b" font-family="Inter Tight, PingFang SC, sans-serif" font-size="18" letter-spacing="4">RELATIONSHIP / TIMELINE</text>
+</svg>

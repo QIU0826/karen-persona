@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200" viewBox="0 0 800 1200">
+  <rect width="800" height="1200" fill="#101014"/>
+  <text x="70" y="120" fill="#8d8d96" font-family="Inter Tight, PingFang SC, sans-serif" font-size="20" letter-spacing="6">KAREN / ARCHIVE 01</text>
+  <line x1="70" y1="150" x2="730" y2="150" stroke="#2a2a31" stroke-width="1"/>
+  <text x="70" y="430" fill="#f4f1ea" font-family="Inter Tight, PingFang SC, sans-serif" font-size="86" font-weight="500" letter-spacing="-4">她有</text>
+  <text x="70" y="530" fill="#f4f1ea" font-family="Inter Tight, PingFang SC, sans-serif" font-size="86" font-weight="500" letter-spacing="-4">自己的生活</text>
+  <text x="70" y="700" fill="#b9b6ae" font-family="Inter Tight, PingFang SC, sans-serif" font-size="24" letter-spacing="2">她不是功能，是一个人。</text>
+  <text x="70" y="1120" fill="#6e6e78" font-family="Inter Tight, PingFang SC, sans-serif" font-size="18" letter-spacing="4">SHANGHAI · 2026</text>
+</svg>

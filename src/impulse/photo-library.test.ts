@@ -34,6 +34,16 @@ describe("photo-library 本地图库", () => {
     expect(pickPhotoCaption(photo!, () => 0)).toBe(photo!.captions[0]);
   });
 
+  it("晚霞图只在傍晚时段发送（早上不会发晚霞）", () => {
+    const morning = pickPhoto({ emotion: 0, hour: 10, tags: ["sunset"], random: () => 0 });
+    expect(morning).not.toBeNull();
+    expect(morning!.id.startsWith("sunset")).toBe(false);
+
+    const evening = pickPhoto({ emotion: 0, hour: 19, tags: ["sunset"], random: () => 0 });
+    expect(evening).not.toBeNull();
+    expect(evening!.tags).toContain("sunset");
+  });
+
   it("资源缺失时返回 null", () => {
     expect(photoFilePath({ id: "x", file: "not-exists.jpg", tags: [], captions: [] })).toBeNull();
   });

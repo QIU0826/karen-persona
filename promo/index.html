@@ -63,14 +63,27 @@ body.cursor-ready #cursor { opacity: 1; }
 /* ── Caption ──────────────────────────── */
 #caption {
   position: fixed; z-index: 20; pointer-events: none;
-  left: 16px; top: 118px;
+  left: 16px; top: 146px;
   width: calc(100vw - 32px);
-  font-family: var(--font); font-weight: 500; font-size: 12px;
-  line-height: 140%; letter-spacing: -0.04em; color: #fff;
+  color: #fff;
   mix-blend-mode: exclusion;
   animation: rise .6s cubic-bezier(.25,.1,.25,1) .3s both;
 }
-#caption .dim { opacity: .62; }
+#caption .eyebrow {
+  font-family: var(--font); font-weight: 500; font-size: 10px;
+  letter-spacing: .16em; text-transform: uppercase;
+  opacity: .62; margin-bottom: 12px;
+}
+#caption .headline {
+  font-family: var(--font); font-weight: 500; font-size: 26px;
+  line-height: 1.16; letter-spacing: -0.035em; margin-bottom: 12px;
+}
+#caption .sub {
+  font-family: var(--font); font-weight: 400; font-size: 12px;
+  line-height: 1.75; letter-spacing: -0.01em; opacity: .78;
+  max-width: 520px;
+}
+#caption .sub .dim { opacity: .55; }
 
 /* ── Nav ──────────────────────────────── */
 #nav {
@@ -96,31 +109,34 @@ body.cursor-ready #cursor { opacity: 1; }
 /* ── 产品信息 / Outro info ─────────────── */
 #outro-info {
   position: fixed; z-index: 20; pointer-events: none;
-  left: 0; right: 0; bottom: 48px;
+  left: 0; right: 0; bottom: 44px;
   display: flex; flex-direction: column; align-items: center;
   mix-blend-mode: exclusion;
   opacity: 0; animation: fadein .8s ease .45s forwards;
 }
-#outro-info .top { display: flex; flex-direction: column; align-items: flex-start; width: 252px; margin-bottom: 12px; }
-#outro-info .circle {
-  position: relative; width: 20px; height: 20px; margin: 0 auto;
-}
+#outro-info .top { display: flex; flex-direction: column; align-items: flex-start; width: 252px; }
+#outro-info .row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+#outro-info .circle { position: relative; width: 20px; height: 20px; flex: 0 0 auto; }
 #outro-info .circle svg { display: block; width: 100%; height: 100%; }
 #outro-info .circle .symbol {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-family: var(--font); font-weight: 500; font-size: 10px;
   letter-spacing: -0.04em; text-transform: uppercase; color: #fff;
 }
-#outro-info .collection {
-  margin-top: 10px; width: 100%;
-  font-family: var(--font); font-weight: 500; font-size: 20px;
-  line-height: 100%; letter-spacing: -0.04em; text-transform: uppercase;
-  text-align: center; color: #fff;
+#outro-info .kicker {
+  font-family: var(--font); font-weight: 500; font-size: 10px;
+  letter-spacing: .16em; text-transform: uppercase; color: #fff; opacity: .68;
 }
-#outro-info .price {
+#outro-info .wordmark {
   font-family: var(--font); font-weight: 500; font-size: 60px;
-  line-height: 100%; letter-spacing: -0.04em; color: #fff;
-  text-align: center;
+  line-height: .94; letter-spacing: -0.06em; color: #fff;
+}
+#outro-info .tag {
+  margin-top: 14px;
+  font-family: var(--font); font-weight: 500; font-size: 9px;
+  letter-spacing: .14em; text-transform: uppercase; color: #fff;
+  opacity: .8; border: 1px solid rgba(255,255,255,.42);
+  border-radius: 999px; padding: 5px 10px;
 }
 
 /* ── CTA（滚动到底部出现） ─────────────── */
@@ -133,8 +149,8 @@ body.cursor-ready #cursor { opacity: 1; }
   mix-blend-mode: exclusion;
 }
 #outro-buy span {
-  font-family: var(--font); font-weight: 500; font-size: 72px;
-  letter-spacing: -0.04em; color: #fff; mix-blend-mode: exclusion;
+  font-family: var(--font); font-weight: 500; font-size: 52px;
+  letter-spacing: -0.045em; color: #fff; mix-blend-mode: exclusion;
 }
 
 /* ── 视频 / 角色层 ────────────────────── */
@@ -150,6 +166,26 @@ body.cursor-ready #cursor { opacity: 1; }
   object-fit: cover; display: none;
 }
 #main-canvas video.active { display: block; }
+#hero-blank {
+  position: fixed; inset: 0; z-index: 0;
+  display: none; overflow: hidden;
+  background:
+    radial-gradient(1100px 720px at 64% 34%, #2c2c34 0%, #17171c 46%, #08080a 100%);
+}
+#hero-blank.show { display: block; }
+#hero-blank::before {
+  content: ""; position: absolute; inset: -15%;
+  background:
+    radial-gradient(560px 420px at 26% 26%, rgba(255, 176, 118, .20), transparent 62%),
+    radial-gradient(680px 520px at 78% 62%, rgba(122, 141, 255, .16), transparent 66%);
+  filter: blur(46px);
+}
+#hero-blank::after {
+  content: "K"; position: absolute; right: -3vw; bottom: -22vh;
+  font-family: var(--font); font-weight: 600; font-size: 78vw;
+  line-height: .8; letter-spacing: -0.06em; color: rgba(255, 255, 255, .035);
+  pointer-events: none;
+}
 #character-layer {
   position: fixed; left: 0; top: 220px; z-index: 0;
   width: 100vw; height: calc(100vh - 220px);
@@ -185,8 +221,8 @@ body.cursor-ready #cursor { opacity: 1; }
 #gallery {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 6vw 5vw;
-  padding: 0 5vw 24vh;
+  gap: 5vh 4vw;
+  padding: 0 4vw 26vh;
 }
 .bp-cell { position: relative; aspect-ratio: 2 / 3; }
 .bp-card {
@@ -229,7 +265,9 @@ body.cursor-ready #cursor { opacity: 1; }
 /* ── 桌面适配 ─────────────────────────── */
 @media (min-width: 640px) {
   #logo { width: 266px; top: 24px; left: 24px; }
-  #caption { left: 24px; top: 180px; width: calc(50vw - 48px); }
+  #caption { left: 24px; top: 186px; width: min(560px, calc(50vw - 48px)); }
+  #caption .headline { font-size: 32px; }
+  #caption .sub { font-size: 13px; }
   #nav { top: 24px; right: 24px; }
   #nav .about { display: block; }
   #nav .right { gap: 50px; }
@@ -239,21 +277,25 @@ body.cursor-ready #cursor { opacity: 1; }
 }
 @media (min-width: 1024px) {
   #logo { width: 355px; top: 32px; left: 32px; }
-  #caption { left: 32px; top: 244px; width: 692px; }
+  #caption { left: 32px; top: 236px; width: 560px; }
+  #caption .headline { font-size: 40px; }
+  #caption .sub { font-size: 14px; }
   #nav { top: 32px; right: 32px; width: 330px; }
   #main-canvas, #character-layer { top: 0; height: 100vh; }
   #character-layer { padding-bottom: 0; }
-  #outro-info { bottom: 80px; width: 330px; left: auto; right: 32px; align-items: center; }
-  #outro-info .top { width: 100%; margin-bottom: 32px; }
+  #outro-info { bottom: 96px; width: 330px; left: auto; right: 32px; align-items: flex-start; }
+  #outro-info .top { width: 100%; }
+  #outro-info .row { margin-bottom: 18px; }
   #outro-info .circle { width: 30px; height: 30px; }
   #outro-info .circle .symbol { font-size: 15px; }
-  #outro-info .collection { font-size: 30px; }
-  #outro-info .price { font-size: 80px; }
-  #outro-buy { left: auto; right: 32px; bottom: 32px; width: 330px; height: 174px; transform-origin: right bottom; }
-  #outro-buy span { font-size: 110px; }
+  #outro-info .kicker { font-size: 11px; }
+  #outro-info .wordmark { font-size: 84px; }
+  #outro-info .tag { font-size: 10px; margin-top: 18px; }
+  #outro-buy { left: auto; right: 32px; bottom: 32px; width: 330px; height: 152px; transform-origin: right bottom; }
+  #outro-buy span { font-size: 84px; }
   #outro-footer { left: 32px; bottom: 32px; width: auto; gap: 80px; }
   #outro-footer span { font-size: 13px; }
-  #gallery { grid-template-columns: repeat(4, 1fr); gap: 8vh 6vw; padding: 0 6vw 30vh; }
+  #gallery { grid-template-columns: repeat(4, 1fr); gap: 6vh 4vw; padding: 0 4vw 30vh; }
 }
 
 @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
@@ -288,9 +330,9 @@ body.cursor-ready #cursor { opacity: 1; }
 
   <!-- Caption -->
   <div id="caption">
-    她不是聊天机器人。她有自己的生活、情绪和记忆——<br />
-    住在你的 QQ 里，慢慢记得你说过的每一件小事。<br />
-    <span class="dim">A SELF-HOSTED AI PERSONA · QQ / ONEBOT</span>
+    <div class="eyebrow">AI PERSONA · QQ / ONEBOT</div>
+    <h1 class="headline">她不是聊天机器人。</h1>
+    <p class="sub">她有自己的生活、情绪和记忆，住在你的 QQ 里，<br />慢慢记得你说过的每一件小事。</p>
   </div>
 
   <!-- Nav -->
@@ -308,19 +350,25 @@ body.cursor-ready #cursor { opacity: 1; }
   <!-- 产品信息 -->
   <div id="outro-info">
     <div class="top">
-      <div class="circle">
-        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="20" cy="20" r="18.75" stroke="#fff" stroke-width="2.5" />
-        </svg>
-        <span class="symbol" id="circle-symbol">8</span>
+      <div class="row">
+        <div class="circle">
+          <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="20" cy="20" r="18.75" stroke="#fff" stroke-width="2.5" />
+          </svg>
+          <span class="symbol" id="circle-symbol">8</span>
+        </div>
+        <span class="kicker">ARCHIVE COLLECTION</span>
       </div>
-      <div class="collection" id="collection"><span>ARCHIVE COLLECTION</span><br /><span>「KAREN」</span></div>
+      <div class="wordmark">KAREN</div>
+      <div class="tag">AI PERSONA · BETA</div>
     </div>
-    <div class="price">BETA</div>
   </div>
 
   <!-- CTA -->
   <a id="outro-buy" href="#" aria-label="体验 KAREN"><span>体验</span></a>
+
+  <!-- 人物区（先留空：干净渐变，等角色素材到位再切 video/character 模式） -->
+  <div id="hero-blank"></div>
 
   <!-- 视频 / 角色 -->
   <div id="main-canvas">
@@ -356,7 +404,8 @@ body.cursor-ready #cursor { opacity: 1; }
    - gallery: 10 张产品/角色档案图（可本地 assets，也可外链）
    ═══════════════════════════════════════════════════════════════ */
 const CONFIG = {
-  heroMode: "video",
+  // "blank" = 人物区留空（当前阶段）；"video" = 双视频；"character" = 单张角色图
+  heroMode: "blank",
 
   leftVideo: "https://d8j0ntlcm91z4.cloudfront.net/user_39ca84eAE1ODL9hbR5VhoEj8tBf/hf_20260625_154433_532a85d3-dabf-4265-b8bd-19ac6af31842.mp4",
   rightVideo: "https://d8j0ntlcm91z4.cloudfront.net/user_39ca84eAE1ODL9hbR5VhoEj8tBf/hf_20260625_154401_a664f076-b971-4557-8728-40ef9ea4c49b.mp4",
@@ -367,24 +416,27 @@ const CONFIG = {
   aboutUrl: "#gallery",
 
   galleryLabels: [
-    "01 / 她的咖啡店", "02 / 雨天记忆", "03 / 深夜独白", "04 / 她的照片", "05 / 关系时间线",
-    "06 / 情绪切片", "07 / 表情与贴纸", "08 / 她眼中的你", "09 / 进化日志", "10 / 只属于你",
+    "01 / 她的咖啡店", "02 / 雪天路上", "03 / 第一杯", "04 / 她有自己的生活",
+    "05 / 远处的山", "06 / 晚霞", "07 / 刷到一只熊", "08 / 第 37 天",
+    "09 / 下班路上", "10 / 她开始记得你",
   ],
   galleryCaptions: [
-    "上海 · 静安区", "她记得你说过喜欢下雨", "凌晨两点还在想你说的话", "随手拍的一张",
-    "第 37 天", "今天有点累", "猫咪贴纸", "她偷偷写的", "承认自己在变化", "留在通讯录里的人",
+    "上海 · 静安区", "今天路上一个人都没有", "刚泡的，今天换了个杯子", "她不是功能，是一个人",
+    "翻到上次出去玩拍的", "今天的晚霞", "笑死，刷到一只熊", "关系不是数字，是时间",
+    "路边这些草被照得金灿灿的", "不是记住数据，是记住你",
   ],
+  // 全部本地素材：日常照片 + 文案海报（无外链，打开即用）
   gallery: [
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_104530_521b2f85-c0f3-4d0e-9704-b578315b4cb9.png&w=1920&q=85",
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103711_76ccdb8b-5043-4f47-9c54-4379713393ea.png&w=1920&q=85",
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103728_394f6a1b-85e2-4386-a4f6-408472a0a5b7.png&w=1920&q=85",
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103739_86743e0e-16a7-4bee-bf38-dd67985344dc.png&w=1920&q=85",
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103748_b2215dc8-a3a7-470d-b19a-5b87fa7d0c37.png&w=1920&q=85",
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103758_e919ce72-5c9d-4b87-9be6-d7647b34825c.png&w=1920&q=85",
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103808_013583d0-3386-4547-9832-37c7d8edb3ac.png&w=1920&q=85",
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103937_a0c49d0a-33eb-4ead-aea6-c1baf241acbc.png&w=1920&q=85",
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_103956_d18ed8fd-7b6f-4b86-91f9-20010fe38670.png&w=1920&q=85",
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260629_104034_ba5a9963-87ff-4008-a545-6bd686c088b5.png&w=1920&q=85"
+    "../assets/photos/cafe.jpg",
+    "../assets/photos/snow-forest.jpg",
+    "../assets/photos/mug-desk.jpg",
+    "assets/gallery/poster-1.svg",
+    "../assets/photos/mountain.jpg",
+    "../assets/photos/sunset-pier.jpg",
+    "../assets/photos/bear.jpg",
+    "assets/gallery/poster-2.svg",
+    "../assets/photos/sunset-plants.jpg",
+    "assets/gallery/poster-3.svg",
   ],
 };
 
@@ -414,24 +466,42 @@ document.querySelector("#nav .about").href = CONFIG.aboutUrl;
 
 /* ── 视频 / 角色模式 ──────────────────── */
 const canvas = document.getElementById("main-canvas");
+const blankLayer = document.getElementById("hero-blank");
 const charLayer = document.getElementById("character-layer");
 const videoLeft = document.getElementById("video-left");
 const videoRight = document.getElementById("video-right");
 const videos = [videoLeft, videoRight];
 
-function fallbackToCharacter() {
+/** 人物区留空：干净渐变 + 大字 K 背景（不显示任何人物占位） */
+function showBlankHero() {
   canvas.style.display = "none";
-  charLayer.classList.add("show");
-  charLayer.querySelector("img").src = CONFIG.characterImage;
+  charLayer.classList.remove("show");
+  blankLayer.classList.add("show");
+}
+
+function hideBlankHero() {
+  blankLayer.classList.remove("show");
 }
 
 function setHeroMode() {
+  // 人物区留空（当前阶段）
+  if (CONFIG.heroMode === "blank") {
+    showBlankHero();
+    return;
+  }
+
+  // 单张角色图（等素材到位后启用）
   if (CONFIG.heroMode === "character") {
+    hideBlankHero();
     canvas.style.display = "none";
+    if (!CONFIG.characterImage) { showBlankHero(); return; }
     charLayer.classList.add("show");
     charLayer.querySelector("img").src = CONFIG.characterImage;
     return;
   }
+
+  // 双视频
+  hideBlankHero();
   canvas.style.display = "block";
   charLayer.classList.remove("show");
   videoLeft.src = CONFIG.leftVideo;
@@ -444,17 +514,17 @@ function setHeroMode() {
       ready++;
       if (ready >= 2) canvas.classList.add("ready");
     }, { once: true });
-    v.addEventListener("error", () => fallbackToCharacter(), { once: true });
+    v.addEventListener("error", () => showBlankHero(), { once: true });
   });
   if (reduced) {
-    // 减少动态：不自动播放视频，直接展示卡通角色占位
-    fallbackToCharacter();
+    // 减少动态：不播放视频，回到留白
+    showBlankHero();
     return;
   }
-  // 5 秒内没有加载出视频（网络/外链失效）→ 回退角色图
+  // 5 秒内没有加载出视频（网络/外链失效）→ 回到留白
   setTimeout(() => {
     if (!canvas.classList.contains("ready") && CONFIG.heroMode === "video") {
-      fallbackToCharacter();
+      showBlankHero();
     }
   }, 5000);
 }
@@ -592,11 +662,17 @@ function buildGallery() {
     });
   });
 
-  // transform-origin：左半列 → right bottom，右半列 → left bottom
-  cards.forEach(({ el }) => {
+  // transform-origin：左半列 → right bottom，右半列 → left bottom；并按列做垂直错位
+  const colCount = cols();
+  cards.forEach(({ el }, i) => {
     const rect = el.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     el.style.transformOrigin = centerX < vw() / 2 ? "right bottom" : "left bottom";
+    const cell = el.parentElement;
+    if (cell && !reduced) {
+      const offset = ((i % colCount) % 2 === 0 ? 1 : -1) * (i % 3) * 2.2;
+      cell.style.transform = `translateY(${offset}vh)`;
+    }
   });
 }
 
@@ -651,6 +727,7 @@ function tick() {
   if (hero.style.visibility !== (y > H ? "hidden" : "visible")) {
     hero.style.visibility = y > H ? "hidden" : "visible";
     charLayer.style.visibility = y > H ? "hidden" : "visible";
+    blankLayer.style.visibility = y > H ? "hidden" : "visible";
   }
 
   // Outro：白场 + 产品信息 + 按钮 + footer
@@ -660,6 +737,18 @@ function tick() {
   info.style.transform = `translateY(${-p * (vw() < 1024 ? 132 : 166)}px)`;
   buy.style.transform = `scale(${p})`;
   footer.style.opacity = String(p);
+
+  // 文字与画廊融合：首屏文字随面板升起淡出；画廊阶段只保留 logo/nav；结尾再让产品信息回来
+  const captionEl = document.getElementById("caption");
+  const inGallery = y > H * 0.82 && y < outroStart - 40;
+  captionEl.style.opacity = String(y < H * 0.82 ? clamp(1 - y / (H * 0.82), 0, 1) : 0);
+  if (inGallery) {
+    info.style.opacity = "0";
+  } else if (y >= outroStart - 40) {
+    info.style.opacity = String(p);
+  } else {
+    info.style.opacity = String(clamp(1 - y / (H * 0.7), 0, 1));
+  }
 
   // Circle symbol 随滚动随机切换（80ms 节流）
   if (p === 0) {
