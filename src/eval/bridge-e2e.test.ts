@@ -577,8 +577,16 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
 
         const beforeSticker = actions.length;
         client.send(privateEvent("发个表情包", 40));
+        // 先等这一轮的回复出现（说明桥接已处理完这条消息），再等贴纸——
+        // 全量并行时桥接处理会变慢，直接等贴纸容易假失败。
+        await client.waitFor(
+          (action, index) =>
+            index >= beforeSticker &&
+            action.action === "send_private_msg" &&
+            messageText(action).length > 0,
+        );
         let matched: string | null = null;
-        for (let attempt = 0; attempt < 50; attempt++) {
+        for (let attempt = 0; attempt < 120; attempt++) {
           const found = actions
             .slice(beforeSticker)
             .map((action) => messageText(action))

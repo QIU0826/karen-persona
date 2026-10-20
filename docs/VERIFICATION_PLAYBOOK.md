@@ -122,7 +122,13 @@ fs.rmSync(tmp, { recursive: true, force: true });
 结果是数据在表里、检索 0 命中，测试会误判"检索坏了"（v0.8.21 写 retriever 测试时踩到）。
 → 用 `insertEpisode()` / `upsertDailyDigest()` 等生产函数造数据；人设用 `setCurrentPersona()` 切。
 
-### 坑 4：临时目录的异步任务会在 cleanup 后报错
+### 坑 4：E2E 交互不要只等"目标事件"，先等"本轮回复"
+
+全量并行时桥接进程处理变慢，直接等某个附带动作（如贴纸）会假失败——
+v0.8.19 的贴纸断言就因此在全量跑里失败过两次。
+→ 先 `waitFor` 这一轮的回复出现（说明消息处理完了），再等附加动作。
+
+### 坑 5：临时目录的异步任务会在 cleanup 后报错
 
 冒烟脚本 `fs.rmSync(tmp)` 之后，后台的 embedding 升级/成本写入还在跑，
 会刷 `database connection is not open` 噪声日志。
