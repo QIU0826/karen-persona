@@ -20,7 +20,9 @@ import {
   touchAnchors,
 } from "../data/memory-v2.js";
 import { buildMemoryContext } from "./memory-context.js";
-import { computeDueJobs, localDayKey, runDailyDigest, runWeeklyRollup } from "../schedule/jobs.js";
+import { computeDueJobs, localDayKey, runDailyDigest, runWeeklyRollup, shiftDayKey } from "../schedule/jobs.js";
+import { runAnchorRefine } from "../schedule/anchor-refine.js";
+import { refineAnchorsWithLLM } from "../schedule/anchor-llm.js";
 import { deserializePlan, generateDailyPlanWithLLM, serializePlan } from "../schedule/initiative-llm.js";
 import {
   buildDailyPlanPrompt,
@@ -1185,6 +1187,38 @@ export async function runMemoryJobsIfDue(state: ConversationState): Promise<void
         console.log(`  [日记忆] ${day} 未生成（${result.reason}）`);
       }
     }
+    // v0.8.4：昨日边界记忆的锚点复筛（每天一次，幂等；候选不足会自动跳过）
+    try {
+      const targetDay = shiftDayKey(localDayKey(Date.now()), -1);
+      const db2 = getVectorDb();
+      const done = db2
+        .prepare(`SELECT 1 FROM job_runs WHERE job = 'anchor_refine' AND period = ? LIMIT 1`)
+        .get(targetDay);
+      if (!done) {
+        const result = await runAnchorRefine({
+          db: db2,
+          personaId: state.storagePersona,
+          ownerId: state.owner,
+          day: targetDay,
+          herName: state.persona.name,
+          userName: state.config.your_name,
+          chatFn: (prompt) => refineAnchorsWithLLM(prompt),
+        });
+        if (result.ok) {
+          db2
+            .prepare(`INSERT OR REPLACE INTO job_runs (job, period, ran_at) VALUES ('anchor_refine', ?, ?)`)
+            .run(targetDay, Date.now());
+          if (result.created > 0) {
+            console.log(`  [锚点复筛] ${targetDay} 新增 ${result.created} 条（候选 ${result.candidates}）`);
+          }
+        } else if (result.reason !== "no_candidates") {
+          console.log(`  [锚点复筛] ${targetDay} 跳过（${result.reason}）`);
+        }
+      }
+    } catch {
+      // 复筛失败不影响其它任务
+    }
+
     for (const week of due.weeklyRollupWeeks) {
       const result = runWeeklyRollup({
         db,

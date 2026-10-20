@@ -51,6 +51,7 @@ export type LlmUsageKind =
   | "photo_query"
   | "daily_digest"
   | "initiative_plan"
+  | "anchor_refine"
   | "memory_eval"
   | "other";
 
