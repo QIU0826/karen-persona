@@ -21,7 +21,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import type BetterSqlite3 from "better-sqlite3";
 
@@ -381,12 +381,28 @@ async function withReadonlyDb<T>(dbPath: string, fn: (db: BetterSqlite3.Database
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+/** 轮询数据库直到满足条件（fire-and-forget 的异步写入用） */
+async function pollDb<T>(read: () => Promise<T>, ok: (value: T) => boolean, message: string): Promise<T> {
+  let last: T | undefined;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try {
+      last = await read();
+      if (ok(last)) return last;
+    } catch {
+      // 表还没建好/库被锁：继续等
+    }
+    await wait(150);
+  }
+  throw new Error(`${message}（最后读取：${JSON.stringify(last ?? null).slice(0, 200)}）`);
+}
+
 describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
   let fake: FakeOpenAi;
   let workDir: string;
   let dataDir: string;
   let bridge: ChildProcess | null = null;
   let onebot: OneBotClient | null = null;
+  let randomSpy: ReturnType<typeof vi.spyOn> | null = null;
 
   beforeAll(async () => {
     fake = await startFakeOpenAi();
@@ -434,6 +450,9 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
       DEEPSEEK_API_KEY: "sk-e2e-test",
       DEEPSEEK_BASE_URL: fake.baseUrl,
       KAREN_DATA_DIR: dataDir,
+      // v0.8.19：打开表情包采集 + 出站优先用收集库，验证「入站图片 → 本地库 → 再发出去」整条链路
+      KAREN_STICKER_COLLECT: "on",
+      KAREN_STICKER_USE: "on",
       LOG_LEVEL: "warn",
       LOG_FORMAT: "text",
       NO_COLOR: "1",
@@ -457,6 +476,11 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
     await waitForPort(port, 30000, bridge);
     onebot = await connectOneBot(port);
   }, 60000);
+
+  afterEach(() => {
+    randomSpy?.mockRestore();
+    randomSpy = null;
+  });
 
   afterAll(async () => {
     try {
@@ -520,6 +544,49 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
       expect(fake.requests.some((request) => JSON.stringify(request).includes("image_url"))).toBe(
         true,
       );
+
+      // 4b) 表情包采集（v0.6，之前只有纯函数单测）：入站图片应真的落进本地库
+      const stickerRows = await pollDb(async () => {
+        const Database = (await import("better-sqlite3")).default;
+        const db = new Database(path.join(dataDir, "memory.sqlite"));
+        try {
+          return db.prepare("SELECT id, bytes, mime FROM sticker_library").all() as Array<{
+            id: number;
+            bytes: number;
+            mime: string;
+          }>;
+        } finally {
+          db.close();
+        }
+      }, (rows) => rows.length > 0, "表情包没有被采集入库");
+      expect(stickerRows[0]!.mime).toContain("image/png");
+      expect(stickerRows[0]!.bytes).toBeGreaterThan(0);
+
+      // 4c) 点名要表情包 → 从**收集来的库**里发（v0.8.19 修复：原来只有 22% 概率）
+      {
+        const Database = (await import("better-sqlite3")).default;
+        const db = new Database(path.join(dataDir, "memory.sqlite"));
+        const row = db.prepare("SELECT file FROM sticker_library LIMIT 1").get() as
+          | { file: string }
+          | undefined;
+        db.close();
+        expect(row?.file, "采集库里应有刚存的图").toBeTruthy();
+        const collectedBase64 = fs.readFileSync(row!.file).toString("base64");
+
+        const beforeSticker = actions.length;
+        randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.99);
+        client.send(privateEvent("发个表情包", 40));
+        const stickerAction = await client.waitFor(
+          (action, index) =>
+            index >= beforeSticker &&
+            action.action === "send_private_msg" &&
+            messageText(action).includes("[CQ:image,file=base64://"),
+        );
+        randomSpy.mockRestore();
+        randomSpy = null;
+        // 发出去的必须是「收集来的那张」，而不是内置贴纸
+        expect(messageText(stickerAction)).toContain(collectedBase64.slice(0, 64));
+      }
 
       // 5) 群聊 @ → 群回复
       client.send(groupEvent("在吗", 5));

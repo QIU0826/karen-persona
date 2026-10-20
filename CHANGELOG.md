@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.8.19 — 2026-10-21
+
+**表情包链路真实端到端验证**（v0.6 最后一个未验证的功能），顺手修掉一个
+「用户明说要，却大概率给不了」的 bug。
+
+### Verified（桥接 E2E 真跑，无模型成本）
+
+把 `KAREN_STICKER_COLLECT=on` + `KAREN_STICKER_USE=on` 接进既有的 mock-OneBot 桥接 E2E：
+
+1. **入站采集**：用户发图片 → bridge 真的下载 → 落 `sticker_library`
+   （断言 mime=image/png、字节数 >0）；
+2. **出站使用**：用户点名「发个表情包」→ 发出去的必须是**收集来的那张**
+   （断言出站 `[CQ:image,file=base64://…]` 的 base64 与库中文件一致），而不是内置贴纸。
+
+两条都在真实 bridge 子进程 + fake NapCat 下跑通，此前只有纯函数单测。
+
+### Fixed
+
+- **点名要表情包时，收集库那条路只有 22% 概率**（真 bug）：
+  内置贴纸路径「点名必发」（`requested` 跳过概率），但 `KAREN_STICKER_USE=on` 时
+  优先走收集库的那段仍写死用普通概率（0.22）——用户明说要一个表情包，
+  **78% 概率给不了库里的图**，只能回退内置贴纸，显得没在听。
+  修法：抽成纯函数 `collectedStickerProbability({requested, inboundSticker, …})`——
+  点名 → 1；收到表情 → 0.55；平时 → 0.22。补 3 条单测。
+
+### Added
+
+- E2E 新增 `pollDb` 辅助（轮询 DB 等 fire-and-forget 写入）；
+- E2E 用 `vi.spyOn(Math, "random")` 固定随机数，让"必定发收集图"可确定性断言。
+
+### Testing
+
+- 103 个测试文件 / 1249 个用例通过（桥接 E2E 5 条含新断言）；`tsc --noEmit` 0 错误；`npm run lint` 0 违规。
+
 ## v0.8.18 — 2026-10-21
 
 **周汇总真实链路冒烟**（`npm run rollup:smoke`，零成本）：补完「日 → 周」记忆链，

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getStickerCatalog, pickSticker, toStickerCqCode } from "./stickers.js";
+import { collectedStickerProbability, getStickerCatalog, pickSticker, toStickerCqCode } from "./stickers.js";
 import { isAllowedCqCode } from "../bridge/onebot.js";
 
 describe("pickSticker", () => {
@@ -50,5 +50,23 @@ describe("toStickerCqCode", () => {
     const again = pickSticker({ ...base, recentIds: [first!.id] });
     expect(again).not.toBeNull();
     expect(again!.id).not.toBe(first!.id);
+  });
+});
+
+describe("collectedStickerProbability（v0.8.19 真实桥接 E2E 驱动）", () => {
+  const base = { requested: false, inboundSticker: false, normalProbability: 0.22, replyProbability: 0.55 };
+
+  it("点名要表情包 → 必定从收集库发（概率 1）", () => {
+    expect(collectedStickerProbability({ ...base, requested: true })).toBe(1);
+    // 即使同时是"收到表情"，点名也优先
+    expect(collectedStickerProbability({ ...base, requested: true, inboundSticker: true })).toBe(1);
+  });
+
+  it("收到对方表情 → 用更高的回应概率", () => {
+    expect(collectedStickerProbability({ ...base, inboundSticker: true })).toBe(0.55);
+  });
+
+  it("平时顺手发 → 用普通概率", () => {
+    expect(collectedStickerProbability(base)).toBe(0.22);
   });
 });

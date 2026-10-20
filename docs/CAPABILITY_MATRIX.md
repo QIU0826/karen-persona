@@ -3,7 +3,7 @@
 > 目的：一眼看清**哪些是真做了、做到什么程度**。每一行都必须能在代码里找到对应，
 > 数字必须能复现（跑法写在「怎么复现」列）。不确定的地方写清楚弱项，不写成优点。
 >
-> 最后更新：2026-10-21（v0.8.18）。配套文档：[README](../README.md)（对外）、
+> 最后更新：2026-10-21（v0.8.19）。配套文档：[README](../README.md)（对外）、
 > [CLAUDE.md](../CLAUDE.md)（开发总控）、[PRODUCT_AUDIT.md](PRODUCT_AUDIT.md)（审计与路线图）。
 
 图例：✅ 可用 ｜ 🚧 有明确限制 ｜ ⛔ 受阻（代码就绪但依赖未到位）
@@ -36,7 +36,7 @@
 |---|---|---|---|---|
 | 打字节奏模拟器 | `src/bridge/pacing.ts` | ✅ | 人设×情绪×深夜×忙碌决定 readDelay/每字耗时/条间间隔/犹豫；默认人设白天 ≈285ms/字、深夜 ≈385ms/字 | "忙碌度"目前恒为 0（还没接她的日程） |
 | 消息意图族 | `src/impulse/message-intent.ts` | ✅ | 四类：打错字 55% / 说重了 30% / 重发 15% / 犹豫（夜间/低落更易）；共享撤回护栏（仅私聊、危机禁用、0.5–5s） | 群聊不演；依赖 NapCat 返回 message_id |
-| 表情包持续收集 | `src/data/sticker-library.ts` | 🚧 | 入站图片自动入库：sha256 去重、库容 500、单文件≤2MB、可一键清空 | **采集默认关**（`KAREN_STICKER_COLLECT=on`）；出站使用默认关（`KAREN_STICKER_USE=on`） |
+| 表情包持续收集 | `src/data/sticker-library.ts`、`src/bridge/qq.ts` | 🚧 | 入站图片自动入库：sha256 去重、库容 500、单文件≤2MB、可一键清空 | **采集默认关**（`KAREN_STICKER_COLLECT=on`）；出站使用默认关（`KAREN_STICKER_USE=on`） |
 | 内置贴纸 | `src/impulse/stickers.ts` | ✅ | 11 个 Twemoji（CC-BY 4.0），22% 概率顺手发、收到表情时 55%、5 分钟冷却 | 数量少，靠上一行补 |
 | 语音消息（TTS） | `src/ai/tts.ts`、`src/impulse/voice.ts` | ✅/🚧 | macOS `say`→WAV→SILK→QQ 语音条；实测 2.4s 语音 ≈9.3KB | **音色仍偏 AI**（用户明确反馈）；非 macOS 降级文字；群聊未接 |
 | 相识不编造 | `src/persona/meeting-guard.ts` | ✅ | 无依据时确定性删掉编造场景（吧台/下雨/借伞），整条都在编就换含糊回应 | 有依据时仍可能细节漂移 |
@@ -83,7 +83,7 @@
 
 | 项 | 状态 | 实测 |
 |---|---|---|
-| 单元/集成测试 | ✅ | **103 文件 / 1246 用例**（`npm test`） |
+| 单元/集成测试 | ✅ | **103 文件 / 1249 用例**（`npm test`） |
 | 类型检查 + lint | ✅ | `tsc --noEmit` 0 错误；`npm run lint`（未使用代码）0 违规 |
 | 覆盖率 | 🚧 | 行 59.21%（`npm run test:coverage`，CI 阈值守护） |
 | 离线评测守门 | ✅ | `npm run eval:offline`：facts≥95% / recall@8≥90% / 合并≥95% / anti-forget PASS / 锚点≥30 条；5 项全达标；CI 已接入 |

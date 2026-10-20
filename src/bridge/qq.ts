@@ -84,7 +84,7 @@ import {
 } from "../persona/age-gate.js";
 import { ackDisclosure, confirmAge, getConsent, hasAgeConfirmation } from "../data/consent.js";
 import { ownerForQq } from "../data/owner.js";
-import { pickSticker, toStickerCqCode } from "../impulse/stickers.js";
+import { collectedStickerProbability, pickSticker, toStickerCqCode } from "../impulse/stickers.js";
 import { buildGroupReplyPlan } from "./group-reply.js";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -1404,7 +1404,15 @@ function maybeSendSticker(
       emotion: emotionTag,
       excludeIds: userRecentCollectedStickers.get(userIdForSticker(target)) ?? [],
     });
-    if (collected && Math.random() <= (inboundSticker ? STICKER_REPLY_TO_STICKER_PROBABILITY : STICKER_PROBABILITY)) {
+    // v0.8.19：点名要表情包时必定从收集库出（原来这里只有 22% 概率，
+    // 与内置贴纸路径"点名必发"不一致；用户明说要还经常给内置的，显得没在听）。
+    const collectedProbability = collectedStickerProbability({
+      requested: opts.requested === true,
+      inboundSticker,
+      normalProbability: STICKER_PROBABILITY,
+      replyProbability: STICKER_REPLY_TO_STICKER_PROBABILITY,
+    });
+    if (collected && Math.random() <= collectedProbability) {
       try {
         const base64 = fs.readFileSync(collected.file).toString("base64");
         const cqCollected = `[CQ:image,file=base64://${base64}]`;

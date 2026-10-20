@@ -104,3 +104,22 @@ export function toStickerCqCode(sticker: StickerDef): string | null {
     return null;
   }
 }
+
+/**
+ * 从「收集来的表情包库」发图时的概率（v0.8.19）。
+ *
+ * 真实桥接 E2E 发现的 bug：点名要表情包时，内置贴纸路径会跳过概率必发，
+ * 但收集库路径仍然只有 22% 概率——用户明确要一个表情包，却 78% 概率给不了库里的图。
+ * 抽成纯函数便于单测。
+ */
+export function collectedStickerProbability(input: {
+  requested: boolean;
+  inboundSticker: boolean;
+  /** 平时顺手发的概率（默认 0.22） */
+  normalProbability: number;
+  /** 收到表情时回一个的概率（默认 0.55） */
+  replyProbability: number;
+}): number {
+  if (input.requested) return 1;
+  return input.inboundSticker ? input.replyProbability : input.normalProbability;
+}
