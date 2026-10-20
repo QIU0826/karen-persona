@@ -25,7 +25,10 @@
     "persona:pack:validate": "tsx src/persona/pack-cli.ts validate",
     "persona:pack:install": "tsx src/persona/pack-cli.ts install",
     "persona:pack:list": "tsx src/persona/pack-cli.ts list",
-    "qq:watch": "tsx scripts/qq-longrun-watch.ts"
+    "qq:watch": "tsx scripts/qq-longrun-watch.ts",
+    "models:status": "tsx scripts/models.ts",
+    "models:list": "tsx scripts/models.ts --list",
+    "models:purge": "tsx scripts/models.ts --purge"
   },
   "dependencies": {
     "axios": "^1.7.0",
