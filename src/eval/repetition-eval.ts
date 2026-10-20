@@ -67,6 +67,8 @@ export interface RepetitionMetrics {
   turns: number;
   /** 相邻回复的复读对数（detectRepetition 判定 duplicate） */
   duplicatePairs: number;
+  /** 长程复读对（与更早的回复比，10 轮窗口；不含单纯开头词重复） */
+  longRangeDuplicatePairs: number;
   /** 相邻回复开头词（前 2 字）重复的次数 */
   openerRepeats: number;
   /** 相邻回复平均相似度 */
@@ -108,12 +110,22 @@ export function summarizeRepetition(arm: string, replies: string[]): RepetitionM
     }
   }
 
+  // v0.8.10：长程复读对——和"更早的回复"比，而不只是相邻两条。
+  // 真实评审抓到过隔 8 轮的原样复读，旧指标（只看相邻）永远是 0。
+  let longRangeDuplicatePairs = 0;
+  for (let i = 1; i < replies.length; i++) {
+    const earlier = replies.slice(Math.max(0, i - 10), i);
+    const result = detectRepetition(replies[i], earlier);
+    if (result.duplicate && result.kind !== "opener") longRangeDuplicatePairs++;
+  }
+
   const adjacentCount = Math.max(0, replies.length - 1);
   const joined = replies.join("\n");
   return {
     arm,
     turns: replies.length,
     duplicatePairs,
+    longRangeDuplicatePairs,
     openerRepeats,
     avgScore: adjacentCount > 0 ? Number((total / adjacentCount).toFixed(3)) : 0,
     maxScore: Number(maxScore.toFixed(3)),

@@ -225,6 +225,11 @@ const PHOTOS: PhotoDef[] = [
   },
 ];
 
+/** 图库里是否有匹配这些场景标签的照片（用于发图前的相关性判定）。 */
+export function hasPhotosForTags(tags: string[] | undefined): boolean {
+  return photosByTags(tags ?? []).length > 0;
+}
+
 export function getPhotoCatalog(): readonly PhotoDef[] {
   return PHOTOS;
 }

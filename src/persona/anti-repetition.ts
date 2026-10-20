@@ -31,6 +31,12 @@ const INNER_WS = /\s+/g;
 
 /** 默认检查她最近几条消息（通常一轮会发 1-3 条，3 条 ≈ 最近 1-2 轮）。 */
 export const DEFAULT_RECENT_REPLY_COUNT = 3;
+/**
+ * 长程复读检测窗口（v0.8.10）：21 轮回归里 LLM 评审抓到"第 9 轮和第 19 轮逐字重复"，
+ * 而生产只跟最近 3 条比 → 隔 8 轮的复读永远检测不到。这里给检测层放宽到 10 条；
+ * 开头词统计仍只用最近 3 条（否则语气词会被误判成复读）。
+ */
+export const DEFAULT_LONG_RANGE_REPLY_COUNT = 10;
 
 /** 判定"复读"的综合相似度阈值：0.6 意味着大部分字面重合，正常换句话说不该到。 */
 export const DEFAULT_DUPLICATE_THRESHOLD = 0.6;

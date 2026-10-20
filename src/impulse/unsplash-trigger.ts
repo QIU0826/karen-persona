@@ -13,7 +13,8 @@ import { recordAuxUsage } from "../ai/aux-usage.js";
 import { previewText } from "../obs/safe-text.js";
 import { fetchUnsplashPhoto } from "../ai/image-gen.js";
 import { describeEmotion } from "../persona/emotion.js";
-import { pickPhotoShare, photoFilePath } from "./photo-library.js";
+import { hasPhotosForTags, pickPhotoShare, photoFilePath } from "./photo-library.js";
+import { assessPhotoRelevance, buildSceneCaption } from "./media-relevance.js";
 import { createLogger } from "../obs/logger.js";
 import { buildScenePrompt, generateImage, isImageGenEnabled } from "../media/comfyui.js";
 import { saveGeneratedImage } from "../media/generated-store.js";
@@ -201,15 +202,19 @@ function shareLocalPhoto(
     log.warn("photo.local_missing", { photo_id: choice.photo.id });
     return null;
   }
+  // v0.9：场景命中时用贴题配文（他说晚霞 → 「天这样了」），否则用照片自带配文
+  const sceneCaption = buildSceneCaption(preferredTags);
+  const caption = sceneCaption ?? choice.caption;
   recentLocalPhotoIds.set(personaKey, [...recentIds, choice.photo.id].slice(-3));
-  recentPhotoCaptions.set(personaKey, [...recentCaptions, choice.caption].slice(-5));
+  recentPhotoCaptions.set(personaKey, [...recentCaptions, caption].slice(-5));
   log.info("photo.local", {
     photo_id: choice.photo.id,
     era: choice.era,
-    caption_chars: choice.caption.length,
+    caption_chars: caption.length,
     scene_matched: Boolean(preferredTags && preferredTags.length > 0),
+    caption_source: sceneCaption ? "scene" : "photo",
   });
-  return { imageFile, caption: choice.caption, source: "local" };
+  return { imageFile, caption, source: "local" };
 }
 
 /**
@@ -227,6 +232,10 @@ export interface PhotoShareOptions {
   requested?: boolean;
   /** 用户提到的场景（晚霞/雪/咖啡/猫…），用于本地图库内容匹配 */
   preferredTags?: string[];
+  /** 她刚说的那句话（用于判断"是否在分享生活"，决定该不该顺手发图） */
+  lastReply?: string;
+  /** 用户这轮原话（判断是否纯问句/抽象话题） */
+  userText?: string;
   /** 对方在讲糟心事：这一轮不顺手发生活照（发呆/共情优先） */
   skipWhenTroubleTalk?: boolean;
 }
@@ -259,6 +268,23 @@ export async function trySharePhoto(
   const probability =
     state.config.photo_share_probability ?? Math.min(0.5, 0.08 + moodBonus + closenessBonus);
   if (!options.requested && Math.random() > probability) return null;
+
+  // v0.9 相关性门控：只在「点名 / 场景命中 / 她刚分享生活」时发图，
+  // 其余情况宁可不发（回归评审：随机插入的照片被认为"跟对话无关"）
+  const sceneTags = options.preferredTags ?? [];
+  // 图库里真有这类图时，才把场景算作"命中"（否则场景词只是他说的话，发不出对应的图）
+  const sceneMatched = sceneTags.length > 0 && hasPhotosForTags(sceneTags);
+  const relevance = assessPhotoRelevance({
+    userText: options.userText ?? "",
+    lastReply: options.lastReply ?? lastReply,
+    sceneTags: sceneMatched ? sceneTags : [],
+    photoTags: sceneMatched ? sceneTags : [],
+    requested: options.requested === true,
+  });
+  if (!relevance.share && !options.requested) {
+    log.info("photo.skipped_no_hook", { reason: relevance.reason });
+    return null;
+  }
 
   // 提前锁定冷却（防止并发重复触发）
   cooldownMap.set(personaId, Date.now());

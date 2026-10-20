@@ -467,3 +467,29 @@ describe("反编造往事", () => {
     expect(prompt).toContain("别补场景");
   });
 });
+
+describe("重复提问规则（v0.8.10 回归驱动）", () => {
+  it("prompt 要求：同一问题再问一遍时不要复述上次的答案", async () => {
+    const persona = await loadPersona("xiaoya");
+    const prompt = buildPrompt({
+      persona,
+      config: { location: "上海" } as unknown as AppConfig,
+      rules: persona.chainRules ?? [],
+      scripts: persona.behavioralScripts ?? [],
+      state: {
+        exposure: 0.3,
+        guilt: 0,
+        emotion: 0,
+        hour: 14,
+        mode: "neutral",
+        closeness: 3,
+      },
+      impulseIntensity: 0.2,
+      corrections: [],
+      tags: [],
+      userText: "我猫叫啥来着？",
+    });
+    expect(prompt).toContain("同一个问题他再问一遍");
+    expect(prompt).toContain("不要复述你上次的答案");
+  });
+});

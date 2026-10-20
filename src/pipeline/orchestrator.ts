@@ -95,6 +95,7 @@ import {
 } from "../persona/prompt-builder.js";
 import {
   buildAvoidRepeatNote,
+  DEFAULT_LONG_RANGE_REPLY_COUNT,
   detectRepetition,
   extractRecentReplies,
 } from "../persona/anti-repetition.js";
@@ -1519,7 +1520,7 @@ export async function processMessage(
   const t1ArcContext = getT1ArcContext(state.storagePersona);
   if (t1ArcContext) logs.push("[T1] 注入最近状态弧");
   // 跨轮反重复：最近几条她自己的话（prompt 注入与回复后检测共用同一份）
-  const recentReplies = extractRecentReplies(session.messages);
+  const recentReplies = extractRecentReplies(session.messages, DEFAULT_LONG_RANGE_REPLY_COUNT);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
   // 用户点名要照片/表情包/语音：让她的语气和程序实际会发的动作对齐
   const mediaRequest = detectMediaRequest(userInput);
@@ -1694,6 +1695,9 @@ export async function processMessage(
           // 用户点名要照片时，尽量按他说的场景挑图（要晚霞就别发山/花）
           // 点名叫他看什么就发什么；普通聊天里提到晚霞/雪/咖啡/猫等强场景词，也顺手匹配
           preferredTags: detectPhotoSceneTags(userInput),
+          // v0.9：相关性判定需要知道"她刚说了什么 / 他在聊什么"
+          lastReply: rawReply,
+          userText: userInput,
         });
     if (photo) {
       imageUrl = photo.imageUrl;
@@ -2000,7 +2004,7 @@ export async function* processMessageStream(
   const t1ArcContext = getT1ArcContext(state.storagePersona);
   if (t1ArcContext) console.log("  [T1] 注入最近状态弧");
   // 跨轮反重复（与非流式对齐）
-  const recentReplies = extractRecentReplies(session.messages);
+  const recentReplies = extractRecentReplies(session.messages, DEFAULT_LONG_RANGE_REPLY_COUNT);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
   const mediaRequest = detectMediaRequest(userInput);
   // 相识守卫：用户问「怎么认识」且无依据 → 逐条过滤编造场景
@@ -2154,6 +2158,8 @@ export async function* processMessageStream(
           requested: mediaRequest.photo,
           skipWhenTroubleTalk: !mediaRequest.photo && isTroubleTalk(userInput),
           preferredTags: detectPhotoSceneTags(userInput),
+          lastReply: fullReply,
+          userText: userInput,
         }).catch(() => null),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
       ]);
@@ -2674,7 +2680,7 @@ export async function processProactive(
   ].join("\n");
 
   // 跨轮反重复：主动消息同样别和上一轮开口一样
-  const recentReplies = extractRecentReplies(session.messages);
+  const recentReplies = extractRecentReplies(session.messages, DEFAULT_LONG_RANGE_REPLY_COUNT);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
   // T1 快照 → 最近状态弧（主动消息也从最近的关系走势出发）
   const t1ArcContext = getT1ArcContext(state.storagePersona);

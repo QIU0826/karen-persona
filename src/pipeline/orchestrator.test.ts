@@ -165,12 +165,13 @@ describe("群聊发图开关（skipPhoto）", () => {
 
     const persona = await loadPersona("xiaoya");
     const state = await initConversation(persona, photoConfig());
-    const withPhoto = await processMessage(state, "今天天气不错出去走走", { bypassGate: true });
+    // v0.9：需要场景/生活信号才发图，这里用"晚霞"触发场景命中
+    const withPhoto = await processMessage(state, "外面晚霞特别好看，出去走了走", { bypassGate: true });
     expect(withPhoto.imageFile ?? withPhoto.imageUrl).toBeTruthy();
 
     const persona2 = await loadPersona("xiaoya");
     const state2 = await initConversation(persona2, photoConfig());
-    const noPhoto = await processMessage(state2, "今天天气不错出去走走", {
+    const noPhoto = await processMessage(state2, "外面晚霞特别好看，出去走了走", {
       bypassGate: true,
       skipPhoto: true,
     });

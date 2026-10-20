@@ -389,6 +389,7 @@ export interface LongrunMetrics {
     avgScore: number;
     maxScore: number;
     duplicatePairs: number;
+    longRangeDuplicatePairs: number;
     questionReplies: number;
     formulaicHits: number;
   };
@@ -1023,6 +1024,7 @@ export function computeMetrics(turns: LongrunTurn[]): LongrunMetrics {
       avgScore: repetition.avgScore,
       maxScore: repetition.maxScore,
       duplicatePairs: repetition.duplicatePairs,
+      longRangeDuplicatePairs: repetition.longRangeDuplicatePairs,
       questionReplies: repetition.questionReplies,
       formulaicHits: repetition.formulaicHits,
     },
@@ -1532,7 +1534,10 @@ export function renderReport(result: LongrunResult, existingReport?: string | nu
   lines.push("| 指标 | 数值 |");
   lines.push("|---|---|");
   lines.push(tableRow(["相邻回复相似度 平均/最高", `${m.repetition.avgScore} / ${m.repetition.maxScore}`]));
-  lines.push(tableRow(["复读对（bigram/开头/前缀）", m.repetition.duplicatePairs]));
+  lines.push(tableRow(["复读对（相邻两条）", m.repetition.duplicatePairs]));
+  lines.push(
+    tableRow(["**复读对（长程，10 轮窗口）**", m.repetition.longRangeDuplicatePairs]),
+  );
   lines.push(tableRow(["以问句收尾的回复", m.repetition.questionReplies]));
   lines.push(tableRow(["套话句式命中", m.repetition.formulaicHits]));
   lines.push(tableRow(["空回复", m.redlines.emptyReplies]));

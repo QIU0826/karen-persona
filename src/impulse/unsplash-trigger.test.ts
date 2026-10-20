@@ -87,7 +87,36 @@ describe("trySharePhoto 本地兜底", () => {
     const state = makeState({
       config: { photo_share_min_closeness: 3, photo_share_probability: 1, photo_share_cooldown_minutes: 10 },
     });
-    expect(await trySharePhoto(state as never, "第一句")).not.toBeNull();
-    expect(await trySharePhoto(state as never, "第二句")).toBeNull();
+    // v0.9：需要"生活信号"才发图（这里模拟她刚说自己在回家的路上）
+    expect(
+      await trySharePhoto(state as never, "我刚下班，路上买了点吃的"),
+    ).not.toBeNull();
+    expect(await trySharePhoto(state as never, "我刚到家")).toBeNull();
+  });
+});
+
+describe("v0.9 多媒体相关性：没有钩子就不发图", () => {
+  it("抽象话题 + 回复没有生活信号 → 不发（宁可少发）", async () => {
+    const state = makeState({
+      config: { photo_share_min_closeness: 0, photo_share_probability: 1, photo_share_cooldown_minutes: 0 },
+    });
+    const photo = await trySharePhoto(state as never, "你觉得人为什么要上班？", {
+      lastReply: "大概是没得选吧",
+      userText: "你觉得人为什么要上班？",
+    });
+    expect(photo).toBeNull();
+  });
+
+  it("场景命中（他说晚霞 + 图库有晚霞图）→ 发，且用场景配文", async () => {
+    const state = makeState({
+      config: { photo_share_min_closeness: 0, photo_share_probability: 1, photo_share_cooldown_minutes: 0 },
+    });
+    const photo = await trySharePhoto(state as never, "外面晚霞好漂亮", {
+      lastReply: "嗯？",
+      userText: "外面晚霞好漂亮",
+      preferredTags: ["sunset"],
+    });
+    expect(photo).not.toBeNull();
+    expect(["天这样了", "刚抬头看到的", "这会儿外面挺好看"]).toContain(photo!.caption);
   });
 });

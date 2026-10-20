@@ -206,3 +206,33 @@ describe("isWithinTurnDuplicate（当轮去重）", () => {
     expect(isWithinTurnDuplicate("被说啦", [])).toBe(false);
   });
 });
+
+describe("长程复读（v0.8.10 回归驱动）", () => {
+  it("隔 8 轮的逐字重复也能检出（生产窗口已放宽到 10 条）", () => {
+    const earlier = [
+      "嗯呐 我在呢",
+      "今天店里人手不够 忙死了",
+      "你先忙你的",
+      "我这边刚收拾完",
+      "笑死 那你也太惨了",
+      "外面雨还没停",
+      "我刚煮了面",
+      "喏 就这个",
+    ];
+    const repeated = "喏 就这个";
+    const result = detectRepetition(repeated, earlier);
+    expect(result.duplicate).toBe(true);
+    expect(result.kind).toBe("exact");
+  });
+
+  it("长程窗口不会把单纯句式重复误判成逐字复读", () => {
+    const earlier = [
+      "你今天怎么样呀我想知道",
+      "外面雨好像小了点吧",
+      "我这边刚收拾完东西",
+      "笑死 那你也太惨了哈哈",
+    ];
+    const result = detectRepetition("晚上吃点什么好呢", earlier);
+    expect(result.duplicate).toBe(false);
+  });
+});
