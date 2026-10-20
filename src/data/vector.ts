@@ -23,14 +23,18 @@
  * FTS5 建表失败 → ftsAvailable=false，混合检索退化为向量单路。均不阻塞启动。
  */
 import Database from "better-sqlite3";
+import { ensureMemoryV2Schema } from "./memory-v2.js";
 import * as sqliteVec from "sqlite-vec";
 import { dbPath, ensureDataDir } from "./paths.js";
 import { EMBEDDING_DIM, NGRAM_EMBEDDING_MODEL } from "./embedding.js";
 
 let db: Database.Database | null = null;
 
-/** 当前 schema 版本（PRAGMA user_version）。修改表结构时 +1 并补迁移。 */
-const SCHEMA_VERSION = 2;
+/**
+ * 当前 schema 版本（PRAGMA user_version）。修改表结构时 +1 并补迁移。
+ * v4（v0.5）：锚点/日记忆/周汇总/调度记录 + user_facts/t2_episodes 扩展列（见 memory-v2.ts）。
+ */
+export const SCHEMA_VERSION = 4;
 
 /** sqlite-vec 扩展是否可用（不可用时 KNN 回退 JS 余弦）。 */
 let vecAvailable = false;
@@ -192,6 +196,10 @@ function migrate(database: Database.Database): void {
 
   ensureFtsTable(database);
   ensureVecTable(database);
+
+  // ── v4（v0.5）：锚点 / 日记忆 / 周汇总 / 调度记录 + 扩展列 ──
+  // 幂等：表用 IF NOT EXISTS、列用 table_info 判重；老库缺表也不会让启动失败。
+  ensureMemoryV2Schema(database);
 
   const current = Number(database.pragma("user_version", { simple: true })) || 0;
   if (current !== SCHEMA_VERSION) {

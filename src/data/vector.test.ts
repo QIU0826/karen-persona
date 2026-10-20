@@ -43,7 +43,7 @@ describe("vector 数据层（全新目录）", () => {
     expect(cols).toContain("embedding_model");
     expect(cols).toContain("semantic_embedding");
     expect(cols).toContain("semantic_model");
-    expect(Number(db.pragma("user_version", { simple: true }))).toBe(2);
+    expect(Number(db.pragma("user_version", { simple: true }))).toBe(m.SCHEMA_VERSION);
     m.closeVectorDb();
   });
 

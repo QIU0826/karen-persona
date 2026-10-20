@@ -135,7 +135,7 @@ describe("schema v2 迁移", () => {
     expect(m.searchEpisodesByFts("咖啡").length).toBe(1);
     expect(m.searchEpisodesByFts("下雨").length).toBe(1);
 
-    expect(Number(db.pragma("user_version", { simple: true }))).toBe(2);
+    expect(Number(db.pragma("user_version", { simple: true }))).toBe(m.SCHEMA_VERSION);
     expect(m.getAllEpisodes()).toHaveLength(2);
 
     // 幂等：关掉重开不会重复建表 / 丢数据 / 破坏索引
