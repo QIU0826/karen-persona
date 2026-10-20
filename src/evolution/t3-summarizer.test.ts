@@ -8,11 +8,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  buildT3SummaryPrompts,
   COMPRESSION_BATCH_SIZE,
   COMPRESSION_MAX_AGE_MS,
   COMPRESSION_MIN_COUNT,
   countUncompressedEpisodes,
   shouldCompressT3,
+  type RawEpisode,
 } from "./t3-summarizer.js";
 
 let dbDir: string;
@@ -99,5 +101,51 @@ describe("countUncompressedEpisodes（DB）", () => {
     ).run();
 
     expect(countUncompressedEpisodes()).toBe(2);
+  });
+});
+
+describe("buildT3SummaryPrompts（摘要质量规则）", () => {
+  const episodes: RawEpisode[] = [
+    {
+      id: 1,
+      content: "用户说他在做一个咖啡品牌包装项目，卡在排版。",
+      source: "chat",
+      emotional_weight: 0.3,
+      created_at: "2026-10-18 10:00:00",
+    },
+    {
+      id: 2,
+      content: "用户说下个月想去云南，但还没定路线。",
+      source: "chat",
+      emotional_weight: 0.2,
+      created_at: "2026-10-19 09:00:00",
+    },
+  ];
+
+  it("prompt 包含「具体事实/未完成话题/不编造」规则", () => {
+    const { system, user } = buildT3SummaryPrompts(episodes, "小雅");
+    expect(system).toContain("保留具体事实");
+    expect(system).toContain("保留未完成的话题");
+    expect(system).toContain("不要编造");
+    expect(system).toContain("第一人称");
+    expect(system).toContain("3-5 句");
+    expect(user).toContain("咖啡品牌包装项目");
+    expect(user).toContain("云南");
+  });
+
+  it("日期范围取首尾片段；超过 60 条片段只喂前 60 条", () => {
+    const many: RawEpisode[] = Array.from({ length: 70 }, (_, index) => ({
+      id: index + 1,
+      content: `片段 ${index}`,
+      source: "chat",
+      emotional_weight: 0,
+      created_at: `2026-09-${String((index % 28) + 1).padStart(2, "0")} 10:00:00`,
+    }));
+    const { user, startDate, endDate } = buildT3SummaryPrompts(many, "小雅");
+    expect(startDate).toBe("2026-09-01");
+    expect(endDate).toBe("2026-09-14");
+    // 前 60 条进入 prompt，第 61+ 条不出现
+    expect(user).toContain("片段 59");
+    expect(user).not.toContain("片段 60");
   });
 });

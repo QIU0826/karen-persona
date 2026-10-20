@@ -122,3 +122,50 @@ describe("user_facts 变更历史（时间维度）", () => {
     expect(facts.listUserFacts("qq:1").find((f) => f.key === "city")?.value).toBe("城市24");
   });
 });
+
+describe("事实超过 20 条的上限压测", () => {
+  it("profile 事实过多时不会挤掉工作/宠物/计划；注入行数 ≤20", async () => {
+    const facts = await import("./user-facts.js");
+    const now = Date.now();
+    const items: Array<{ key: string; value: string; category: "profile" }> = [];
+    // 25 条 profile（模拟用户翻来覆去说自己的基本信息）
+    for (let i = 0; i < 25; i++) {
+      items.push({ key: `profile_${i}`, value: `基本信息${i}`, category: "profile" });
+    }
+    facts.upsertUserFacts("stress:local", items);
+    facts.upsertUserFacts("stress:local", [
+      { key: "job", value: "产品设计师", category: "work" },
+      { key: "pet", value: "橘猫团子", category: "pet" },
+      { key: "plan", value: "下个月去云南", category: "plan" },
+      { key: "pref", value: "喜欢美式咖啡", category: "preference" },
+    ]);
+
+    const all = facts.listUserFacts("stress:local");
+    expect(all.length).toBe(29);
+
+    const selected = facts.selectFactsForPrompt(all, 20);
+    expect(selected).toHaveLength(20);
+    // 核心分类保留；剩余名额按时间回填，profile 最多占满剩余（不会把核心分类挤掉）
+    expect(selected.filter((f) => f.category === "profile").length).toBeLessThan(20);
+    expect(selected.some((f) => f.key === "job")).toBe(true);
+    expect(selected.some((f) => f.key === "pet")).toBe(true);
+    expect(selected.some((f) => f.key === "plan")).toBe(true);
+
+    const text = facts.getUserFactsContext("stress:local");
+    const lineCount = text.split("\n").filter((line) => line.startsWith("- ")).length;
+    expect(lineCount).toBe(20);
+    expect(text).toContain("产品设计师");
+    expect(text).toContain("团子");
+    expect(text).toContain("云南");
+  });
+
+  it("事实少于上限时全部注入（行为与旧版一致）", async () => {
+    const facts = await import("./user-facts.js");
+    facts.upsertUserFacts("small:local", [
+      { key: "name", value: "林哲", category: "profile" },
+      { key: "job", value: "产品设计师", category: "work" },
+    ]);
+    const selected = facts.selectFactsForPrompt(facts.listUserFacts("small:local"), 20);
+    expect(selected).toHaveLength(2);
+  });
+});

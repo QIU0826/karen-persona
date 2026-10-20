@@ -76,12 +76,19 @@ function getLastSummaryAtMs(pid: string): number | null {
 
 // ── 压缩逻辑 ──────────────────────────────────
 
-interface RawEpisode {
+export interface RawEpisode {
   id: number;
   content: string;
   source: string;
   emotional_weight: number;
   created_at: string;
+}
+
+export interface T3SummaryPrompts {
+  system: string;
+  user: string;
+  startDate: string;
+  endDate: string;
 }
 
 /**
@@ -193,6 +200,49 @@ async function runT3Compression(pid: string, uncompressedCount: number): Promise
 
 // ── LLM 摘要生成 ──────────────────────────────
 
+/**
+ * 构造 T3 摘要 prompt（纯函数，便于单测）。
+ *
+ * 规则按 docs/MEMORY_AI_TONE_AUDIT.md §3 的质量要求加固：
+ * - 保留具体事实（人名/项目/地点/数字/计划），不能泛化成「聊了很多」；
+ * - 保留没聊完的话题（待续/还没决定/下次再说）；
+ * - 禁止编造片段里没有的具体事件，不确定就模糊表达；
+ * - 第一人称、3-5 句、按时间顺序，但不要逐条罗列。
+ */
+export function buildT3SummaryPrompts(episodes: RawEpisode[], personaId: string): T3SummaryPrompts {
+  const lines = episodes.map((e) => {
+    const date = e.created_at?.slice(0, 10) ?? "未知日期";
+    const tag = e.source === "chat" ? "对话" : e.source === "causal_chain" ? "事件" : "记录";
+    return `[${date} · ${tag} · 情绪 ${e.emotional_weight.toFixed(1)}] ${e.content.slice(0, 120)}`;
+  });
+  const startDate = episodes[0]?.created_at?.slice(0, 10) ?? "?";
+  const endDate = episodes[episodes.length - 1]?.created_at?.slice(0, 10) ?? "?";
+
+  const system = [
+    `你是长期的记忆整理系统。下面是她（${personaId}）过去一段时间的生活片段。`,
+    `你的任务是把这些碎片压缩成 3-5 句的叙事摘要，就像人在多年后回忆一段时光。`,
+    ``,
+    `规则：`,
+    `- 不要逐条复述，要提炼出这段时间的主题和情感走向`,
+    `- 用第一人称（"我那段时间..."、"我记得..."）`,
+    `- **保留具体事实**：人名、地点、项目、宠物、数字、计划要保留原意，不要泛化成"聊了很多"`,
+    `- **保留未完成的话题**：还没决定、待续、下次再说的事要留着，那是以后还能接上的线`,
+    `- **不要编造**片段里没有的具体事件/对话；不确定的地方就用"好像""记不太清"这种模糊表达`,
+    `- 关注情绪变化和重要事件，忽略日常寒暄`,
+    `- 3-5 句话即可，不要写长文`,
+  ].join("\n");
+
+  const user = [
+    `以下是 ${episodes.length} 条片段，跨越 ${startDate} 到 ${endDate}：`,
+    "",
+    ...lines.slice(0, 60), // 最多 60 条，避免 token 爆炸
+    "",
+    "压缩成 3-5 句叙事摘要：",
+  ].join("\n");
+
+  return { system, user, startDate, endDate };
+}
+
 async function generateT3Summary(episodes: RawEpisode[], personaId: string): Promise<string | null> {
   const modelConfig = getChatModel();
   const client = new OpenAI({
@@ -200,31 +250,7 @@ async function generateT3Summary(episodes: RawEpisode[], personaId: string): Pro
     baseURL: modelConfig.baseUrl,
   });
 
-  // 准备输入：按时间排序的片段列表
-  const lines = episodes.map((e) => {
-    const date = e.created_at?.slice(0, 10) ?? "未知日期";
-    const tag = e.source === "chat" ? "对话" : e.source === "causal_chain" ? "事件" : "记录";
-    return `[${date} · ${tag} · 情绪 ${e.emotional_weight.toFixed(1)}] ${e.content.slice(0, 120)}`;
-  });
-
-  const systemPrompt = [
-    `你是长期的记忆整理系统。下面是她（${personaId}）过去一段时间的生活片段。`,
-    `你的任务是把这些碎片压缩成 3-5 句的叙事摘要，就像人在多年后回忆一段时光。`,
-    ``,
-    `规则：`,
-    `- 不要逐条复述，要提炼出这段时间的主题和情感走向`,
-    `- 用第一人称（"我那段时间..."、"我记得..."）`,
-    `- 关注情绪变化和重要事件，忽略日常寒暄`,
-    `- 3-5 句话即可，不要写长文`,
-  ].join("\n");
-
-  const userPrompt = [
-    `以下是 ${episodes.length} 条片段，跨越 ${lines[0]?.slice(1, 11) ?? "?"} 到 ${lines[lines.length - 1]?.slice(1, 11) ?? "?"}：`,
-    "",
-    ...lines.slice(0, 60), // 最多 60 条，避免 token 爆炸
-    "",
-    "压缩成 3-5 句叙事摘要：",
-  ].join("\n");
+  const { system: systemPrompt, user: userPrompt } = buildT3SummaryPrompts(episodes, personaId);
 
   try {
     const response = await client.chat.completions.create(withThinking({

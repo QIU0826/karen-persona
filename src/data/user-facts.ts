@@ -250,6 +250,82 @@ export function getRecentFactChanges(
   return latest;
 }
 
+/** 注入上限：事实超过这个数时按分类配额挑选，避免某类事实太多把别的挤掉。 */
+export const MAX_FACTS_IN_PROMPT = 20;
+
+/** 分类展示顺序（也是配额的选择顺序）。 */
+const FACT_CATEGORY_ORDER: FactCategory[] = [
+  "profile",
+  "work",
+  "pet",
+  "relationship",
+  "plan",
+  "preference",
+  "other",
+];
+
+/**
+ * 每个分类的保底展示名额（总和 20）。事实很少时名额会自动回填给其他分类，
+ * 所以小数据量下的行为和旧版"按分类排序取前 20"一致；大数据量时保证
+ * 工作/宠物/计划等不会因为 profile 事实太多而完全消失。
+ */
+const FACT_CATEGORY_QUOTA: Record<FactCategory, number> = {
+  profile: 4,
+  work: 3,
+  pet: 3,
+  relationship: 3,
+  plan: 3,
+  preference: 2,
+  other: 2,
+};
+
+/**
+ * 挑选要注入 prompt 的事实（同 key 只留最新）。
+ *
+ * 旧实现直接按「分类顺序 + 更新时间」取前 20：如果用户说了 25 条 profile 类事实，
+ * 工作/宠物/计划会被全部挤掉。现在改为：
+ * 1. 核心分类先按配额拿（同类内按更新时间新→旧）；
+ * 2. 剩余名额按更新时间全局回填（小数据量时退化为原行为）；
+ * 3. 输出前按分类顺序 + 更新时间排序，保持 prompt 稳定。
+ */
+export function selectFactsForPrompt(
+  facts: UserFact[],
+  max: number = MAX_FACTS_IN_PROMPT,
+): UserFact[] {
+  const limit = Math.max(1, Math.floor(max));
+  // 同 key 只保留最新
+  const byKey = new Map<string, UserFact>();
+  for (const fact of facts) {
+    const previous = byKey.get(fact.key);
+    if (!previous || fact.updatedAt > previous.updatedAt) byKey.set(fact.key, fact);
+  }
+  const deduped = [...byKey.values()];
+
+  const sortedByTime = (items: UserFact[]): UserFact[] =>
+    [...items].sort((a, b) => b.updatedAt - a.updatedAt);
+
+  const picked = new Set<UserFact>();
+  for (const category of FACT_CATEGORY_ORDER) {
+    const bucket = sortedByTime(deduped.filter((fact) => fact.category === category));
+    for (const fact of bucket.slice(0, FACT_CATEGORY_QUOTA[category] ?? 2)) {
+      if (picked.size >= limit) break;
+      picked.add(fact);
+    }
+  }
+  if (picked.size < limit) {
+    for (const fact of sortedByTime(deduped)) {
+      if (picked.size >= limit) break;
+      picked.add(fact);
+    }
+  }
+
+  const categoryRank = (category: FactCategory): number => FACT_CATEGORY_ORDER.indexOf(category);
+  return [...picked].sort((a, b) => {
+    const rank = categoryRank(a.category) - categoryRank(b.category);
+    return rank === 0 ? b.updatedAt - a.updatedAt : rank;
+  });
+}
+
 /** 格式化为 prompt 注入块（≤20 条、≈300 tokens 内）。 */
 export function formatUserFacts(
   facts: UserFact[],
@@ -261,24 +337,12 @@ export function formatUserFacts(
     if (previousChanges instanceof Map) return previousChanges.get(key);
     return previousChanges[key];
   };
-  // 按分类聚合；同 key 只保留最新
-  const seen = new Set<string>();
-  const lines: string[] = [];
-  const ordered = [...facts].sort((a, b) => {
-    const order: FactCategory[] = ["profile", "work", "pet", "relationship", "plan", "preference", "other"];
-    const ai = order.indexOf(a.category);
-    const bi = order.indexOf(b.category);
-    return ai === bi ? b.updatedAt - a.updatedAt : ai - bi;
-  });
-  for (const f of ordered) {
-    if (seen.has(f.key)) continue;
-    seen.add(f.key);
-    const previous = previousLookup(f.key);
+  const lines = selectFactsForPrompt(facts).map((fact) => {
+    const previous = previousLookup(fact.key);
     const changeNote =
-      previous && previous !== f.value ? `（之前是：${previous.slice(0, 30)}）` : "";
-    lines.push(`- ${CATEGORY_LABELS[f.category]}：${f.value}${changeNote}`);
-    if (lines.length >= 20) break;
-  }
+      previous && previous !== fact.value ? `（之前是：${previous.slice(0, 30)}）` : "";
+    return `- ${CATEGORY_LABELS[fact.category]}：${fact.value}${changeNote}`;
+  });
   if (lines.length === 0) return "";
   return `\n## 你确定记得的关于对方的事\n${lines.join("\n")}\n（这些是你真的记得的事实，可以直接自然地用；不确定的别编。）\n`;
 }
