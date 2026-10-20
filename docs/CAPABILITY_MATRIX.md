@@ -3,7 +3,7 @@
 > 目的：一眼看清**哪些是真做了、做到什么程度**。每一行都必须能在代码里找到对应，
 > 数字必须能复现（跑法写在「怎么复现」列）。不确定的地方写清楚弱项，不写成优点。
 >
-> 最后更新：2026-10-21（v0.8.14）。配套文档：[README](../README.md)（对外）、
+> 最后更新：2026-10-21（v0.8.15）。配套文档：[README](../README.md)（对外）、
 > [CLAUDE.md](../CLAUDE.md)（开发总控）、[PRODUCT_AUDIT.md](PRODUCT_AUDIT.md)（审计与路线图）。
 
 图例：✅ 可用 ｜ 🚧 有明确限制 ｜ ⛔ 受阻（代码就绪但依赖未到位）
@@ -17,8 +17,8 @@
 | 本地真向量嵌入 | `src/data/local-embed.ts`、`services/embed/server.py` | ✅ | Qwen3-Embedding-0.6B（768 维）；批量 20 条 **137ms**（≈7ms/条）；127/127 条历史记忆重嵌入 | 需本机跑 `npm run embed:start`；服务不在时自动降级 n-gram |
 | 向量 + FTS5 混合检索 | `src/data/retriever.ts` | ✅ | 检索 **p95 <100ms**（原 LLM 重排路径 ~664ms） | 语义级"改写重复"仍未处理 |
 | 关掉每轮 LLM 重排 | `src/data/retrieval-boost.ts` | ✅ | 本地向量下默认关；开启后反而更慢且不更准（金标 16→17–18/20） | `KAREN_SEMANTIC_BOOST=on` 可强制开 |
-| 锚点记忆（长期不忘） | `src/data/memory-v2.ts` | ✅ | 关键事件永不衰减、双时间轴（否认只标记不删）；真实库当前 0 条（还在等"值得记"的事件） | 自动入库阈值 0.75 仍会漏无关键词事件 |
-| 锚点日度 LLM 复筛 | `src/schedule/anchor-refine.ts`、`anchor-llm.ts` | ✅ | 30 条金标四次跑：**精确率 100%**（从不误建）、召回 82–100%、kind 79–94% | 漏记偏"越界/冲突"类；kind 不稳定（不影响记不记得） |
+| 锚点记忆（长期不忘） | `src/data/memory-v2.ts`、`scripts/anchor-smoke.ts` | ✅ | 关键事件永不衰减、双时间轴（否认只标记不删）；真实库当前 0 条（还在等"值得记"的事件） | 自动入库阈值 0.75 仍会漏无关键词事件 |
+| 锚点日度 LLM 复筛 | `src/schedule/anchor-refine.ts`、`anchor-llm.ts` | ✅ | 30 条金标四次跑：**精确率 100%**（从不误建）、召回 82–100%、kind 79–94%；真实链路冒烟：该记的记住 / 闲聊不乱记 / 会注入（v0.8.15） | 漏记偏"越界/冲突"类；kind 不稳定（不影响记不记得） |
 | 日记忆 / 周汇总 | `src/schedule/jobs.ts` | ✅ | 真实数据一次生成 **1.5s**，抓到「橘猫/换工作/骂人推文截图」+2 条未完成话题 | 长周期摘要质量需按周抽检 |
 | 事实层 + 状态机 | `src/data/user-facts.ts` | ✅ | pending/confirmed/**disputed**；冲突时她顺口确认一句（2 天内只问一次）；`/fact` 可确认/否掉 | 用户不自述时事实层为空 → 靠下一行补 |
 | 认识初期主动提问 | `src/persona/get-to-know.ts` | ✅ | 亲密度 <5 时问工作/城市/宠物/名字/计划；间隔 ≥4 轮、问过不重复 | 只问 5 类主题，用户不答时不会追问 |
@@ -83,7 +83,7 @@
 
 | 项 | 状态 | 实测 |
 |---|---|---|
-| 单元/集成测试 | ✅ | **103 文件 / 1228 用例**（`npm test`） |
+| 单元/集成测试 | ✅ | **104 文件 / 1232 用例**（`npm test`） |
 | 类型检查 + lint | ✅ | `tsc --noEmit` 0 错误；`npm run lint`（未使用代码）0 违规 |
 | 覆盖率 | 🚧 | 行 59.21%（`npm run test:coverage`，CI 阈值守护） |
 | 离线评测守门 | ✅ | `npm run eval:offline`：facts≥95% / recall@8≥90% / 合并≥95% / anti-forget PASS / 锚点≥30 条；5 项全达标；CI 已接入 |

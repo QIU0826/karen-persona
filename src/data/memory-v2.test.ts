@@ -220,3 +220,26 @@ describe("日记忆与调度记录", () => {
     expect(wasJobRun(db, "daily_digest", "2026-10-21")).toBe(false);
   });
 });
+
+describe("scoreSalience：至亲离世必须能记住（v0.8.15 真实冒烟驱动）", () => {
+  const score = (content: string) => scoreSalience({ content, source: "chat", emotionVector: 0 }).score;
+
+  it("「我奶奶上个月走了」→ 达到 0.75 阈值（能成为锚点）", () => {
+    expect(score("我奶奶上个月走了。这件事我还没跟别人说过，晚上经常想她。")).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it("「去世/过世/离世/病逝」等明确表达都能记住", () => {
+    for (const word of ["去世", "过世", "离世", "病逝"]) {
+      expect(score(`我爷爷上个月${word}了`), word).toBeGreaterThanOrEqual(0.75);
+    }
+  });
+
+  it("含糊的「我先走了 / 没电了」不能被当成失去事件（避免什么都记）", () => {
+    expect(score("太晚了，我先走了")).toBeLessThan(0.75);
+    expect(score("手机没电了")).toBeLessThan(0.75);
+  });
+
+  it("承诺 + 共同经历仍然是强信号（原有行为不变）", () => {
+    expect(score("我们约好了下个月一起去看海")).toBeGreaterThanOrEqual(0.75);
+  });
+});

@@ -192,7 +192,11 @@ const SELF_DISCLOSURE = /(我妈|我爸|我家|我小时候|我老板|我同事|
 const SHARED_WORDS = /(第一次|一起|那天我们|我们俩|上次你|上次我)/;
 const SECRET_WORDS = /(别告诉|只跟你说|不想让别人知道|秘密)/;
 const CONFESSION_WORDS = /(喜欢你|爱你|想你了|舍不得|在乎你)/;
-const LOSS_WORDS = /(去世|走了|离开|分手|没了|走了以后)/;
+// v0.8.15：收紧「失去」词表——原来的「走了/离开/没了」会误伤「我先走了/没电了」，
+// 但真正的至亲离世必须记住（冒烟发现「奶奶去世」只有 0.60，低于 0.75 阈值 → 漏记）。
+// 两部分：明确词 + 「亲人+走了/没了」这种口语说法（但不含「我先走了/没电了」）。
+const LOSS_WORDS =
+  /(去世|过世|离世|病逝|不在了|不在了以后|走了以后|离开人世|葬礼|下葬|分手|离婚|(?:奶奶|爷爷|姥姥|姥爷|外婆|外公|爸爸|妈妈|我爸|我妈|家人|亲人|朋友|同事|他|她)[^。！？\n]{0,8}(?:走了|没了))/;
 
 /**
  * 显著度打分（0-1）：决定这段对话值不值得成为"锚点"。
@@ -231,15 +235,17 @@ export function scoreSalience(input: SalienceInput): SalienceResult {
     reasons.push("共同经历");
   }
   if (SECRET_WORDS.test(content)) {
-    score += 0.2;
+    score += 0.3;
     reasons.push("秘密");
   }
   if (CONFESSION_WORDS.test(content)) {
-    score += 0.2;
+    score += 0.3;
     reasons.push("表白/亲密表达");
   }
   if (LOSS_WORDS.test(content)) {
-    score += 0.25;
+    // 至亲离世/分手这类事是"永远不会忘"的典型：单项就应达到阈值，
+    // 否则会出现"记得住约好看海、记不住奶奶去世"的荒谬结果（真实冒烟抓到）。
+    score += 0.4;
     reasons.push("失去/离开");
   }
   if (Array.from(content).length >= 60) {
