@@ -10,13 +10,24 @@
 2. **直接双击**：用浏览器打开 `promo/index.html`
    （视频/图库是外链，需要联网；本地素材用相对路径 `assets/...` 即可）
 
+## 当前角色素材（已接入）
+
+- 角色由用户提供（AI 生成，豆包风格），已做去水印处理：
+  - 视频：原 720×1280 / 6 秒，水印在部分帧出现在左上/右上/右下，因此裁掉上下边缘并去掉音轨，
+    输出 `assets/hero-left.mp4`、`assets/hero-right.mp4`（720×840，H.264）；
+  - 图片：裁掉底部水印区，输出 `assets/character-1.jpg`、`assets/character-2.jpg`（1535×2412）。
+- 首屏默认使用这两段视频（桌面鼠标左右 scrub / 移动端交替自动播放），加载失败时回退到角色图；
+  画廊第 4 张为「她本人」。
+- 如果想换：直接替换 `assets/hero-left.mp4` / `hero-right.mp4` / `character-1.jpg`，保持同名即可；
+  或在 `CONFIG` 里指向新文件。
+
 ## 素材与文案都在哪里改
 
 打开 `promo/index.html`，在 `<script>` 开头的 `CONFIG` 对象里改：
 
 ```js
 const CONFIG = {
-  heroMode: "blank",          // 当前留白：不显示人物；"video" 双视频 / "character" 卡通角色图
+  heroMode: "video",          // "video" 双视频 / "character" 单张角色图 / "blank" 留白
   leftVideo: "...",           // 左视频 URL 或本地相对路径
   rightVideo: "...",          // 右视频 URL 或本地相对路径
   characterImage: "assets/character.svg",
@@ -59,8 +70,8 @@ const CONFIG = {
   ```
 - 页面会显示角色图 + 轻微浮动动画。后面可随时升级成方案 A。
 
-> 当前默认 `heroMode: "blank"`：人物区域留空（深色渐变 + 大字背景），等你的角色素材到位后
-> 改成 `"video"` 或 `"character"` 即可，不需要改其它代码。
+> 当前默认 `heroMode: "video"`：使用已处理的角色短视频。想回到留白改 `"blank"`，
+> 想用单张图（如透明 PNG）改 `"character"` 并设置 `characterImage`。
 
 ### 方案 C：PNG 序列 / 动画 WebP（想要更精细动作）
 
