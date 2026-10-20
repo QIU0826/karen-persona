@@ -28,7 +28,9 @@
     "qq:watch": "tsx scripts/qq-longrun-watch.ts",
     "models:status": "tsx scripts/models.ts",
     "models:list": "tsx scripts/models.ts --list",
-    "models:purge": "tsx scripts/models.ts --purge"
+    "models:purge": "tsx scripts/models.ts --purge",
+    "embed:start": "cd services/embed && uv run --python 3.12 --with fastapi --with uvicorn --with fastembed server.py",
+    "embed:spike": "tsx scripts/spike-embed.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",
