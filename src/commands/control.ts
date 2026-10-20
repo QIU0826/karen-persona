@@ -14,6 +14,11 @@ import {
 import { buildAboutText } from "../persona/disclosure.js";
 import { getConsent } from "../data/consent.js";
 import {
+  buildReflectionStatement,
+  PHASE_DURATION_MS,
+  REFLECTION_PHASE_LABELS,
+} from "../evolution/reflection.js";
+import {
   createRelationshipDims,
   derivePhase,
   describeDims,
@@ -125,6 +130,27 @@ export function buildFactListText(facts: UserFact[]): string {
   ].join("\n");
 }
 
+/** /reflect：反思循环现状（觉察/嘴硬/认了/慢慢改）。 */
+export function buildReflectText(state: ConversationState): string {
+  const r = state.reflectionState;
+  const lines = [`【反思】${REFLECTION_PHASE_LABELS[r.phase]}`];
+  if (r.topic) lines.push(`由头：${r.topic}`);
+  if (r.phase !== "none") {
+    const stayMin = Math.round((Date.now() - r.phaseSince) / 60000);
+    const needMin = Math.round(PHASE_DURATION_MS[r.phase] / 60000);
+    lines.push(`这一阶段已停留 ${stayMin} 分钟（该阶段通常 ${needMin} 分钟）`);
+    lines.push(`被戳次数：${r.pushCount}`);
+    const statement = buildReflectionStatement(r);
+    if (statement) lines.push("", `她心里可能是：${statement}`);
+  }
+  lines.push(
+    "",
+    "说明：这是「她怎么消化自己的变化」的弧线——先察觉、再嘴硬、被戳够才承认，承认一段时间后才真的改；改过只改一次。",
+  );
+  if (r.changeApplied) lines.push("她上一轮反思已经改过一次了（基线已回落）。");
+  return lines.join("\n");
+}
+
 /** /relations：五维关系现状（亲密/信任/互惠/依赖/张力）+ 阶段 + 行为倾向。 */
 export function buildRelationsText(state: ConversationState): string {
   const dims = state.relationshipState.dims ?? createRelationshipDims(state.relationshipState.closeness);
@@ -168,6 +194,7 @@ export function buildHelpText(): string {
     "/export: 导出你们的对话与记忆备份（JSON）",
     "/about: AI 披露、数据去向、年龄与安全说明",
     "/relations: 五维关系现状（亲密/信任/互惠/依赖/张力）",
+    "/reflect: 她的反思弧线（察觉/嘴硬/认了/慢慢改）",
     "/fact: 查看她记得的关于你的事（可确认/否掉）",
     "/age: 查看年龄确认状态",
     "/help: 这条帮助",
@@ -306,6 +333,9 @@ export async function handleControlCommand(
       }
       return true;
     }
+    case "reflect":
+      deps.reply(buildReflectText(state));
+      return true;
     case "relations":
       deps.reply(buildRelationsText(state));
       return true;

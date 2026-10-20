@@ -86,3 +86,34 @@ describe("state-store", () => {
     expect(fs.readdirSync(dir).some((f) => f.includes(".corrupt-"))).toBe(true);
   });
 });
+
+describe("反思状态持久化（v0.8）", () => {
+  it("保存并读回反思弧线（阶段/由头/被戳次数）", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "karen-state-refl-"));
+    process.env.KAREN_DATA_DIR = dir;
+    try {
+      const { createPersistedPersonaState, savePersonaState, loadPersonaState } = await import(
+        "./state-store.js"
+      );
+      const personaId = "小雅";
+      const state = createPersistedPersonaState(personaId, 3);
+      state.reflection = {
+        phase: "denying",
+        topic: "他好像觉得我最近有点不一样",
+        signalKind: "user_pointed_out",
+        pushCount: 2,
+        phaseSince: Date.now(),
+        changeApplied: false,
+        updatedAt: Date.now(),
+      };
+      savePersonaState(state);
+      const loaded = loadPersonaState(personaId, 3);
+      expect(loaded?.reflection.phase).toBe("denying");
+      expect(loaded?.reflection.topic).toContain("最近有点不一样");
+      expect(loaded?.reflection.pushCount).toBe(2);
+    } finally {
+      delete process.env.KAREN_DATA_DIR;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

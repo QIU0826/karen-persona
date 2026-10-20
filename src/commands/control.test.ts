@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildReflectText,
   buildFactListText,
   buildRelationsText,
   buildHelpText,
@@ -178,5 +179,58 @@ describe("/relations：五维关系", () => {
       relationshipState: { closeness: 3, interactionStreak: 1, lastConflictAt: null },
     }) as never;
     expect(buildRelationsText(state)).toContain("亲密度：3.00/10");
+  });
+});
+
+describe("/reflect：反思弧线", () => {
+  it("平静期只说明状态与含义", () => {
+    const state = makeState({
+      reflectionState: {
+        phase: "none",
+        topic: null,
+        signalKind: null,
+        pushCount: 0,
+        phaseSince: Date.now(),
+        changeApplied: false,
+        updatedAt: Date.now(),
+      },
+    }) as never;
+    const text = buildReflectText(state);
+    expect(text).toContain("平静");
+    expect(text).toContain("先察觉");
+  });
+
+  it("否认期展示由头、停留时长与心里话", () => {
+    const state = makeState({
+      reflectionState: {
+        phase: "denying",
+        topic: "他好像觉得我最近有点不一样",
+        signalKind: "user_pointed_out",
+        pushCount: 1,
+        phaseSince: Date.now() - 30 * 60_000,
+        changeApplied: false,
+        updatedAt: Date.now(),
+      },
+    }) as never;
+    const text = buildReflectText(state);
+    expect(text).toContain("嘴硬");
+    expect(text).toContain("他好像觉得我最近有点不一样");
+    expect(text).toContain("被戳次数：1");
+    expect(text).toContain("哪有");
+  });
+
+  it("改过之后有说明", () => {
+    const state = makeState({
+      reflectionState: {
+        phase: "none",
+        topic: null,
+        signalKind: null,
+        pushCount: 0,
+        phaseSince: Date.now(),
+        changeApplied: true,
+        updatedAt: Date.now(),
+      },
+    }) as never;
+    expect(buildReflectText(state)).toContain("改过一次");
   });
 });

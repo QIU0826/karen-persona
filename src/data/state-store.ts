@@ -20,6 +20,7 @@ import type { CausalChain } from "../evolution/causal-chain.js";
 import { createNarrativeArc, type NarrativeArc } from "../evolution/narrative-reconstruct.js";
 import { createRelationshipState, type RelationshipState } from "../persona/relationship.js";
 import { createRelationshipDims } from "../persona/relationship-dims.js";
+import { createReflectionState, type ReflectionState } from "../evolution/reflection.js";
 import type { WeatherInfo } from "../world/weather.js";
 
 /** 当前持久化 schema 版本 */
@@ -58,6 +59,8 @@ export interface PersistedPersonaState {
   emotion: EmotionState;
   guilt: GuiltState;
   drift: DriftState;
+  /** v0.8：反思循环（觉察→否认→承认→整合） */
+  reflection: ReflectionState;
   silence: SilenceState;
   causalChains: CausalChain[];
   narrativeArc: NarrativeArc;
@@ -100,6 +103,7 @@ export function createPersistedPersonaState(personaId: string, initialCloseness 
     emotion: createEmotionState(),
     guilt: createGuiltState(),
     drift: createDriftState(0),
+    reflection: createReflectionState(),
     silence: createSilenceState(),
     causalChains: [],
     narrativeArc: createNarrativeArc(),
@@ -148,6 +152,12 @@ function normalize(raw: unknown, personaId: string, initialCloseness: number): P
     pressure: num(driftRaw.pressure, 0),
     lastAwareness: num(driftRaw.lastAwareness, Date.now()),
     history: Array.isArray(driftRaw.history) ? (driftRaw.history as DriftState["history"]).slice(-100) : [],
+  };
+
+  const reflectionRaw = isRecord(raw.reflection) ? raw.reflection : {};
+  const reflection: ReflectionState = {
+    ...createReflectionState(),
+    ...(reflectionRaw as Partial<ReflectionState>),
   };
 
   const silenceRaw = isRecord(raw.silence) ? raw.silence : {};
@@ -244,6 +254,7 @@ function normalize(raw: unknown, personaId: string, initialCloseness: number): P
     emotion,
     guilt,
     drift,
+    reflection,
     silence,
     causalChains: Array.isArray(raw.causalChains)
       ? (raw.causalChains as CausalChain[]).filter(isRecord).slice(0, 20)

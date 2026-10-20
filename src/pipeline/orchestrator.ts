@@ -39,6 +39,17 @@ import {
 } from "../data/memory-v2.js";
 import { buildGetToKnowNote, pickGetToKnowAsk } from "../persona/get-to-know.js";
 import {
+  applyReflectionSignal,
+  buildReflectionInjection,
+  buildReflectionStatement,
+  createReflectionState,
+  looksLikeUserPointingOut,
+  REFLECTION_PHASE_LABELS,
+  shouldApplyChange,
+  type ReflectionSignalKind,
+  type ReflectionState,
+} from "../evolution/reflection.js";
+import {
   applyDimEvent,
   behaviorNote,
   createRelationshipDims,
@@ -247,6 +258,8 @@ export interface ConversationState {
   guiltState: GuiltState;
   socialTact: SocialTact;
   driftState: DriftState;
+  /** v0.8：反思循环（觉察→否认→承认→整合） */
+  reflectionState: ReflectionState;
   causalChains: CausalChain[];
   silenceState: SilenceState;
   session: ConversationSession;
@@ -360,6 +373,7 @@ export async function initConversation(
   const guiltState = persisted?.guilt ?? createGuiltState();
   const socialTact = createSocialTact(persona.emotions.attachmentStyle);
   const driftState = persisted?.drift ?? createDriftState(emotionState.baseline);
+  const reflectionState = persisted?.reflection ?? createReflectionState();
   const causalChains: CausalChain[] =
     persisted?.causalChains && persisted.causalChains.length > 0
       ? persisted.causalChains
@@ -416,7 +430,7 @@ export async function initConversation(
     corrections: [],
     innerState, prevInnerState: { ...innerState },
     emotionState, guiltState, socialTact,
-    driftState, causalChains, silenceState, session, personaType, stance,
+    driftState, reflectionState, causalChains, silenceState, session, personaType, stance,
     weatherPerception, weatherApplied: false,
     lastSharedWeather: counters?.lastSharedWeather ?? null,
     lastHeartbeatAt: counters?.lastHeartbeatAt ?? 0,
@@ -724,6 +738,7 @@ export function persistRuntimeState(state: ConversationState): void {
       emotion: state.emotionState,
       guilt: state.guiltState,
       drift: state.driftState,
+      reflection: state.reflectionState,
       silence: state.silenceState,
       causalChains: state.causalChains,
       narrativeArc: state.narrativeArc,
@@ -823,6 +838,17 @@ export function updateRelationshipAfterTurn(
   } else {
     state.relationshipState = touchInteraction(state.relationshipState, now);
   }
+
+  // v0.8：反思循环（觉察→否认→承认→整合；承认后才真的改）
+  const phaseBefore = state.reflectionState.phase;
+  feedReflectionSignal(state, userInput);
+  if (state.reflectionState.phase !== phaseBefore) {
+    messages.push(`[反思] ${REFLECTION_PHASE_LABELS[state.reflectionState.phase]}`);
+    const statement = buildReflectionStatement(state.reflectionState);
+    if (statement) console.log(`  [反思] 她心里：${previewText(statement, 30)}`);
+  }
+  applyReflectionChange(state);
+
   return messages;
 }
 
@@ -873,6 +899,79 @@ function buildGetToKnowInjection(state: ConversationState): string {
  * 与既有说法冲突的事实 → 让她自然确认一句。
  * 同一条事实 2 天内只问一次（markFactsChallenged），避免变成审问。
  */
+// ── 反思循环（v0.8）─────────────────────────
+
+/** 每个 owner 的「同类信号」短期计数（进程内即可，重启清零不算准） */
+const reflectionSignalCounts = new Map<string, { kind: ReflectionSignalKind; count: number; lastAt: number }>();
+
+/**
+ * 每轮喂一个反思信号（是否真的触发由状态机判定）。
+ *
+ * 信号来源（不读用户原文进 prompt，只作为内部由头）：
+ * - 他点破（"你最近是不是冷淡了"）→ user_pointed_out（1 次即察觉）；
+ * - 连续冷场/他很少回 → self_observed（需 2 次）；
+ * - 24h 内有过冲突 → conflict_echo。
+ */
+function feedReflectionSignal(state: ConversationState, userInput: string): void {
+  try {
+    const now = Date.now();
+    const kind: ReflectionSignalKind | null = looksLikeUserPointingOut(userInput)
+      ? "user_pointed_out"
+      : state.relationshipState.lastConflictAt !== null &&
+          now - state.relationshipState.lastConflictAt < 24 * 3600_000
+        ? "conflict_echo"
+        : null;
+    if (!kind) return;
+
+    const topic =
+      kind === "user_pointed_out"
+        ? "他好像觉得我最近有点不一样"
+        : "上次那件事我还在想";
+
+    const prev = reflectionSignalCounts.get(state.owner);
+    const count =
+      prev && prev.kind === kind && now - prev.lastAt < 3 * 24 * 3600_000 ? prev.count + 1 : 1;
+    reflectionSignalCounts.set(state.owner, { kind, count, lastAt: now });
+
+    state.reflectionState = applyReflectionSignal(
+      state.reflectionState,
+      { kind, topic },
+      { now, recentSignalCount: count },
+    );
+  } catch {
+    // 反思失败不影响对话
+  }
+}
+
+/** 承认之后真的改一点（只改一次）：往哪个方向改由由头决定。 */
+function applyReflectionChange(state: ConversationState): void {
+  try {
+    if (!shouldApplyChange(state.reflectionState)) return;
+    const topic = state.reflectionState.topic ?? "";
+    // 默认：把漂移基线往"更稳"的方向拉一点，并把 perceived 对齐（她自己的感知跟上）
+    const drift = state.driftState;
+    state.driftState = {
+      ...drift,
+      actualBaseline: Math.max(-0.3, Math.min(0.3, drift.actualBaseline * 0.85)),
+      perceivedBaseline: Math.max(-0.3, Math.min(0.3, drift.perceivedBaseline * 0.85)),
+      lastAwareness: Date.now(),
+    };
+    state.reflectionState = { ...state.reflectionState, changeApplied: true };
+    console.log(`  [反思] 她真的改了一点（由头：${previewText(topic, 20)}）`);
+  } catch {
+    // 忽略
+  }
+}
+
+/** 反思注入（非平静期才有，一句话）。 */
+function buildReflectionNote(state: ConversationState): string {
+  try {
+    return buildReflectionInjection(state.reflectionState);
+  } catch {
+    return "";
+  }
+}
+
 // ── 五维关系注入（v0.8）─────────────────────
 
 /** 把「关系现状」压成一句话注入 prompt：阶段 + 行为倾向。 */
@@ -1397,6 +1496,7 @@ export async function processMessage(
     crisisNote +
     t1ArcContext +
     factsContext +
+    buildReflectionNote(state) +
     buildRelationshipDimsInjection(state) +
     buildFactConflictInjection(state) +
     buildGetToKnowInjection(state) +
@@ -1886,6 +1986,7 @@ export async function* processMessageStream(
     (crisis ? crisisSafetyNote() : "") +
     t1ArcContext +
     factsContext +
+    buildReflectionNote(state) +
     buildRelationshipDimsInjection(state) +
     buildFactConflictInjection(state) +
     buildGetToKnowInjection(state) +
