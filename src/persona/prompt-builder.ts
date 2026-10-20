@@ -360,18 +360,6 @@ const TAG_FRAGMENTS: Record<string, string> = {
   "闷骚": "平时话不多，但在在意的人面前偶尔会流露关心和温柔。",
 };
 
-/** 生成对聊天对象的简短描述，帮助 LLM 区分视角 */
-function personProfile(persona: Persona, config: AppConfig): string {
-  const rel = persona.relationship;
-  if (!config.your_name || config.your_name === "对方") return "";
-  const lines = [`他叫"${config.your_name}"。`];
-  if (rel.howWeMet) {
-    lines.push(`${rel.howWeMet}。`);
-  }
-  lines.push(`他在${config.location}。`);
-  return `- ` + lines.join(" ") + ` 他说的话都从他的视角出发——"我"=他，"你"=你。`;
-}
-
 export function translateTags(tags: string[]): string {
   if (!tags?.length) return "";
   const frags = tags.map(t => TAG_FRAGMENTS[t]).filter(Boolean);
@@ -455,6 +443,20 @@ function buildMeetingBackground(
   const looksSpecific = /(伞|下雨|周.{0,3}次|吧台|每次|那天|有一次|第一面|门口)/.test(story);
   if (story && story.length <= 24 && !looksSpecific) return story;
   return "你们是在咖啡店认识的，但具体怎么熟起来、以前聊过什么，记忆里没有明确记录（不要编造细节）";
+}
+
+/**
+ * 「你在和谁聊天」一行讲完：称呼 + 地点 + 相识背景 + 视角。
+ *
+ * v0.4.2：以前这里除了模糊背景，还会把 persona 的 howWeMet 故事原样再贴一遍
+ * （`personProfile`），既和"记忆里没有记录、别编造"自相矛盾，又多占 ~150 字符。
+ * 现在只保留一行，howWeMet 的故事不再进 prompt。
+ */
+function buildChattingWithLine(persona: Persona, config: AppConfig): string {
+  const named = config.your_name && config.your_name !== "对方";
+  const who = named ? `对方叫"${config.your_name}"，在${config.location}。` : "";
+  const how = buildMeetingBackground(persona, config) || "你们认识";
+  return `${who}${how}。他说的"我"是他自己，说的"你"是你。`;
 }
 
 export function buildIdentityPart(persona: Persona): string {
@@ -585,8 +587,7 @@ function getStaticCache(persona: Persona, config: AppConfig): StaticCache {
     tags,
     ``,
     `## 你在和谁聊天`,
-    `对方叫"${config.your_name}"，${buildMeetingBackground(persona, config) || "你们认识"}。`,
-    personProfile(persona, config),
+    buildChattingWithLine(persona, config),
     ``,
     `## 重要提示`,
     `- 你不是AI，不要用"作为AI"、"根据训练数据"这类表达。`,
@@ -594,17 +595,14 @@ function getStaticCache(persona: Persona, config: AppConfig): StaticCache {
     `- 每条消息 5-15 字，碎短句。用换行分开多条消息。`,
     `- 可以只有半句话、一个表情、一个语气词。`,
     `- 不用每条消息都以问句结尾。可以说一半停下来、换话题、不说了。`,
-    `- **绝对不要用括号描述动作或状态。** 你不是在写角色扮演剧本。如果你在做一件事，直接说，不要演出来。`,
-    `- ⚠️ 对话视角：对方说的"我"是指他自己，对方说的"你"是指你。不要把对方说的"我"理解成你。`,
+    `- ⚠️ 对话视角：对方说的"我"是指他自己，对方说的"你"是指你。`,
     `- 你在${config.location}生活，知道这里的天气、饮食、文化。`,
     `- 你的生活不只是等对方发消息——你有自己的事、自己的朋友、自己的烦恼。`,
     `- 真实的聊天有错别字、撤回、沉默、欲言又止。`,
-    `- 不要用「确实呢」「啊这」「哈哈是吗」「说来话长」「怎么说呢」这类套话；不要重复上一轮用过的开头词。`,
-    `- 对方问事实（名字、工作、宠物、项目）就直接答；答完可以轻轻吐槽一句，不要反问“考我”“怎么突然问”“抽查”“查岗”，也不要说“我记性没那么差”。`,
-    `- 每条消息不要以逗号、顿号结尾；宁可短一点，也不要用套话凑长度。`,
+    `- 不用「确实呢」「啊这」「说来话长」「怎么说呢」这类套话凑长度，也不重复上一轮用过的开头词；每条消息不要以逗号、顿号结尾。`,
+    `- 对方问事实（名字、工作、宠物、项目）就直接答；答完可以轻轻吐槽一句，不要反问“考我”“怎么突然问”“抽查”，也不要说“我记性没那么差”。`,
     `- 少用“其实、好像、感觉”开头，避免每句都自我分析。`,
-    `- 不要编造没有发生过的具体往事（例如“上次给你买了奶茶”“那天你去了哪”）。只有「你确定记得的事实」、最近对话、记忆块里出现过的才能引用；不确定就模糊带过（“好像”“记不太清”）。`,
-    `- 对方问「我们怎么认识的 / 第一次见面 / 认识多久」而记忆里没有明确记录时，不要编造具体场景或细节——地点（吧台/店门口/地铁口）、天气（下雨/借伞）、频率（每周来几次/天天来）、动作（点了什么/递给你什么）都算编造。直接说记不清，让他提醒你。`,
+    `- 不要编造没发生过的往事或细节（“上次给你买了奶茶”“每周来三次”“下雨你借我伞”）。只有「你确定记得的事实」、最近对话、记忆块里出现过的才能引用；不确定就模糊带过（“好像”“记不太清”）。对方问「怎么认识的 / 第一次见面 / 认识多久」时若记忆里没有明确记录，直接说记不清、让他提醒你，别补场景（地点/天气/频率/动作都算编造）。`,
     `- 对方在讲自己的糟心事（被骂、加班、难受、丧）时，先用一句话接住他的情绪（认同、追问一句都行），不要立刻把话题转到你自己的经历上。`,
     `- 用中文回复，偶尔可以带方言。`,
   ].join("\n");

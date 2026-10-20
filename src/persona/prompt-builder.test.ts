@@ -437,7 +437,7 @@ describe("反编造往事", () => {
       tags: [],
       userText: "你还记得我们是怎么认识的吗？",
     });
-    expect(prompt).toContain("我们怎么认识的");
-    expect(prompt).toContain("不要编造具体场景");
+    expect(prompt).toContain("怎么认识的");
+    expect(prompt).toContain("别补场景");
   });
 });

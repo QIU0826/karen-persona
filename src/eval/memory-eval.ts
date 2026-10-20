@@ -495,7 +495,8 @@ function round4(value: number): number {
 
 /** 对每条 gold 计算 facts 命中 / T2 排名 / 合并命中（需已 seed 且 db 可用）。 */
 function evaluateCases(cases: GoldCase[], depth: number = RECALL_DEPTH): CaseEval[] {
-  const factsContext = getUserFactsContext(EVAL_OWNER);
+  // 评测要看事实层的「全覆盖」，因此显式放开注入上限（生产路径仍按 MAX_FACTS_IN_PROMPT 截断）
+  const factsContext = getUserFactsContext(EVAL_OWNER, 100);
 
   return cases.map((item) => {
     const memories = retrieveRelevantMemories(item.probe, depth);
@@ -574,7 +575,8 @@ function runAntiForgetScenario(): AntiForgetResult {
   const expected = "小满";
   seedAntiForgetScenario();
 
-  const factsContext = getUserFactsContext(EVAL_OWNER);
+  // 评测要看事实层的「全覆盖」，因此显式放开注入上限（生产路径仍按 MAX_FACTS_IN_PROMPT 截断）
+  const factsContext = getUserFactsContext(EVAL_OWNER, 100);
   const memories = retrieveRelevantMemories(probe, 8);
   const ragContext = buildRagContext(memories);
   const factsHit = matchesAny(factsContext, [expected]);

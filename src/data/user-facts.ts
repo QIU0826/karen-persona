@@ -252,7 +252,16 @@ export function getRecentFactChanges(
 }
 
 /** 注入上限：事实超过这个数时按分类配额挑选，避免某类事实太多把别的挤掉。 */
+/**
+ * 注入上限：**保持 20 条**。
+ *
+ * v0.4.2 试过按 Prompt 预算审计的建议收到 12 条，实测记忆金标集从 17/20 掉到 14/20
+ * （连跑 3 次都是 14，不是噪声）——缺的正是不在注入里的那几条事实。
+ * 结论：**省 prompt 不能拿"记性"换**。改为只做单条截断（60 字），条数不动。
+ */
 export const MAX_FACTS_IN_PROMPT = 20;
+/** 单条事实注入的最大字符数 */
+export const MAX_FACT_VALUE_CHARS = 60;
 
 /** 分类展示顺序（也是配额的选择顺序）。 */
 const FACT_CATEGORY_ORDER: FactCategory[] = [
@@ -331,6 +340,7 @@ export function selectFactsForPrompt(
 export function formatUserFacts(
   facts: UserFact[],
   previousChanges?: Map<string, string> | Record<string, string>,
+  max?: number,
 ): string {
   if (facts.length === 0) return "";
   const previousLookup = (key: string): string | undefined => {
@@ -338,18 +348,22 @@ export function formatUserFacts(
     if (previousChanges instanceof Map) return previousChanges.get(key);
     return previousChanges[key];
   };
-  const lines = selectFactsForPrompt(facts).map((fact) => {
+  const lines = selectFactsForPrompt(facts, max ?? MAX_FACTS_IN_PROMPT).map((fact) => {
     const previous = previousLookup(fact.key);
     const changeNote =
       previous && previous !== fact.value ? `（之前是：${previous.slice(0, 30)}）` : "";
-    return `- ${CATEGORY_LABELS[fact.category]}：${fact.value}${changeNote}`;
+    const value =
+      fact.value.length > MAX_FACT_VALUE_CHARS
+        ? `${fact.value.slice(0, MAX_FACT_VALUE_CHARS)}…`
+        : fact.value;
+    return `- ${CATEGORY_LABELS[fact.category]}：${value}${changeNote}`;
   });
   if (lines.length === 0) return "";
   return `\n## 你确定记得的关于对方的事\n${lines.join("\n")}\n（这些是你真的记得的事实，可以直接自然地用；不确定的别编。）\n`;
 }
 
 /** 取某 owner 的事实注入块；DB 异常时静默返回空。 */
-export function getUserFactsContext(ownerId: string): string {
+export function getUserFactsContext(ownerId: string, max?: number): string {
   try {
     const facts = listUserFacts(ownerId);
     if (facts.length === 0) return "";
@@ -359,7 +373,8 @@ export function getUserFactsContext(ownerId: string): string {
     } catch {
       previousChanges = undefined;
     }
-    return formatUserFacts(facts, previousChanges);
+    // max 只在学习/评测场景显式传入（想看全量）；生产默认按注入预算截断
+    return formatUserFacts(facts, previousChanges, max);
   } catch {
     return "";
   }

@@ -91,7 +91,8 @@ describe("evaluateOffline", () => {
     expect(result.seeded.facts).toBe(new Set(cases.map((item) => item.fact.key)).size);
     expect(result.seeded.episodes).toBe(new Set(cases.map((item) => item.statement)).size);
 
-    // 指标自洽：facts 全覆盖；recall 单调；合并 ≥ facts；总数正确
+    // 指标自洽：facts 全覆盖（评测侧显式放开注入上限，测的是事实层而不是注入预算）；
+    // recall 单调；合并 ≥ facts；总数正确
     expect(result.metrics.total).toBe(cases.length);
     expect(result.metrics.factsHits).toBe(cases.length);
     expect(result.metrics.factsHitRate).toBe(1);

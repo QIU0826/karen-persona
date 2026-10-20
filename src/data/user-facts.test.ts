@@ -123,8 +123,8 @@ describe("user_facts 变更历史（时间维度）", () => {
   });
 });
 
-describe("事实超过 20 条的上限压测", () => {
-  it("profile 事实过多时不会挤掉工作/宠物/计划；注入行数 ≤20", async () => {
+describe("事实超过上限的压测", () => {
+  it("profile 事实过多时不会挤掉工作/宠物/计划；注入行数 = MAX_FACTS_IN_PROMPT", async () => {
     const facts = await import("./user-facts.js");
     const now = Date.now();
     const items: Array<{ key: string; value: string; category: "profile" }> = [];
@@ -143,17 +143,19 @@ describe("事实超过 20 条的上限压测", () => {
     const all = facts.listUserFacts("stress:local");
     expect(all.length).toBe(29);
 
-    const selected = facts.selectFactsForPrompt(all, 20);
-    expect(selected).toHaveLength(20);
+    const selected = facts.selectFactsForPrompt(all, facts.MAX_FACTS_IN_PROMPT);
+    expect(selected).toHaveLength(facts.MAX_FACTS_IN_PROMPT);
     // 核心分类保留；剩余名额按时间回填，profile 最多占满剩余（不会把核心分类挤掉）
-    expect(selected.filter((f) => f.category === "profile").length).toBeLessThan(20);
+    expect(selected.filter((f) => f.category === "profile").length).toBeLessThan(
+      facts.MAX_FACTS_IN_PROMPT,
+    );
     expect(selected.some((f) => f.key === "job")).toBe(true);
     expect(selected.some((f) => f.key === "pet")).toBe(true);
     expect(selected.some((f) => f.key === "plan")).toBe(true);
 
     const text = facts.getUserFactsContext("stress:local");
     const lineCount = text.split("\n").filter((line) => line.startsWith("- ")).length;
-    expect(lineCount).toBe(20);
+    expect(lineCount).toBe(facts.MAX_FACTS_IN_PROMPT);
     expect(text).toContain("产品设计师");
     expect(text).toContain("团子");
     expect(text).toContain("云南");
