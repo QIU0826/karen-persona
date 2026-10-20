@@ -1,7 +1,7 @@
 # 发布准备（Release Prep）
 
-> 状态：**已发布 v0.2.0（2026-10-20）**：`main` 与 `v0.2.0` tag 已推送到 GitHub，CI 运行中。
-> 版本：`0.2.0`。远端：`https://github.com/QIU0826/karen-persona.git`；分支 `main`（release commit `82a14ac`），tag `v0.2.0`。
+> 状态：**已发布 v0.2.1（2026-10-20）**：`main` 与 `v0.2.1` tag 已推送到 GitHub，CI 三平台全绿（run 39382097271）。v0.2.0 tag 保留但 Windows `npm ci` 失败，已由 v0.2.1 修复。
+> 版本：`0.2.1`。远端：`https://github.com/QIU0826/karen-persona.git`；分支 `main`，tag `v0.2.1`。
 > 旧分支 `master` 是上游历史，本次未 force push；建议在 GitHub 把默认分支改为 `main`。
 
 ## 1. 已完成检查（可复现）
@@ -25,8 +25,8 @@ node node_modules/vitest/vitest.mjs run            # 69 文件 / 687 用例全�
 
 ### 1.2 CI 跨平台安装
 
-- ubuntu / macOS 通过；Windows 在 `npm ci` 失败（root cause：npm 对带 `binding.gyp` 的 better-sqlite3 自动执行 `node-gyp rebuild`，runner 无 Visual Studio）。
-- 修复：仓库根 `.npmrc` 设 `ignore-scripts=true`（依赖自带预编译二进制），本机干净安装/测试已通过，Windows CI 复验中。
+- 初次发布：ubuntu / macOS 绿，Windows 在 `npm ci` 失败（root cause：npm 对带 `binding.gyp` 的 better-sqlite3 自动执行 `node-gyp rebuild`，runner 无 Visual Studio）。
+- 修复：仓库根 `.npmrc` 设 `ignore-scripts=true`（依赖自带预编译二进制）；另修 Windows 下 POSIX 0600 测试断言。**Windows CI 已复验通过**（诊断分支已删除），main CI 三平台全绿。
 
 ### 1.2 仓库卫生 / 隐私
 

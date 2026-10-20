@@ -9,7 +9,7 @@
 
 QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、情绪、记忆和社交圈的人」，而不是一个问答助手。
 
-当前阶段：**M2 产品化收尾 + v0.2.0 已发布（2026-10-20，main + tag 已推送，CI 验证中）**。M0 地基已修复完成（新装可用、不丢消息、安全加固、文档真话）；M1 核心体验闭环主要项已完成（状态持久化、关系成长、演化可见化、多用户隔离、双管线对齐、检索增强）；M2-A 首次引导 2.0、M2-B 人设包 v2、M2-C 多用户只读 Web + 导出、M2-D 真实长跑工具已实施；发布检查见 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（已 push main + tag v0.2.0）。M1/M2 路线见审计报告第 5 节。
+当前阶段：**M2 产品化收尾 + v0.2.1 已发布（2026-10-20，main + tag 已推送，CI 三平台全绿）**。M0 地基已修复完成（新装可用、不丢消息、安全加固、文档真话）；M1 核心体验闭环主要项已完成（状态持久化、关系成长、演化可见化、多用户隔离、双管线对齐、检索增强）；M2-A 首次引导 2.0、M2-B 人设包 v2、M2-C 多用户只读 Web + 导出、M2-D 真实长跑工具已实施；发布检查见 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（已 push main + tag v0.2.0）。M1/M2 路线见审计报告第 5 节。
 
 ## 技术栈（如实）
 
@@ -101,6 +101,7 @@ npm run setup      # 交互式配置向导
 - **成本统计覆盖旁路 LLM（2026-10-20）**：新增 `src/ai/aux-usage.ts` 统一记账；事实抽取/内心独白（含深夜独白）/T3 摘要/herView/进化日志/叙事重构/视觉描述/配图搜索词全部写入 `llm_usage`（带 `kind`）；`/cost` 与 Web 控制台新增「按用途」拆分（对话/事实抽取/独白/长期摘要/图片识别…）。真实验证：一次事实抽取调用写入 kind=fact_extraction、prompt 234 / completion 63、¥0.000486。测试 54 文件 / 600 用例。
 - **合规默认值调整（2026-10-20，用户反馈）**：用户明确不希望聊天里出现 AI 披露（体验很差）→ 聊天内 AI 披露**默认关闭**（`src/data/store.ts` 默认 false；`config.yaml.example` 同步）；setup 向导移除 AI 披露文案，只保留 18+ 确认，不再写披露确认；披露能力保留，`ai_disclosure: true` 可显式开启（公开发布/商用建议开启）。新增 3 条配置默认值测试；测试 69 文件 / 687 用例。
 - **记忆修正 `/forget`（2026-10-20，真机反馈）**：新增 `/forget 关键词 [--yes]`（QQ/CLI）：先预览匹配的 T2 记忆，确认后删除（一次最多 20 条），用于清理被编造/记错的往事；只删 T2，不动会话与人格状态。新增 3 条测试（预览不删/确认删除/无匹配与用法）；测试 69 文件 / 687 用例。
+- **v0.2.1 Windows 安装与 CI 修复（2026-10-20）**：`.npmrc ignore-scripts=true` 避免 npm 对 better-sqlite3 自动跑 node-gyp（Windows 无 VS 失败）；Windows 跳过 POSIX 0600 断言；通过临时诊断 workflow + check-run annotations 定位后删除诊断分支；CI ubuntu/macOS/Windows 全绿（run 39382097271）。
 - **发布准备（2026-10-20）**：干净 checkout（`git archive` → 临时目录 + 软链 node_modules）复验通过：typecheck 0、687 用例全绿、doctor 在缺 config/.env 时给出可执行指引；仓库卫生检查（无 .env/config.yaml/data/coverage 入库、无真实密钥、跟踪文件 257 个约 12.6MB）；新增 [docs/RELEASE_PREP.md](docs/RELEASE_PREP.md)（检查结果 + 发布步骤 + Release Note）与 [CHANGELOG.md](CHANGELOG.md)；用户已拍板：升级 **v0.2.0** 并 push + tag（远端 `master` 是上游旧历史，不 force push，推本地 `main` 新分支）。
 - **M2-D 真实 QQ 长跑工具 + 首轮真机修复（2026-10-20）**：新增 `src/eval/qq-realrun.ts`（只读快照/回合延迟/重复空回复/成本/事实/同意 → 报告）+ `scripts/qq-longrun-watch.ts` + `npm run qq:watch`，结束写 `data/realrun-*.md`（含对话原文，600 权限）；支持 `--once --since <时间>` 随时复盘历史并标记「AI 披露未确认/空回复/重复/无成本记录」。首轮真机（3 轮）暴露并修复：①老用户 session 非空导致 AI 披露被跳过 → 改为按 `user_consent.disclosure_acked_at` 补发（`shouldSendDisclosure`），披露/`/about` 文案改用当前人设名；②消息门未把当前消息计入「5 分钟连续跟进」，18s 后的追问被随机延迟 31 分钟 → `buildGateContext` 修正并补回归测试；③第二轮真机发现「问怎么认识」时编造具体场景 → prompt 增加确定性反编造规则 + 单测。测试 69 文件 / 687 用例。
 - **M2-C 单 owner 导出（2026-10-20）**：`user-export.ts` 拆出 `buildUserExportPayload`（只读组装，不落盘）+ Web API `GET /api/export?owner=`（JSON 附件下载，ASCII 安全文件名，默认仅主用户、开启 `web_all_owners` 后可导出其他 owner；非法/越权 400/403）；前端顶栏「导出当前用户」按钮（自动带 token/owner）。测试：导出新文件 3 条场景 + dashboard 断言；全仓 65 文件 / 666 用例。

@@ -90,6 +90,14 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 Windows 安装/CI 修复 v0.2.1）
+
+- **现象**：v0.2.0 发布后 CI ubuntu/macOS 绿、Windows 在 `npm ci` 失败。
+- **根因**：better-sqlite3 13 包内自带 prebuilds，但 npm 对带 `binding.gyp` 的包仍自动执行 `node-gyp rebuild`；Windows runner 无 Visual Studio。
+- **修复**：仓库根 `.npmrc ignore-scripts=true`（依赖均自带预编译二进制）；Windows 单测跳过 POSIX 0600 权限断言。
+- **定位方式**：临时诊断 workflow 把 `npm ci` 失败尾部写入 check-run annotations（公开可读），无需 Actions 日志权限；诊断分支已删除。
+- **验证**：Windows debug CI 全绿（npm ci + typecheck + 687 用例）；main CI 三平台全绿（run 39382097271）；发布 v0.2.1。
+
 ### ✅ 已完成（2026-10-20 M2-D 真实长跑工具 + 首轮真机修复）
 
 - **工具**：`src/eval/qq-realrun.ts` + `scripts/qq-longrun-watch.ts` + `npm run qq:watch`（只读观察真实回合/延迟/成本/事实/同意，结束写 `data/realrun-*.md`）；报告含空回复/重复/延迟/成本/异常标记，支持 `--once --since` 单次复盘。

@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.1 — 2026-10-20
+
+### Fixed
+
+- **Windows 安装**：仓库增加 `.npmrc`（`ignore-scripts=true`），避免 npm 对自带 prebuilds 的 better-sqlite3 自动执行 `node-gyp rebuild`（Windows runner/用户无 Visual Studio 时 `npm ci` 失败）；macOS/Linux 同样使用包内预编译二进制。
+- **Windows 单元测试**：`user-export` 的 POSIX 0600 权限断言在 Windows 跳过（Windows 不支持该权限位）。
+- **CI**：GitHub Actions 三平台矩阵（ubuntu/macOS/Windows）恢复全绿；Windows 由临时诊断 workflow + check-run annotations 定位（诊断分支已删除）。
+
+### Upgrade notes
+
+- 老数据无需迁移；安装方式不变，但 `npm install` 会跳过依赖生命周期脚本（本仓库依赖都自带预编译二进制）。
+
 ## v0.2.0 — 2026-10-20
 
 M2 产品化 + 真实 QQ 首轮验证修复。

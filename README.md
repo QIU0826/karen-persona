@@ -8,7 +8,7 @@
 
 > **项目状态（2026-10）**：M0「地基修复」完成（新装可启动、延迟消息不丢、QQ 桥接安全加固、LLM 异常兜底、文档真话）；M1 核心体验闭环已完成主要项（情绪/负债/关系/演化状态持久化、亲密度成长与里程碑、CLI 可看日记/时间线/她眼中的你、多用户隔离、双管线对齐、记忆检索 DeepSeek 候选重排 20 条金标 recall@1 55%→95%）；M2 产品化已交付 **首次引导 2.0**（setup 变成她记得的第一段对话）、**人设包 v2**（manifest/素材/记忆种子/CLI）、**本地 Web 控制台多用户只读视图 + 单用户 JSON 导出**、**真实 QQ 长跑观察工具**。图片识别走 DeepSeek Flash（不需要 Qwen-VL Key）；真语义向量（需 Qwen Key 或本地模型）仍未开启。本文所有功能宣称都以当前代码为准：未完成的能力明确标成「半成品 / 规划中」，不会把设计目标写成已实现。完整功能清单与路线图见 **[docs/PRODUCT_AUDIT.md](docs/PRODUCT_AUDIT.md)**。
 >
-> **v0.2.0 已发布**（2026-10-20）：GitHub `main` 分支 + tag `v0.2.0` 已推送，CI 运行中。
+> **v0.2.1 已发布**（2026-10-20）：GitHub `main` 分支 + tag `v0.2.1`，CI 三平台全绿（v0.2.0 tag 保留但 Windows 安装失败，已由 v0.2.1 修复）。
 >
 > 仓库实测状态（2026-10-20）：`npm run typecheck` 0 错误；`npm test` **69 个测试文件 / 687 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 54.5%）。**干净 checkout + 真实 `npm ci` 已复验**：122 个依赖约 40s 安装、typecheck 0 错误、687 用例全绿、doctor 在缺 config/.env 时给出可执行的修复指引。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**。
 
