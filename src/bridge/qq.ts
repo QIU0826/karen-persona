@@ -17,7 +17,7 @@
  * - 日志只打印长度/摘要，不打印消息全文、token 或不必要的外部内容。
  */
 import "dotenv/config";
-import { computeTypingDelay } from "./humanizer.js";
+import { planPacing, typingTimeFor, type PacingPersona, type PacingResult } from "./pacing.js";
 import { WebSocketServer, type WebSocket } from "ws";
 import { loadPersona } from "../persona/loader.js";
 import type { Persona } from "../persona/loader.js";
@@ -1058,8 +1058,38 @@ async function sendPhotoToGroup(groupId: number, photo: OutboundPhoto): Promise<
  * v0.4.0 起深夜（23:00–06:00）会慢约 1.35 倍、封顶 4.2s（人困的时候确实打得慢）。
  * 目的：让她不是「char 级流式刷屏」，而是像人一样一条一条地把话打完。
  */
-function typingDelayFor(text: string): number {
-  return computeTypingDelay(charCount(text), new Date().getHours());
+/**
+ * 从人设的 typingHabit 文本推断打字速度/条间节奏（v0.6）。
+ *
+ * 人设里 `speaking.typingHabit` 是自然语言（如「一段一段发，不一次性发大段」），
+ * 这里只做保守的关键词映射；没有线索就用默认值。
+ */
+function pacingPersonaFor(persona: ConversationState["persona"]): PacingPersona {
+  const habit = String(
+    (persona as unknown as { speaking?: { typingHabit?: string } }).speaking?.typingHabit ?? "",
+  );
+  const persona2: PacingPersona = {};
+  if (/慢|慢吞吞|想很久|斟酌/.test(habit)) persona2.typingWpm = 165;
+  if (/快|秒回|刷屏|连发/.test(habit)) persona2.typingWpm = 265;
+  if (/一段一段|分段|一句一句|碎/.test(habit)) persona2.burstiness = 1.35;
+  if (/一条|一次发一条|整段/.test(habit)) persona2.burstiness = 0.8;
+  if (/犹豫|欲言又止|打了又删/.test(habit)) persona2.hesitation = 0.35;
+  return persona2;
+}
+
+/**
+ * 这一轮的打字节奏（人设 × 情绪 × 时段；忙碌度暂取 0）。
+ * NODE_ENV=test 时压到最小，避免 E2E/单测因为"真人节奏"变慢或抖动。
+ */
+function buildPacing(state: ConversationState): PacingResult {
+  if (process.env.NODE_ENV === "test") {
+    return { readDelayMs: 0, perCharMs: 1, capMs: 10, gapMs: 1, hesitationMs: 0, profile: "fast" };
+  }
+  return planPacing({
+    hour: new Date().getHours(),
+    emotionVector: state.emotionState.vector,
+    persona: pacingPersonaFor(state.persona),
+  });
 }
 
 // ── 打错字 → 撤回 → 重发修正（v0.3 真实感）──────
@@ -1152,6 +1182,10 @@ async function streamPrivateReply(params: {
   /** 每轮最多演一次「打错字撤回」，避免多气泡放大触发率 */
   let typoDecided = false;
 
+  // v0.6：这一轮的打字节奏（人设 × 情绪 × 时段），整轮复用
+  const pacing = buildPacing(state);
+  let pacedFirstTextSent = false;
+
   const stream = processMessageStream(state, text, options);
   for await (const frag of stream) {
     // 中断检测：用户发来新消息 → 丢弃剩余 burst
@@ -1210,8 +1244,14 @@ async function streamPrivateReply(params: {
 
     // 真人节奏：第一条是「看到消息 → 开始打字」，后续每条按字数模拟打字耗时
     // （中文手打约 80–120ms/字；过短的气泡也不会秒发，读/点发送有固定开销）
+    // 第一条：看到消息→开始打字的延迟（含偶发的犹豫）
+    if (!pacedFirstTextSent) {
+      pacedFirstTextSent = true;
+      await sleep(pacing.readDelayMs + pacing.hesitationMs);
+    }
+
     if (sentCount > 0) {
-      await sleep(typingDelayFor(frag.text));
+      await sleep(typingTimeFor(frag.text, pacing));
       if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
         state.interrupted = true;
         log.info("reply.interrupted", { user_id: userId, stage: "streaming" });
@@ -1239,7 +1279,7 @@ async function streamPrivateReply(params: {
 
   // 超出气泡上限的内容合并成一条发出（保持在 4 条以内，又不会丢话）
   if (mergedTail.trim()) {
-    await sleep(typingDelayFor(mergedTail));
+    await sleep(typingTimeFor(mergedTail, pacing));
     if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
       state.interrupted = true;
       log.info("reply.interrupted", { user_id: userId, stage: "before_merged_tail" });
