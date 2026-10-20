@@ -363,7 +363,13 @@ export interface LongrunMetrics {
   noReplyReasons: Record<string, number>;
   latency: { p50: number; p95: number; max: number; avg: number };
   bubbles: { total: number; avgPerReply: number; multiBubbleTurns: number; multiBubbleRate: number };
-  text: { bubbles: number; avgCharsPerBubble: number; avgCharsPerTurn: number; totalChars: number };
+  text: {
+    bubbles: number;
+    avgPerReply: number;
+    avgCharsPerBubble: number;
+    avgCharsPerTurn: number;
+    totalChars: number;
+  };
   emojiKaomoji: number;
   media: {
     image: number;
@@ -881,6 +887,7 @@ export function computeMetrics(turns: LongrunTurn[]): LongrunMetrics {
     },
     text: {
       bubbles: textBubbles.length,
+      avgPerReply: replied.length > 0 ? round(textBubbles.length / replied.length, 2) : 0,
       avgCharsPerBubble:
         textBubbles.length > 0 ? round(textBubbles.join("").length / textBubbles.length, 1) : 0,
       avgCharsPerTurn: replied.length > 0 ? round(totalTextChars / replied.length, 1) : 0,
@@ -1319,7 +1326,7 @@ export function renderReport(result: LongrunResult, existingReport?: string | nu
   lines.push(tableRow(["平均首条延迟", formatSeconds(m.latency.avg)]));
   lines.push(tableRow(["气泡总数 / 平均每条回复", `${m.bubbles.total} / ${m.bubbles.avgPerReply}`]));
   lines.push(tableRow(["多气泡率（≥2 条）", `${formatPct(m.bubbles.multiBubbleRate)}（${m.bubbles.multiBubbleTurns} 轮）`]));
-  lines.push(tableRow(["文字气泡数", m.text.bubbles]));
+  lines.push(tableRow(["文字气泡数 / 平均每轮", `${m.text.bubbles} / ${m.text.avgPerReply}`]));
   lines.push(tableRow(["平均每条文字气泡字数", m.text.avgCharsPerBubble]));
   lines.push(tableRow(["平均每轮文字字数", m.text.avgCharsPerTurn]));
   lines.push(tableRow(["颜文字/emoji（启发式）", m.emojiKaomoji]));
@@ -1787,6 +1794,16 @@ export function spawnBridgeProcess(
   const bridgeEntry = path.join(repoRoot, "src", "bridge", "qq.ts");
   if (!fs.existsSync(tsxCli)) throw new Error(`找不到 tsx CLI: ${tsxCli}（请先安装依赖）`);
   if (!fs.existsSync(bridgeEntry)) throw new Error(`找不到 bridge 入口: ${bridgeEntry}`);
+  // 用临时 workdir 里的 wrapper 入口启动：进程命令行不含 src/bridge/qq.ts，
+  // 避免开发者重启真实 bridge 时 `pkill -f "src/bridge/qq.ts"` 误杀 mock 子进程。
+  const wrapperEntry = path.join(workspace.workDir, "mock-bridge-entry.ts");
+  fs.writeFileSync(
+    wrapperEntry,
+    `// 真实验证台自动生成：真实 bridge 入口的 wrapper（见 src/eval/mock-longrun.ts）
+import ${JSON.stringify(bridgeEntry)};
+`,
+    "utf8",
+  );
 
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const key of STRIPPED_ENV_KEYS) delete env[key];
@@ -1802,7 +1819,7 @@ export function spawnBridgeProcess(
   });
   if (deepseek.baseUrl) env.DEEPSEEK_BASE_URL = deepseek.baseUrl;
 
-  const child = spawn(nodeBinary, [tsxCli, bridgeEntry], {
+  const child = spawn(nodeBinary, [tsxCli, wrapperEntry], {
     cwd: workspace.workDir,
     env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -1987,6 +2004,9 @@ export class MockOneBotClient {
       }
       this.actions.push(parsed);
       this.handleAction(parsed);
+    });
+    ws.on("error", () => {
+      // 连接错误统一由 close 事件处理；不挂 error 监听会抛未捕获异常
     });
     ws.on("close", (code: number, reason: Buffer) => {
       this.closedInfo = `code=${code} reason=${reason.toString()}`;
