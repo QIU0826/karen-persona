@@ -56,7 +56,7 @@ npm install
 # 可选：pnpm install（仅本地开发；仓库只跟踪 package-lock.json）
 ```
 
-> `better-sqlite3` 13 已内置 Windows/macOS/Linux 的 N-API 预编译模块（`prebuilds/`），正常 `npm install` **无需 C++ 编译工具链**。若安装的是更老版本才需要 VS Build Tools。
+> `better-sqlite3` 13 已内置 Windows/macOS/Linux 的 N-API 预编译模块（`prebuilds/`）；仓库根 `.npmrc` 设了 `ignore-scripts=true`，避免 npm 对带 `binding.gyp` 的包自动跑 `node-gyp rebuild`。正常 `npm install` **无需 C++ 编译工具链**（Windows 也不需要 Visual Studio）。若确需重建：`npm rebuild better-sqlite3 --foreground-scripts`。
 
 ### 2. 配置
 

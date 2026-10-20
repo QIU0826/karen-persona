@@ -23,6 +23,11 @@ node node_modules/vitest/vitest.mjs run            # 69 文件 / 687 用例全�
 - typecheck 0 错误；**69 文件 / 687 用例全绿**（含 mock-OneBot bridge E2E、setup E2E、人设包、多用户 Web、真实长跑报告）；
 - `doctor` 在缺 `config.yaml` / `.env` 时输出 ✅/❌ 清单和修复命令，不崩溃。
 
+### 1.2 CI 跨平台安装
+
+- ubuntu / macOS 通过；Windows 在 `npm ci` 失败（root cause：npm 对带 `binding.gyp` 的 better-sqlite3 自动执行 `node-gyp rebuild`，runner 无 Visual Studio）。
+- 修复：仓库根 `.npmrc` 设 `ignore-scripts=true`（依赖自带预编译二进制），本机干净安装/测试已通过，Windows CI 复验中。
+
 ### 1.2 仓库卫生 / 隐私
 
 | 检查 | 结果 |

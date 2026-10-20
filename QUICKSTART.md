@@ -22,7 +22,7 @@ npm install
 # 可选：pnpm install（仅本地开发；仓库只跟踪 package-lock.json）
 ```
 
-> 如果 `npm install` 报 C++ 编译错误：安装 [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)（勾选「C++ 桌面开发工作负载」）后重试。
+> 依赖自带预编译二进制；仓库根 `.npmrc` 默认 `ignore-scripts=true`，安装不会触发 node-gyp 编译，**Windows/macOS 都不需要 C++ 工具链**。若需重建原生模块：`npm rebuild better-sqlite3 --foreground-scripts`。
 
 ## 2. 配置（推荐用 `npm run setup`，或手动复制两个文件）
 
