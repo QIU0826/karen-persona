@@ -24,6 +24,7 @@ const COMMAND_SOURCES = [
   fs.readFileSync(path.join(ROOT, "src", "commands", "control.ts"), "utf-8"),
   fs.readFileSync(path.join(ROOT, "src", "test-bot.ts"), "utf-8"),
 ];
+const MATRIX_PATH = path.join(ROOT, "docs", "CAPABILITY_MATRIX.md");
 
 /** README 里出现的 npm run 脚本名（去掉参数） */
 export function extractNpmScripts(markdown: string): string[] {
@@ -97,5 +98,36 @@ describe("extractNpmScripts / extractSlashCommands（解析器自测）", () => 
     expect(cmds).toContain("/why");
     expect(cmds).toContain("/fact");
     expect(cmds).toContain("/api");
+  });
+});
+
+describe("能力总表（docs/CAPABILITY_MATRIX.md）", () => {
+  it("文件存在且分节齐全", () => {
+    expect(fs.existsSync(MATRIX_PATH)).toBe(true);
+    const md = fs.readFileSync(MATRIX_PATH, "utf-8");
+    for (const section of ["## 1. 记忆", "## 2. 拟人化交互", "## 3. 关系、主动性与演化", "## 4. 媒体", "## 5. 语音", "## 6. 工程与评测", "## 7. 明确未做的事"]) {
+      expect(md, `缺少分节：${section}`).toContain(section);
+    }
+  });
+
+  it("表里引用的所有代码/脚本路径都真实存在（防「文档写了不存在的文件」）", () => {
+    const md = fs.readFileSync(MATRIX_PATH, "utf-8");
+    const paths = new Set<string>();
+    for (const match of md.matchAll(/`((?:src|services|scripts|docs)\/[\w./-]+)`/g)) {
+      paths.add(match[1]);
+    }
+    expect(paths.size).toBeGreaterThan(20);
+    const missing = [...paths].filter((rel) => !fs.existsSync(path.join(ROOT, rel)));
+    expect(missing, `能力总表引用了不存在的路径：${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("每条能力的实测列都写了数字或明确的'未测/受阻'，不写空话", () => {
+    const md = fs.readFileSync(MATRIX_PATH, "utf-8");
+    // 抽查几处关键实测数字必须存在（防止有人把数字删了留空）
+    expect(md).toContain("97.5%"); // 记忆 recall@8
+    expect(md).toContain("100%"); // 锚点精确率
+    expect(md).toContain("p95");
+    expect(md).toContain("1174");
+    expect(md).toContain("59.21%");
   });
 });
