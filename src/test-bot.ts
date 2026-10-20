@@ -24,7 +24,6 @@ import { closenessLabel } from "./persona/relationship.js";
 import {
   initConversation,
   processMessage,
-  getStateSummary,
   persistRuntimeState,
 } from "./pipeline/orchestrator.js";
 import { handleControlCommand } from "./commands/control.js";

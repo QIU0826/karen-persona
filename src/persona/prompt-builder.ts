@@ -298,7 +298,6 @@ function defaultScript(): BehavioralScript {
 
 // ── corrections 覆盖 ────────────────────────────
 
-const CORRECTION_HALF_LIFE = 4.5 * 3600 * 1000;  // 4.5h
 const IMPEDANCE_THRESHOLD = 3;                    // 同类纠正 ≥3 次触发阻抗
 const IMPEDANCE_WINDOW = 4 * 3600 * 1000;         // 4h 窗口
 

@@ -53,7 +53,7 @@ export function getSilencePhase(state: SilenceState): SilencePhase {
  * 重启消息 = f(沉默时长, 用户最后一条消息的内容权重)
  */
 export function generateRestartMessage(
-  state: SilenceState,
+  _state: SilenceState,
   userLastMessage: string
 ): string {
   const hasEmotionalWeight =

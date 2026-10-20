@@ -20,13 +20,6 @@ const PERSONAS_DIR = path.resolve("personas");
 type Trust = "high" | "medium" | "low";
 type Source = "derived" | "inferred" | "default" | "unfilled";
 
-interface AnnotatedField {
-  value: any;
-  source: Source;
-  trust: Trust;
-  note: string;
-}
-
 interface PersonaAnswers {
   id: string;
   displayName: string;
@@ -372,17 +365,14 @@ function buildSkillMd(a: PersonaAnswers, derived: ReturnType<typeof deriveFromAn
 
   const catchphraseStr = (p["speaking.catchphrases"] as string[] | undefined)?.map((c) => `"${c}"`).join(" ") || "待补充";
   const dialectStr = p["speaking.dialect"] || "";
-  const careerStr = p["identity.lifeStory.career"] || "待补充";
   const currentStr = p["identity.lifeStory.currentStatus"] || "待补充";
   const attachmentStr = p["emotions.attachmentStyle"] || "安全型";
   const attachmentNote = notes["emotions.attachmentStyle"] || "";
   const vulnStr = (p["emotions.vulnerabilities"] as string[] | undefined)?.join("、") || "待补充";
-  const conflictStr = a.innerConflict ? a.innerConflict.slice(0, 60) : "待补充";
 
   const momentStr = a.entryAnswer.slice(0, 100);
   const speakStr = a.howSheSpeaks.slice(0, 120);
   const badStr = a.whatSheBadAt.slice(0, 80);
-  const relationStr = ""; // 需要用户自己补充
 
   // 依恋类型演化提示
   const evolutionHints: Record<string, string> = {

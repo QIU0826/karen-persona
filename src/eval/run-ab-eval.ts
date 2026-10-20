@@ -16,14 +16,11 @@ import * as path from "node:path";
 import { loadPersona, type Persona } from "../persona/loader.js";
 import { loadConfig } from "../data/store.js";
 import {
-  computeCompliance,
-  scoreCompliance,
   compareAB,
   buildBaselinePrompt,
   buildJudgePrompt,
   parseJudgeResponse,
   formatABReport,
-  type ComplianceScorecard,
   type ABComparison,
   type JudgeResult,
 } from "./consistency-eval.js";

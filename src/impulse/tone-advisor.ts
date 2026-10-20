@@ -263,7 +263,7 @@ export class ToneAdvisor {
     return Math.random() > 0.5 ? "start" : "end";
   }
 
-  private selectBestPosition(sentences: string[], textLength: number): "start" | "middle" | "end" {
+  private selectBestPosition(sentences: string[], _textLength: number): "start" | "middle" | "end" {
     if (sentences.length <= 1) {
       return Math.random() > 0.5 ? "start" : "end";
     }
@@ -296,7 +296,7 @@ export class ToneAdvisor {
     return priorities[Math.floor(Math.random() * priorities.length)];
   }
 
-  private getCategoryPriorities(emotion: EmotionType, scene: SceneType, closeness: number): string[] {
+  private getCategoryPriorities(emotion: EmotionType, _scene: SceneType, closeness: number): string[] {
     const base = ["sentenceEnd"];
 
     if (emotion === "excited" || emotion === "happy") {

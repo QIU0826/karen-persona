@@ -16,5 +16,8 @@ personas/*/memory.md
 # 便携 Node 运行时（本地部署用，不入库）
 .runtime/
 
+# 测试覆盖率报告（本地/CI 生成，不入库）
+coverage/
+
 # 数据库手动备份（本地保留，不入库）
 data/*.sqlite.bak*

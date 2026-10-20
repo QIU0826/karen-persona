@@ -90,6 +90,13 @@
 
 ### ✅ 已完成（2026-10-19 深夜）
 
+### ✅ 已完成（2026-10-20 工程加固：lint / 覆盖率 / 日志脱敏）
+
+- **lint（零新依赖）**：`npm run lint` = tsc `noUnusedLocals/noUnusedParameters`；修掉 47 处未使用导入/变量/参数（含 qq.ts 两个死函数、orchestrator 未用导入）；CI 增加 lint 步骤。
+- **覆盖率基线**：安装 `@vitest/coverage-v8`，`npm run test:coverage`；首次基线 Statements 50.9% / Branch 47.25% / Functions 57.76% / Lines 51.91%；vitest 阈值守护（50/45/55/51），CI 仅 Linux 跑一次；`coverage/` 加入 .gitignore。
+- **日志正文脱敏（IMP-5）**：新增 `src/obs/safe-text.ts`（`previewText`/`previewError`，4 条单测）；默认输出 `[redacted N chars]`，`LOG_CONTENT=1` 才输出 40 字预览；替换独白/日记/发图配文/主动消息/因果链/搜索词等 12 处内容打印；`.env.example` 增加开关说明。
+- **测试**：57 文件 / 619 用例，tsc 0、lint 0。
+
 ### ✅ 已完成（2026-10-20 30 轮真实长跑回归）
 
 - **新增长跑 harness**：`src/eval/longrun-sim.ts`（30 轮混合场景 + 指标汇总单测）+ 报告 `docs/LONGRUN_REGRESSION.md`。

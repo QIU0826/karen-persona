@@ -14,8 +14,9 @@
 import OpenAI from "openai";
 import { withThinking } from "../ai/chat.js";
 import { recordAuxUsage } from "../ai/aux-usage.js";
+import { previewText } from "../obs/safe-text.js";
 import { getChatModel } from "../ai/router.js";
-import { getVectorDb, getCurrentPersona, insertEpisode, updateStrength } from "../data/vector.js";
+import { getVectorDb, getCurrentPersona, insertEpisode } from "../data/vector.js";
 import { generateEmbedding } from "../data/embedding.js";
 
 // ── 阈值 ──────────────────────────────────────
@@ -143,7 +144,7 @@ export function maybeCompressToT3(): void {
       `[T3][dry-run] 将压缩 ${candidates.length} 条（未压缩 ${countRow.cnt} 条，上次摘要 ${lastSummaryAtMs ? new Date(lastSummaryAtMs).toISOString() : "无"}）`,
     );
     for (const item of candidates.slice(0, 5)) {
-      console.log(`  - #${item.id} ${item.created_at} ${item.preview.replace(/\s+/g, " ")}`);
+      console.log(`  - #${item.id} ${item.created_at} ${previewText(item.preview.replace(/\s+/g, " "))}`);
     }
     return;
   }

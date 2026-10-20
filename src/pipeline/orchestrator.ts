@@ -3,7 +3,7 @@ import { chat, chatStream } from "../ai/chat.js";
 import { classifyComplexity } from "../ai/router.js";
 import { addMessage, buildChatMessages, loadSession, type ConversationSession } from "../data/history.js";
 import { decideGate, getBusyLevel, type GateAction, type GateContext } from "../impulse/message-gate.js";
-import { insertT1Snapshot, insertEpisode, setCurrentPersona, applyGlobalDecay, archiveDecayedEpisodes, closeVectorDb, backfillEpisodeVectors } from "../data/vector.js";
+import { insertT1Snapshot, insertEpisode, setCurrentPersona, backfillEpisodeVectors } from "../data/vector.js";
 import { generateEmbedding } from "../data/embedding.js";
 import { buildRagContext, storeConversationEpisode } from "../data/retriever.js";
 import { retrieveWithLlmBoost } from "../data/retrieval-boost.js";
@@ -19,7 +19,6 @@ import {
   createGuiltState,
   incurGuilt,
   dailyDecay,
-  resentmentEffect,
   type GuiltState,
 } from "../persona/guilt-repayment.js";
 import {
@@ -30,7 +29,6 @@ import {
 import {
   buildPrompt,
   computeThreshold,
-  buildStateLabel,
   checkRuleBreach,
   type ChainRule,
   type BehavioralScript,
@@ -51,6 +49,7 @@ import { trySharePhoto } from "../impulse/unsplash-trigger.js";
 import { resolveOwnerScope, OWNER_CLI } from "../data/owner.js";
 import { extractUserFactsAsync, getUserFactsContext } from "../data/user-facts.js";
 import { getT1ArcContext } from "../data/t1-injection.js";
+import { previewText } from "../obs/safe-text.js";
 import { stripMemoryDeflection } from "../persona/reply-guard.js";
 import {
   detectCrisis,
@@ -75,7 +74,6 @@ import {
   generateIntrusion,
   type CausalChain,
 } from "../evolution/causal-chain.js";
-import { metabolizeMemories } from "../evolution/memory-decay.js";
 import { generateMonologue, storeMonologue, generateNightMonologue } from "../evolution/internal-monologue.js";
 import { retrieveStyleReference, buildStyleContext } from "../evolution/style-reference.js";
 import { maybeCompressToT3 } from "../evolution/t3-summarizer.js";
@@ -732,7 +730,7 @@ export async function processMessage(
 ): Promise<PipelineResult> {
   const logs: string[] = [];
   const now = new Date();
-  const { persona, config, emotionState, guiltState, socialTact, driftState, causalChains, silenceState, session, stance, weatherPerception } = state;
+  const { persona, config, emotionState, guiltState, socialTact, driftState, causalChains, silenceState, session, weatherPerception } = state;
 
   // A-1. 安全兜底：危机信号（不是情感识别，是安全优先）
   const crisis = detectCrisis(userInput);
@@ -758,26 +756,25 @@ export async function processMessage(
   const silencePhase = getSilencePhase(silenceState);
   if (silencePhase >= 3 && !silenceState.restartSent) {
     const restartMsg = generateRestartMessage(silenceState, userInput);
-    logs.push(`[沉默] 阶段${silencePhase}，建议重启: "${restartMsg}"`);
+    logs.push(`[沉默] 阶段${silencePhase}，建议重启: "${previewText(restartMsg)}"`);
   }
 
   // C. 因果链闯入 + 漂移
   const intrusion = generateIntrusion(causalChains);
   if (intrusion) {
-    logs.push(`[因果链] 闯入: ${intrusion.description}`);
+    logs.push(`[因果链] 闯入: ${previewText(intrusion.description)}`);
     Object.assign(emotionState, adjustEmotion(emotionState, intrusion.intensity * (Math.random() > 0.5 ? 1 : -1) * 0.1, "闯入事件"));
   }
   addDriftPressure(driftState, Math.abs(emotionState.vector - emotionState.baseline), 0);
   emotionState.baseline += getDriftOffset(driftState) * 0.01;
   dailyRebound(driftState, 0);
   const awareness = checkAwareness(driftState);
-  if (awareness.aware) logs.push(`[觉察] ${awareness.message}`);
+  if (awareness.aware) logs.push(`[觉察] ${previewText(awareness.message)}`);
 
 
 
   // D. 负债衰减
   Object.assign(guiltState, dailyDecay(guiltState));
-  const resentment = resentmentEffect(guiltState);
 
   // E. 消息门（与流式路径共用 buildGateContext）
   const gateContext = buildGateContext(state, userInput, now);
@@ -1046,7 +1043,7 @@ export async function processMessage(
     addUserTrace(chain, userInput);
     if (Math.random() < 0.1) {
       const trace = recallUserTrace(chain);
-      if (trace) logs.push(`[因果链] 回响: ${trace}`);
+      if (trace) logs.push(`[因果链] 回响: ${previewText(trace)}`);
     }
   }
 
@@ -1113,7 +1110,7 @@ export async function processMessage(
       imageUrl = photo.imageUrl;
       imageFile = photo.imageFile;
       imageCaption = photo.caption;
-      logs.push(`[发图] 主动分享(${photo.source}): ${imageCaption}`);
+      logs.push(`[发图] 主动分享(${photo.source}): ${previewText(imageCaption)}`);
     }
   } catch (err: unknown) {
     // 发图失败不影响主回复
@@ -1166,8 +1163,6 @@ function buildInterruptSignal(
   const isQuickFollow =
     userMsgs.length >= 2 &&
     userMsgs[userMsgs.length - 1].timestamp - userMsgs[userMsgs.length - 2].timestamp < 60_000;
-
-  const attachmentStyle = ""; // 由 persona 决定，这里用通用信号
 
   const parts: string[] = [];
   parts.push("[对方发了新消息");
@@ -1787,7 +1782,7 @@ export async function processProactive(
       }).then((mono) => {
         if (mono) {
           insertEpisode(`[独白] ${mono}`, "internal_monologue", -0.1);
-          console.log(`[独白] 深夜冲动已记录: ${mono.slice(0, 60)}...`);
+          console.log(`[独白] 深夜冲动已记录: ${previewText(mono)}`);
         }
       }).catch(() => { /* 独白失败不影响主流程 */ });
     } else {
@@ -1886,14 +1881,14 @@ export async function processProactive(
   state.proactiveCountToday += 1;
   persistRuntimeState(state);
 
-  logs.push(`[主动] 已发送: "${reply.slice(0, 50)}..."`);
+  logs.push(`[主动] 已发送: ${previewText(reply)}`);
   return { reply, logs, qqFace: rendered.qqFace };
 }
 
 // ── 统计信息 ──────────────────────────────────
 
 export function getStateSummary(state: ConversationState): string[] {
-  const { persona, emotionState, guiltState, driftState, causalChains, session } = state;
+  const { emotionState, guiltState, driftState, causalChains, session } = state;
   const episodes = (() => {
     try {
       const { getAllEpisodes } = require("../data/vector.js");

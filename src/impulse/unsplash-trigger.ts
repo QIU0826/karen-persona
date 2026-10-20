@@ -10,6 +10,7 @@ import OpenAI from "openai";
 import { getChatModel } from "../ai/router.js";
 import { withThinking } from "../ai/chat.js";
 import { recordAuxUsage } from "../ai/aux-usage.js";
+import { previewText } from "../obs/safe-text.js";
 import { fetchUnsplashPhoto } from "../ai/image-gen.js";
 import { describeEmotion } from "../persona/emotion.js";
 import { pickPhotoShare, photoFilePath } from "./photo-library.js";
@@ -37,7 +38,7 @@ async function searchWithFallback(query: string): Promise<string | null> {
   const words = query.split(" ");
   if (words.length <= 3) return null;
   const broader = words.slice(0, -2).join(" ");
-  console.log(`[Unsplash] 首搜无结果，重试: "${broader}"`);
+  console.log(`[Unsplash] 首搜无结果，重试: "${previewText(broader)}"`);
   return fetchUnsplashPhoto(broader);
 }
 

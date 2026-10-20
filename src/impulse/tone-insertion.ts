@@ -1,6 +1,6 @@
 import { ToneDecisionEngine, ContextFactors } from "./tone-engine.js";
-import { ToneAdvisor, createToneAdvisor, ToneHistory } from "./tone-advisor.js";
-import { EmotionType, SceneType, ClosenessLevel, TONE_VAULT, getToneWordsByContext } from "./tone-vault.js";
+import { createToneAdvisor, ToneHistory } from "./tone-advisor.js";
+import { EmotionType, SceneType, ClosenessLevel, getToneWordsByContext } from "./tone-vault.js";
 
 export interface ToneConfig {
   style: string;

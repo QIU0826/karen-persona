@@ -91,7 +91,6 @@ export function perceiveTime(world: PersonalWorld): TimeContext {
   const now = new Date();
   const hour = now.getHours();
   const weekday = now.getDay();
-  const month = now.getMonth() + 1;
   const period = getPeriod(hour);
   const dayLabel = `周${WEEKDAY_NAMES[weekday]}`;
 

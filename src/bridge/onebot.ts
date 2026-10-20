@@ -352,13 +352,6 @@ interface ApiCall {
   echo?: string;
 }
 
-interface ApiResponse {
-  status: "ok" | "failed";
-  retcode: number;
-  data: unknown;
-  echo?: string;
-}
-
 // ── WS 连接管理 ──────────────────────────────────
 
 let connections: WebSocket[] = [];

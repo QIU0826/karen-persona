@@ -64,7 +64,7 @@ export function internalStateImpulse(
  */
 export function userSilenceImpulse(
   silenceHours: number,
-  closeness: number,
+  _closeness: number,
   attachmentStyle: string
 ): ImpulseTrigger | null {
   // 阶段1: < 6h → 不觉得有问题

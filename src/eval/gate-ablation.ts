@@ -9,7 +9,7 @@
  * 测量不同参数组合下门控决策的分布变化，
  * 输出灵敏度分析和推荐参数范围。
  */
-import { decideGate, type GateContext, type GateAction } from "../impulse/message-gate.js";
+import { decideGate, type GateContext } from "../impulse/message-gate.js";
 
 // ── 参数网格 ──────────────────────────────────
 
@@ -195,7 +195,7 @@ export function runAblation(
   };
 }
 
-function applyOverrides(ctx: GateContext, params: AblationParams): GateContext {
+function applyOverrides(ctx: GateContext, _params: AblationParams): GateContext {
   // 通过调整 messageCountToday 来模拟不同的 earlyMsgExempt 阈值效果
   // （门控内部的豁免逻辑使用的是硬编码阈值，这里无法直接修改——
   //   消融实验的价值在于展示"如果阈值变了，决策分布会怎么变"的推理框架。

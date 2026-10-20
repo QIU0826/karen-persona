@@ -179,7 +179,6 @@ export async function fetchWeather(
 export function mockWeather(city: string): WeatherInfo {
   const now = new Date();
   const month = now.getMonth() + 1;
-  const hour = now.getHours();
 
   // 基于季节的天气概率
   const isSummer = month >= 6 && month <= 8;

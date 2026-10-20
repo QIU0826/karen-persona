@@ -18,6 +18,7 @@ import { getVectorDb } from "../data/vector.js";
 import OpenAI from "openai";
 import { withThinking } from "../ai/chat.js";
 import { recordAuxUsage } from "../ai/aux-usage.js";
+import { previewText } from "../obs/safe-text.js";
 import { getChatModel } from "../ai/router.js";
 
 // ── 翻阅日记（P2-1）─────────────────────────────
@@ -95,7 +96,7 @@ export async function flipThroughDiary(): Promise<string | null> {
     if (!text || text === "没什么特别的" || text === "没什么特别的。" || text.length < 2) {
       return null;
     }
-    console.log(`[日记翻阅] ${text}`);
+    console.log(`[日记翻阅] ${previewText(text)}`);
     return text;
   } catch (err) {
     console.log(`[日记翻阅] 失败: ${err instanceof Error ? err.message : err}`);

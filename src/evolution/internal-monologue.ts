@@ -13,6 +13,7 @@
 import OpenAI from "openai";
 import { withThinking } from "../ai/chat.js";
 import { recordAuxUsage } from "../ai/aux-usage.js";
+import { previewText } from "../obs/safe-text.js";
 import { getChatModel } from "../ai/router.js";
 import { insertEpisodeWithEmbedding } from "../data/vector.js";
 import { generateEmbedding } from "../data/embedding.js";
@@ -131,7 +132,7 @@ export async function generateMonologue(params: MonologueParams): Promise<Monolo
 /**
  * 存储独白到 T2 记忆库，并返回漂移信息用于基线更新。
  */
-export function storeMonologue(result: MonologueResult, personaName: string): void {
+export function storeMonologue(result: MonologueResult, _personaName: string): void {
   if (!result.text) return;
 
   const content = `[独白] ${result.text}`;
@@ -140,7 +141,7 @@ export function storeMonologue(result: MonologueResult, personaName: string): vo
 
   insertEpisodeWithEmbedding(content, "internal_monologue", embedding, emotionalWeight);
   maybeCompressToT3();
-  console.log(`[独白] ${result.text.slice(0, 60)}...`);
+  console.log(`[独白] 已生成 ${previewText(result.text)}`);
   if (result.selfAware) {
     console.log(`[独白] 自我觉察: ${result.driftDirection ?? "未明"} → 漂移压力 ±0.02`);
   }

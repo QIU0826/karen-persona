@@ -95,7 +95,7 @@ export function penetrationCheck(
  * 生成"知道但不关心"的回应模板。
  * 可以没有观点，但不能没有反应。
  */
-export function neutralAwarenessResponse(topic: string): string {
+export function neutralAwarenessResponse(_topic: string): string {
   const templates = [
     `哦那个，我不太追这些。怎么了？`,
     `好像瞥到过一眼，但没仔细看。发生什么了？`,

@@ -54,7 +54,7 @@ export function isException(
  */
 export function exceptionSelfAwareness(
   personaType: "高冷型" | "回避型" | "话痨型" | "安全型",
-  action: string
+  _action: string
 ): string | null {
   switch (personaType) {
     case "高冷型":

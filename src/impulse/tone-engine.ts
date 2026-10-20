@@ -1,6 +1,6 @@
 import {
   EmotionType, SceneType, ClosenessLevel, ToneCategory,
-  TONE_VAULT, CATEGORY_CONFIG, getToneWordsByContext, calculateCategoryProbability,
+  CATEGORY_CONFIG, getToneWordsByContext, calculateCategoryProbability,
 } from "./tone-vault.js";
 
 export interface ContextFactors {

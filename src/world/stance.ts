@@ -17,7 +17,7 @@ export interface PerceptualStance {
  */
 export function deriveStance(
   age: number,
-  personality: string
+  _personality: string
 ): PerceptualStance {
   // 年轻人更主动，年长者更防御型（对流行文化）
   const isYoung = age < 25;

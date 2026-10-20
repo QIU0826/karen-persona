@@ -1,7 +1,8 @@
 name: CI
 
 # 提交到任意分支、以及所有 PR 都会跑：
-#   安装锁定依赖（npm ci）→ 类型检查（tsc --noEmit）→ 单元测试（vitest run）
+#   安装锁定依赖（npm ci）→ 类型检查（tsc --noEmit）→ lint（未使用代码）→ 单元测试（vitest run）
+#   Linux 额外跑覆盖率基线（npm run test:coverage，阈值见 vitest.config.ts）
 on:
   push:
   pull_request:
@@ -36,5 +37,14 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # 零新依赖的 lint：用 tsc 的 noUnusedLocals/noUnusedParameters 查未使用导入/变量/参数
+      - name: Lint (unused code)
+        run: npm run lint
+
       - name: Unit tests
         run: npm test
+
+      # 覆盖率基线只在 Linux 跑一次（三平台测试已覆盖安装/行为，避免三倍耗时）
+      - name: Coverage baseline (Linux)
+        if: runner.os == 'Linux'
+        run: npm run test:coverage

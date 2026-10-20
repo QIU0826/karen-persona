@@ -176,7 +176,6 @@ export function computeSentimentTrend(points?: SentimentPoint[]): SentimentTrend
   }
 
   // 愧疚趋势
-  const gMean = guilts.reduce((a, b) => a + b, 0) / guilts.length;
   const gFirst = guilts.slice(0, Math.floor(guilts.length / 3)).reduce((a, b) => a + b, 0) / Math.max(1, Math.floor(guilts.length / 3));
   const gLast = guilts.slice(-Math.floor(guilts.length / 3)).reduce((a, b) => a + b, 0) / Math.max(1, Math.floor(guilts.length / 3));
   const guiltDelta = gLast - gFirst;

@@ -124,7 +124,7 @@ export function renderExpression(
 }
 
 function pickKaomoji(
-  content: string,
+  _content: string,
   style: string
 ): string | undefined {
   if (style === "none") return undefined;

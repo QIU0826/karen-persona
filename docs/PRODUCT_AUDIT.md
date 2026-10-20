@@ -38,7 +38,8 @@
 - 跨平台 QQ 桥接方案 ✅ 文档化（`docs/QQ_BRIDGE_CROSS_PLATFORM.md` + `deploy/napcat-macos`/`napcat-windows` + `scripts/mock-onebot.mjs`；mock 全链路实测通过；macOS 原生 NapCat 未实机扫码验证）
 - 真机联调（2026-10-19 深夜）：NapCat 原生 macOS → Karen → DeepSeek 全链路跑通；图片识别/缓存/流式正常；已修复 BUG-1（关系误判）、BUG-2（延迟队列持久化）、IMP-1（图片描述过短），并新增免打扰配置；问题清单见 docs/M1_BACKLOG.md。
 - M1-7 记忆检索 P0 完成：n-gram + FTS5 BM25 RRF 混合、sqlite-vec 启用、语义 embedding 双列（需 Qwen Key 实跑）、真实库 schema v2 幂等迁移验证。测试数更新为 27 文件 / 386 用例。
-- 记忆评测 + 反重复 + 检索修复（2026-10-20）：新增可复现记忆金标集（20 条中文 case，离线 recall@k / facts 注入 / anti-forget，报告 `docs/MEMORY_EVAL_REPORT.md`）；修复 `searchEpisodesByFts` 的 FTS5 隐式 AND 问题（自然问句 FTS 命中 0/20 → 20/20，T2 recall@8 40%→85%）；新增跨轮反重复（`src/persona/anti-repetition.ts`，默认只注入开头词，真实 A/B 见 `docs/MEMORY_AI_TONE_AUDIT.md` §4.1）；补上流式主路径遗漏的用户事实注入；Web 控制台新增「用户事实」「记忆命中回放」只读面板。测试数更新为 56 文件 / 615 用例。
+- 记忆评测 + 反重复 + 检索修复（2026-10-20）：新增可复现记忆金标集（20 条中文 case，离线 recall@k / facts 注入 / anti-forget，报告 `docs/MEMORY_EVAL_REPORT.md`）；修复 `searchEpisodesByFts` 的 FTS5 隐式 AND 问题（自然问句 FTS 命中 0/20 → 20/20，T2 recall@8 40%→85%）；新增跨轮反重复（`src/persona/anti-repetition.ts`，默认只注入开头词，真实 A/B 见 `docs/MEMORY_AI_TONE_AUDIT.md` §4.1）；补上流式主路径遗漏的用户事实注入；Web 控制台新增「用户事实」「记忆命中回放」只读面板。测试数更新为 57 文件 / 619 用例。
+- 工程加固（2026-10-20）：零依赖 lint（tsc 未使用代码检查，47 处清理，CI 接入）、覆盖率基线（@vitest/coverage-v8：行 51.9%，阈值守护）、日志正文默认脱敏（obs/safe-text，LOG_CONTENT=1 才预览）。测试 57 文件 / 619 用例。
 - 30 轮真实长跑回归（2026-10-20）：记忆 6/6、复读对 0、错误 0、137 次调用 ¥0.0758；修复事实抽取质量（角色人设泄漏/模糊职业/丢细节 → prompt+接地校验）、记忆防御话术漏网（确定性 reply-guard）、小候选池无用重排；报告 docs/LONGRUN_REGRESSION.md。测试 56 文件 / 615 用例。
 - 成本统计覆盖旁路 LLM（2026-10-20）：新增 aux-usage 统一记账（事实抽取/独白/T3/herView/日志/叙事/视觉/配图搜索词），带 kind；/cost 与 Web 控制台按用途拆分；仍为估算（节假日峰谷近似）。测试 54 文件 / 600 用例。
 - 年龄门 18+ 确认（2026-10-20）：新增 consent 存储 + age-gate 纯函数；QQ 私聊首次对话披露+确认请求，未确认不进入对话、未成年明确拒绝、群聊未确认不回复；`/age` 查看；默认开启（CLI 不强制），仍是自我声明。测试 53 文件 / 596 用例。

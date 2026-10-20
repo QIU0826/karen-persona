@@ -3,7 +3,7 @@
  * 人设校验 CLI
  * 用法: npx tsx src/persona/check.ts [persona-id]
  */
-import { loadPersona, validatePersona, listPersonas, CURRENT_SCHEMA_VERSION } from "./loader.js";
+import { validatePersona, listPersonas, CURRENT_SCHEMA_VERSION } from "./loader.js";
 import fs from "node:fs";
 import path from "node:path";
 

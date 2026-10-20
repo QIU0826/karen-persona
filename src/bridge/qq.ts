@@ -37,7 +37,6 @@ import {
   processMessage,
   processMessageStream,
   processProactive,
-  getStateSummary,
   persistRuntimeState,
   type ConversationState,
   type PipelineResult,
@@ -129,11 +128,6 @@ function stripCqCodes(raw: string): string {
   return raw.replace(/\[CQ:[^\]]+\]/g, " ").replace(/\s+/g, " ").trim();
 }
 
-/** 只保留长度信息：日志中不落任何消息正文 */
-function textSummary(text: string): string {
-  return `${text.length} 字`;
-}
-
 /** 按 Unicode 码点统计字符数（结构化日志字段用）。 */
 function charCount(text: string): number {
   return Array.from(text).length;
@@ -151,19 +145,6 @@ function notifyWindows(title: string, body: string): void {
     execSync(`powershell -NoProfile -Command "${ps}"`, { timeout: 8000, stdio: "ignore" });
   } catch {
     // 通知失败不影响主流程，也不在日志里输出异常（可能包含命令行参数）
-  }
-}
-
-/** 下载图片并转为 base64 data URI，供 CQ 码使用 */
-async function downloadImageAsBase64(url: string): Promise<string | null> {
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!resp.ok) return null;
-    const buf = Buffer.from(await resp.arrayBuffer());
-    const mime = resp.headers.get("content-type") ?? "image/jpeg";
-    return `base64://${buf.toString("base64")}`;
-  } catch {
-    return null;
   }
 }
 
@@ -793,7 +774,6 @@ async function main() {
         const result = await processProactive(state);
         if (!result || !result.reply) continue;
 
-        const userName = String(userId);
         for (const line of result.logs) {
           console.log(`  ${line}`);
         }
@@ -1023,7 +1003,7 @@ async function streamPrivateReply(params: {
   /** 日志前缀，用于区分正常回复与延迟补发 */
   logPrefix?: string;
 }): Promise<PrivateStreamOutcome> {
-  const { state, text, userId, userName, options } = params;
+  const { state, text, userId, options } = params;
   const logPrefix = params.logPrefix ?? "回复";
   const pendingSnapshot = userPending.get(userId) ?? 0;
   let sentCount = 0;
@@ -1365,7 +1345,7 @@ async function handlePrivateBatch(
 async function sendGroupReplies(
   groupId: number,
   userId: number,
-  userName: string,
+  _userName: string,
   result: PipelineResult,
   options: { photoEnabled?: boolean } = {},
 ): Promise<number> {

@@ -56,7 +56,7 @@ export function exposureRatio(
  * 高亲密度关门 = 不需要解释 = 无负债
  */
 export function analyzeDoorClosing(
-  tact: SocialTact,
+  _tact: SocialTact,
   closeness: number
 ): {
   isDoorClosing: boolean;

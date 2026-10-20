@@ -14,6 +14,7 @@
 import OpenAI from "openai";
 import { withThinking } from "../ai/chat.js";
 import { recordAuxUsage } from "../ai/aux-usage.js";
+import { previewText } from "../obs/safe-text.js";
 import { getChatModel } from "../ai/router.js";
 import { getVectorDb, getCurrentPersona, insertEpisode, getRecentSnapshots, type T1Snapshot } from "../data/vector.js";
 import { generateEmbedding } from "../data/embedding.js";
@@ -27,7 +28,6 @@ const MIN_SNAPSHOTS = 30;
 const MIN_INTERVAL_DAYS = 7;
 
 /** 快照采样天数 */
-const SAMPLE_DAYS = 30;
 
 // ── 趋势分析 ──────────────────────────────────
 
@@ -191,7 +191,7 @@ export function maybeGenerateJournal(): void {
     getVectorDb().prepare("UPDATE t2_episodes SET embedding = ?, half_life_days = 180 WHERE id = ?")
       .run(arr, episodeId);
 
-    console.log(`[日志] 进化日志已生成 (id=${episodeId}): ${narrative.slice(0, 80)}...`);
+    console.log(`[日志] 进化日志已生成 (id=${episodeId}): ${previewText(narrative)}`);
   }).catch((err) => {
     console.log(`[日志] 生成失败: ${err instanceof Error ? err.message : err}`);
   });
