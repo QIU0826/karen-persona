@@ -14,7 +14,7 @@ ln -s "$PWD/node_modules" "$TMP/node_modules"
 cd "$TMP"
 node node_modules/tsx/dist/cli.mjs src/doctor.ts     # 无 config/.env 时给出可执行修复指引
 node node_modules/typescript/bin/tsc --noEmit        # 0 错误
-node node_modules/vitest/vitest.mjs run              # 68 文件 / 683 用例全绿
+node node_modules/vitest/vitest.mjs run              # 69 文件 / 686 用例全绿
 ```
 
 结果（2026-10-20）：typecheck 0 错误；679 用例全绿（含 mock-OneBot bridge E2E、setup E2E、人设包、多用户 Web、真实长跑报告）；`doctor` 在缺 `config.yaml` / `.env` 时输出 ✅/❌ 清单和修复命令，不崩溃。
@@ -39,7 +39,7 @@ node node_modules/vitest/vitest.mjs run              # 68 文件 / 683 用例全
 ### 1.4 真机与测试
 
 - 真实 QQ 长跑：首轮 2 个完整回合，平均延迟 2876ms，成本 ¥0.005650，空/重复 0；暴露的「老用户无 AI 披露」「快速追问被误延迟 31 分钟」已修复（见 [QQ_REAL_RUN.md](QQ_REAL_RUN.md)）。**样本仍少**。
-- 测试：68 文件 / 683 用例；`tsc` 0、lint 0；覆盖率行 54.2%（CI 阈值守护，Linux）。
+- 测试：69 文件 / 686 用例；`tsc` 0、lint 0；覆盖率行 54.3%（CI 阈值守护，Linux）。
 - CI：ubuntu / macOS / Windows 三平台矩阵；Linux 额外跑覆盖率。
 
 ## 2. 发布决策与待办
@@ -76,6 +76,6 @@ git push origin main --follow-tags
 - **本地 Web 控制台**：多用户只读切换（默认关，`web_all_owners: true` 开）、单用户 JSON 导出、健康/成本视图；仍只绑本机。
 - **真实 QQ 长跑工具**：`npm run qq:watch -- --duration 1800`，只读观察真实回合/延迟/成本/事实/同意并生成本地报告。
 - **真机修复**：快速追问不再被随机延迟；AI 披露改为默认关闭（可显式开启）；`/about` 文案支持当前人设名。
-- **质量**：67 测试文件 / 679 用例；`tsc` 0、lint 0、行覆盖 54.2%；干净 checkout 复验通过。
+- **质量**：67 测试文件 / 679 用例；`tsc` 0、lint 0、行覆盖 54.3%；干净 checkout 复验通过。
 
 **升级提示**：老数据无需迁移；**AI 披露默认关闭**（不在聊天里出现；公开发布/商用可在 `config.yaml` 打开 `ai_disclosure: true`）。**已知限制**见 README「已知限制」：18+ 为自我声明、危机检测为关键词兜底、NapCat 有封号风险、群聊为半成品、无 TTS/图片生成、真语义向量需 Qwen Key。

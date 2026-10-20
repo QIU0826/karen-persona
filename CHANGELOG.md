@@ -10,6 +10,7 @@ M2 产品化 + 真实 QQ 首轮验证修复。
 - **人设包 v2（M2-B）**：`manifest.json` + `persona.json` + 可选 `assets/`、`memories/seed.jsonl`；`npm run persona:pack:validate/install/list`；覆盖安装自动备份到 `personas/.backups/`；记忆种子默认不写库。
 - **本地 Web 控制台多用户只读视图（M2-C）**：`/api/owners` + `?owner=` 只读切换会话/时间线/记忆/总览（默认只展示主用户，`web_all_owners: true` 开启）；前端 owner 下拉。
 - **单用户 JSON 导出（M2-C）**：`GET /api/export?owner=` 下载会话 + 人格状态 + T2 记忆（不落盘）；控制台「导出当前用户」按钮。
+- **`/forget 关键词 [--yes]`**：按关键词删除本机 T2 记忆（先预览，确认后加 `--yes` 才删；一次最多 20 条），用于修正被编造/记错的往事。
 - **真实 QQ 长跑工具（M2-D）**：`npm run qq:watch -- --duration 1800` 只读观察真实回合/延迟/成本/事实/同意并生成本地报告；支持 `--once --since` 复盘历史。
 - `npm run qq:watch`、`persona:pack:*` 等新命令；`web_all_owners` 配置项。
 
@@ -23,7 +24,7 @@ M2 产品化 + 真实 QQ 首轮验证修复。
 
 ### Testing
 
-- 68 个测试文件 / 683 个用例；`tsc --noEmit` 0 错误；`npm run lint` 0 违规；行覆盖率 54.2%（CI 阈值守护）。
+- 69 个测试文件 / 686 个用例；`tsc --noEmit` 0 错误；`npm run lint` 0 违规；行覆盖率 54.3%（CI 阈值守护）。
 - 干净 checkout（`git archive` 到临时目录）复验通过；`doctor` 在缺 config/.env 时给出可执行修复指引。
 
 ### Upgrade notes

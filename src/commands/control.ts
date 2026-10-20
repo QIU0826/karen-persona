@@ -9,6 +9,7 @@ import { closenessLabel } from "../persona/relationship.js";
 import { getStateSummary, type ConversationState } from "../pipeline/orchestrator.js";
 import { buildAboutText } from "../persona/disclosure.js";
 import { getConsent } from "../data/consent.js";
+import { deleteEpisode, searchEpisodesByKeyword } from "../data/vector.js";
 
 export interface ExportSummary {
   path: string;
@@ -92,6 +93,7 @@ export function buildHelpText(): string {
     "可用指令：",
     "/why: 解释她上一轮为什么这样回",
     "/stats: 关系/情绪/记忆状态",
+    "/forget 关键词: 删除包含关键词的记忆（先预览，加 --yes 才删）",
     "/pause: 暂停主动消息（仍会回复你的消息）",
     "/resume: 恢复主动消息",
     "/export: 导出你们的对话与记忆备份（JSON）",
@@ -99,6 +101,51 @@ export function buildHelpText(): string {
     "/age: 查看年龄确认状态",
     "/help: 这条帮助",
   ].join("\n");
+}
+
+export interface ForgetResult {
+  keyword: string;
+  matched: number;
+  deleted: number;
+  /** 前几条匹配预览（确认前给用户看） */
+  previews: string[];
+  requiresConfirm: boolean;
+}
+
+const FORGET_MAX_MATCHES = 20;
+
+function previewMemory(content: string, max = 60): string {
+  const oneLine = content.replace(/\s+/g, " ").trim();
+  return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max)}…`;
+}
+
+/**
+ * 记忆修正：按关键词删除当前人设的 T2 记忆。
+ * - 默认只预览，必须显式带 `--yes` 才真正删除（避免误删）；
+ * - 一次最多 20 条；只删 T2，不动会话 JSON / 人格状态。
+ */
+export function forgetMemories(rawArg: string | undefined): ForgetResult {
+  const text = (rawArg ?? "").trim();
+  const requiresConfirmFlag = /(^|\s)--yes$/i.test(text);
+  const keyword = text.replace(/(^|\s)--yes$/i, "").trim();
+  if (!keyword) {
+    return { keyword: "", matched: 0, deleted: 0, previews: [], requiresConfirm: false };
+  }
+  const hits = searchEpisodesByKeyword(keyword, FORGET_MAX_MATCHES);
+  if (!requiresConfirmFlag) {
+    return {
+      keyword,
+      matched: hits.length,
+      deleted: 0,
+      previews: hits.slice(0, 3).map((hit) => previewMemory(hit.content)),
+      requiresConfirm: true,
+    };
+  }
+  let deleted = 0;
+  for (const hit of hits) {
+    if (deleteEpisode(hit.id)) deleted += 1;
+  }
+  return { keyword, matched: hits.length, deleted, previews: [], requiresConfirm: false };
 }
 
 /** 处理治理命令；不是已知命令返回 false（由调用方决定兜底文案）。 */
@@ -117,6 +164,38 @@ export async function handleControlCommand(
     case "why":
       deps.reply(buildWhyText(state));
       return true;
+    case "forget": {
+      if (!cmd.arg) {
+        deps.reply("用法：/forget 关键词 [--yes]（先预览，确认后加 --yes 才删除）");
+        return true;
+      }
+      const result = forgetMemories(cmd.arg);
+      if (!result.keyword) {
+        deps.reply("用法：/forget 关键词 [--yes]（先预览，确认后加 --yes 才删除）");
+        return true;
+      }
+      if (result.requiresConfirm) {
+        if (result.matched === 0) {
+          deps.reply(`没有找到包含「${result.keyword}」的记忆。`);
+        } else {
+          deps.reply(
+            [
+              `找到 ${result.matched} 条包含「${result.keyword}」的记忆：`,
+              ...result.previews.map((line) => `· ${line}`),
+              "",
+              `确认删除请发送：/forget ${result.keyword} --yes（一次最多 ${FORGET_MAX_MATCHES} 条）`,
+            ].join("\n"),
+          );
+        }
+        return true;
+      }
+      deps.reply(
+        result.deleted > 0
+          ? `已删除 ${result.deleted} 条包含「${result.keyword}」的记忆（仅本机 T2；可用 /export 先备份）。`
+          : `没有找到包含「${result.keyword}」的记忆。`,
+      );
+      return true;
+    }
     case "pause":
       state.proactivePaused = true;
       deps.persist();
