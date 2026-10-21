@@ -175,7 +175,13 @@ async function tryGeneratedPhoto(
     (options.preferredTags ?? []).includes("sunset")
       ? ["刚拍的，天这样了", "你看今天的天空"]
       : ["刚拍的", "随手拍了一张", "这个角度还行吧"];
-  const caption = captionPool[Math.floor(random() * captionPool.length)];
+  // v0.8.23：避免连续两次用同一句配文（真实长跑评审："喏，刚拍的 / 刚拍的" 像机械重复）
+  const personaKey = state.storagePersona ?? state.persona.name;
+  const recent = recentPhotoCaptions.get(personaKey) ?? [];
+  const fresh = captionPool.filter((text) => !recent.includes(text));
+  const pool = fresh.length > 0 ? fresh : captionPool;
+  const caption = pool[Math.floor(random() * pool.length)];
+  recentPhotoCaptions.set(personaKey, [...recent, caption].slice(-3));
   log.info("photo.generated", { bytes: result.bytes.length, elapsed_ms: result.elapsedMs ?? 0 });
   return { imageFile: file, caption, source: "generated" };
 }

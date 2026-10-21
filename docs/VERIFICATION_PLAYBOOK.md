@@ -41,6 +41,7 @@ npm run refine:smoke     # 锚点复筛：精度优先 / 当日幂等           
 npm run proactive:smoke  # 主动消息 plan 场景：像不像念稿                 ~¥0.002
 # 零成本
 npm run rollup:smoke     # 周汇总：7 天全覆盖 / 话题不被截断 / 幂等
+npm run image:smoke      # 本机生图：真出图 / 可复现 / 落盘 / 产品路径（需先 image:start）
 
 # 真机（需要真实 QQ 有历史消息）
 npm run qq:watch -- --once --since 2026-10-18T00:00:00
@@ -127,8 +128,15 @@ fs.rmSync(tmp, { recursive: true, force: true });
 全量并行时桥接进程处理变慢，直接等某个附带动作（如贴纸）会假失败——
 v0.8.19 的贴纸断言就因此在全量跑里失败过两次。
 → 先 `waitFor` 这一轮的回复出现（说明消息处理完了），再等附加动作。
+另外：全量并行跑时桥接子进程会被 CPU 抢占，**等待默认 30s**（个别场景 20s 会偶发假失败）。
 
-### 坑 5：临时目录的异步任务会在 cleanup 后报错
+### 坑 5：下载大模型要先确认「走的是哪条 CDN」
+
+`huggingface_hub` 1.x 默认走 **Xet**（`us.aws.cdn.hf.co`）；HF 直连不通时它不会自动回退 HTTP，
+报的是 `RuntimeError: Task error: File reconstruction error: CAS Client Error`。
+→ 设置 `HF_HUB_DISABLE_XET=1` 或改用镜像 + 分块 curl；并注意 `| tail` 会把失败吞成 exit 0。
+
+### 坑 6：临时目录的异步任务会在 cleanup 后报错
 
 冒烟脚本 `fs.rmSync(tmp)` 之后，后台的 embedding 升级/成本写入还在跑，
 会刷 `database connection is not open` 噪声日志。
@@ -149,6 +157,7 @@ v0.8.19 的贴纸断言就因此在全量跑里失败过两次。
 | v0.8.17 | 真实冒烟 | ①复筛不回写 `anchor_id` ②`created` 把"复述强化"算新增 ③被否候选永远留在池里 | 幂等只靠 job_runs、计数量错、缺哨兵 |
 | v0.8.18 | 真实冒烟 | ①400 字截断吃掉「还没聊完」②周汇总**写了但没人读** | 拼接后硬截断、断链（无消费者） |
 | v0.8.19 | 桥接 E2E | 点名要表情包时，收集库只有 22% 概率被选中 | 两条路径概率策略不一致 |
+| v0.8.23 | mock 长跑评审 | ①打错字撤回把 24 度换成 42 度（事实错误）②生成图配文连用同一句 | 错字目标包含数字；生成图路径没复用避重 |
 
 **共同点**：没有一个是"函数算错了"，全是**数据流、优先级、截断、幂等、开关组合**问题。
 这正是纯函数单测的盲区。

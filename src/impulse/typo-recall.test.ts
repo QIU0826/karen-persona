@@ -290,3 +290,25 @@ describe("onebot 受控撤回 delete_msg", () => {
     expect(await recallMessage(Number.NaN)).toBe(false);
   });
 });
+
+describe("错字不能改数字（v0.8.23 真实长跑评审驱动）", () => {
+  const digits = (text: string): string => (text.match(/[0-9０-９]+/g) ?? []).join(",");
+
+  it("含数字的句子：错字版里的数字必须原样保留", () => {
+    const text = "多云，24度，挺舒服的";
+    for (let i = 0; i < 60; i++) {
+      const typo = introduceTypo(text, () => (i % 60) / 60);
+      if (!typo) continue;
+      expect(digits(typo), `第 ${i} 次把数字改掉了：${typo}`).toBe(digits(text));
+    }
+  });
+
+  it("数字不会被相邻互换（24 不能变 42）", () => {
+    const text = "今天24度";
+    for (let i = 0; i < 60; i++) {
+      const typo = introduceTypo(text, () => (i % 60) / 60);
+      if (!typo) continue;
+      expect(typo).not.toContain("42");
+    }
+  });
+});

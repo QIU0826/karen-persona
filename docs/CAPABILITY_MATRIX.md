@@ -3,7 +3,7 @@
 > 目的：一眼看清**哪些是真做了、做到什么程度**。每一行都必须能在代码里找到对应，
 > 数字必须能复现（跑法写在「怎么复现」列）。不确定的地方写清楚弱项，不写成优点。
 >
-> 最后更新：2026-10-21（v0.8.22）。配套文档：[README](../README.md)（对外）、
+> 最后更新：2026-10-21（v0.8.23）。配套文档：[README](../README.md)（对外）、
 > [CLAUDE.md](../CLAUDE.md)（开发总控）、[PRODUCT_AUDIT.md](PRODUCT_AUDIT.md)（审计与路线图）。
 
 图例：✅ 可用 ｜ 🚧 有明确限制 ｜ ⛔ 受阻（代码就绪但依赖未到位）
@@ -62,7 +62,7 @@
 
 | 能力 | 代码 | 状态 | 实测 | 弱项 / 边界 |
 |---|---|---|---|---|
-| 本机生图（diffusers+MPS） | `src/media/comfyui.ts`、`services/image/server.py` | ⛔ | 代码/测试/降级路径完成；服务 `/health` 正常（device=mps）；约 20% 照片走生成、失败回退图库 | **模型没下下来**（HF 连接间歇中断）；`KAREN_IMAGE_GEN` 默认 off；补模型见 [IMAGE_GEN.md](IMAGE_GEN.md) |
+| 本机生图（diffusers+MPS） | `src/media/comfyui.ts`、`services/image/server.py` | ✅ | `stabilityai/sdxl-turbo` fp16 已本地化（5.14GB）；**热态 2.1–2.2s/张**（832×1216，MPS）；`npm run image:smoke` 全过；mock 长跑真的发出 2 张生成图；失败静默回退图库 | 无角色一致性（只有场景照）；首次请求加载模型约 10s；服务需手动启动（`npm run image:start`） |
 | 生成图治理 | `src/media/generated-store.ts` | ✅ | 按日期落盘、30 天自动清理、可 purge、可统计占用 | 依赖上一行启用才有内容 |
 | 照片分享 | `src/impulse/unsplash-trigger.ts` | ✅ | 时间关系（今天/昨天/以前）+ 场景匹配（晚霞/雨/猫…）+ 亲密度门槛 | 无 Unsplash Key 时只有 15 张本地图 |
 | 图片识别 | `src/ai/vision.ts` | ✅ | DeepSeek Flash 多模态，`detail=high`，截图逐字转述 ≤200 字 | 中文小字/模糊截图仍可能错 |
@@ -83,7 +83,7 @@
 
 | 项 | 状态 | 实测 |
 |---|---|---|
-| 单元/集成测试 | ✅ | **109 文件 / 1294 用例**（`npm test`）；验证方法论见 [VERIFICATION_PLAYBOOK.md](VERIFICATION_PLAYBOOK.md)；覆盖核对见 [COVERAGE_AUDIT.md](COVERAGE_AUDIT.md)；文档数字核对见 `doc-facts.test.ts` |
+| 单元/集成测试 | ✅ | **109 文件 / 1298 用例**（`npm test`）；验证方法论见 [VERIFICATION_PLAYBOOK.md](VERIFICATION_PLAYBOOK.md)；覆盖核对见 [COVERAGE_AUDIT.md](COVERAGE_AUDIT.md)；文档数字核对见 `doc-facts.test.ts` |
 | 类型检查 + lint | ✅ | `tsc --noEmit` 0 错误；`npm run lint`（未使用代码）0 违规 |
 | 覆盖率 | 🚧 | 行 59.21%（`npm run test:coverage`，CI 阈值守护） |
 | 离线评测守门 | ✅ | `npm run eval:offline`：facts≥95% / recall@8≥90% / 合并≥95% / anti-forget PASS / 锚点≥30 条；5 项全达标；CI 已接入 |
@@ -101,7 +101,7 @@
 ## 7. 明确未做的事（避免误解）
 
 - **没有** ASR、没有语音克隆（音色仍假）、没有微信桥接（占位桩）。
-- **没有** 本机生图可用性（模型未就绪），也没有角色一致性（未接 IP-Adapter/参考图）。
+- **没有** 生成图的角色一致性（未接 IP-Adapter/参考图）；生图服务需手动启动（`npm run image:start`）。
 - **没有** 语义级"改写重复"处理（只有句式提醒，9 次 A/B 未测出稳定效果）。
 - **没有** 交互式记忆编辑（只有 `/forget` 按关键词删 + Web 只读查看）。
 - **没有** 商用多租户/托管；Web 控制台只读且只绑本机。

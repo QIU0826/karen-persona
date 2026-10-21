@@ -251,7 +251,7 @@ async function connectOneBot(port: number): Promise<OneBotClient> {
       }
       ws.send(JSON.stringify(event));
     },
-    waitFor: async (predicate, timeoutMs = 20000) => {
+    waitFor: async (predicate, timeoutMs = 30000) => {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
         for (let index = 0; index < actions.length; index++) {
@@ -639,7 +639,7 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
       // 副作用校验不是重点，但至少确认 bridge 没有崩溃且收到过 3 类 action
       expect(actions.some((action) => action.action === "send_private_msg")).toBe(true);
     },
-    120000,
+    180000,
   );
 
   it("治理命令：/about 展示 AI 披露与数据去向、/age 显示已确认", async () => {

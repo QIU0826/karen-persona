@@ -48,39 +48,62 @@ KAREN_IMAGE_URL=http://127.0.0.1:18084
 - 负面提示词压制：文字水印、多余手指、卡通/3D 感。
 - 生成图写在 `data/generated/日期/`，30 天后自动清理。
 
-## 5. 当前状态与已知阻塞（如实）
+## 5. 当前状态（2026-10-21 v0.8.23：已跑通）
 
-- ✅ 代码、测试（18 条）、目录治理、接入照片链路、降级路径全部完成。
-- ✅ `torch 2.14.1` + `MPS` 可用；`diffusers 0.41.0` 已装；服务 `/health` 正常。
-- ❌ **模型下载受网络阻塞**：`stabilityai/sdxl-turbo`（6.9GB）与 `segmind/tiny-sd`（约 1GB）
-  在本机多次尝试都卡住/报 `LocalEntryNotFoundError`（HF 连接间歇性中断；此前下 Qwen 向量模型时
-  一度跑满 31MB/s，说明是链路波动而非配置问题）。
-- 因此 `KAREN_IMAGE_GEN` 默认仍是 **off**：生图链路就绪但没启用，照片继续走图库。
+- ✅ 代码、测试、目录治理、接入照片链路、降级路径全部完成；
+- ✅ `torch 2.14.1` + MPS、`diffusers 0.41.0`、服务 `/health` 正常；
+- ✅ **模型已下载并可真实出图**（`stabilityai/sdxl-turbo` fp16，832×1216）；
+- ✅ `scripts/image-smoke.ts` 真实链路冒烟全过：PNG 合法 / 同 seed 可复现 / 换 seed 不同图 /
+  落盘与清理正常 / 产品路径 `trySharePhoto` 返回 `source=generated`；
+- ✅ mock 桥接长跑（6 轮，真实 DeepSeek）里**真的发出 2 张生成图**（报告 §4b 可查）。
 
-**手动补模型（任一网络更稳的时候）**：
+### 实测性能（M5 Pro，MPS）
+
+| 场景 | 耗时 |
+|---|---|
+| 服务首次请求（含加载模型） | ≈12s |
+| 热态单张（1 step / 832×1216） | **2.1–2.2s** |
+| 单张体积 | 1.6–1.8MB（上限 4MB） |
+
+### 模型下载（本机可复现的方法）
+
+直连 HuggingFace 不通、`huggingface_hub` 默认走 **Xet CDN（us.aws.cdn.hf.co）也不可达**；
+`hf-mirror.com` 可用但**单连接会被限速**（约 0.3–0.7MB/s，5GB 要 2 小时以上）。
+
+最终做法（已写进 `docs/IMAGE_GEN.md` 顶部「为什么不是 ComfyUI」同一思路）：
+
+1. **只下载配置文件与 fp16 小权重**：`HF_ENDPOINT=https://hf-mirror.com snapshot_download(... allow_patterns=['*.json','*.txt','*fp16*'])`
+   （Xet 只影响大文件；小文件走 HTTP 正常）。
+2. **unet fp16（5.14GB）用分块并发 curl 下载**：每块 128MB、4 路并发、失败重试，
+   实测聚合 ~2–4MB/s，约 40 分钟；写完按顺序拼进本地模型目录。
+3. 把配置/编码器/VAE/分词器从 HF 快照**解引用复制**到本地模型目录
+   `~/Library/Application Support/karen/models/sdxl-turbo/`（1.7GB）。
+4. 用本地目录启动服务（`npm run image:start`）：显式 `KAREN_IMAGE_MODEL=<本地目录>` +
+   `HF_HUB_OFFLINE=1`，避免回源卡住。
+
+下载脚本可参考本轮记录（`/tmp/dl-unet-par.py` 思路）；核心是 **禁用 Xet + 短连接分块**。
+
+### 启用
 
 ```bash
-# 1) 下载模型（会存到 KAREN_MODELS_DIR/hf）
-KAREN_MODELS_DIR="$HOME/Library/Application Support/karen/models" \
-HF_HOME="$KAREN_MODELS_DIR/hf" \
-services/image/.venv/bin/python -c "from huggingface_hub import snapshot_download; snapshot_download('stabilityai/sdxl-turbo', allow_patterns=['*.json','*.txt','*.safetensors','*.fp16.safetensors'])"
+# .env
+KAREN_IMAGE_GEN=on
+KAREN_IMAGE_BACKEND=service
+KAREN_IMAGE_URL=http://127.0.0.1:18084
 
-# 2) 起服务
-KAREN_MODELS_DIR="$HOME/Library/Application Support/karen/models" services/image/.venv/bin/python services/image/server.py
+# 启动服务（首次请求加载模型约 10s）
+npm run image:start
 
-# 3) 冒烟（应返回 PNG）
-curl -X POST http://127.0.0.1:18084/generate -H 'Content-Type: application/json' \
-  -d '{"prompt":"warm sunset over rooftops, smartphone photo","seed":42}' -o /tmp/test.png
-
-# 4) 打开开关并重启桥接
-#    .env 里加 KAREN_IMAGE_GEN=on
+# 验证真实链路（会真的出图、落盘、并走一遍产品路径）
+npm run image:smoke
 ```
 
-若只想先用小模型验证：把 `KAREN_IMAGE_MODEL=segmind/tiny-sd`（质量一般但快）。
+服务没起/模型没加载/超时 → **静默回退图库**，不影响聊天。
 
 ## 6. 局限
 
 - 没有角色一致性（未接 IP-Adapter / 参考图），所以生成图多为"场景/氛围照"，不放正脸；
   要拍到"她本人"需要后续接参考图条件（v0.8 之后再评估）。
-- 单张预期耗时未在真机上验证（模型没下完），代码里上限 25s、超时回退。
+- 实测单张 **2.1–2.2s**（热态，MPS，832×1216），首次请求含加载 ≈12s；代码上限 25s，超时回退。
+- 服务需手动启动（`npm run image:start`）；未启动/加载失败时**静默回退图库**，聊天不受影响。
 - GPU 只有 MPS（M5 Pro），并发下会互相拖慢；因此一次只生成一张，不做批量。

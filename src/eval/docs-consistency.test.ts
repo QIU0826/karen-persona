@@ -178,7 +178,7 @@ describe("验证手册（docs/VERIFICATION_PLAYBOOK.md，v0.8.20）", () => {
     }
     // 审计文档必须诚实标注未验证项（防止以后被删干净）
     expect(md).toContain("❌ 不存在");
-    expect(md).toContain("⛔ 阻塞");
+    expect(md).toContain("⚠️ 未验");
   });
 
   it("文档引用的 smoke 脚本文件都真实存在", () => {
@@ -187,5 +187,26 @@ describe("验证手册（docs/VERIFICATION_PLAYBOOK.md，v0.8.20）", () => {
     for (const match of md.matchAll(/`(scripts\/[\w.-]+)`/g)) refs.add(match[1]);
     const missing = [...refs].filter((rel) => !fs.existsSync(path.join(ROOT, rel)));
     expect(missing, `验证手册引用了不存在的脚本：${missing.join(", ")}`).toEqual([]);
+  });
+});
+
+describe("产品审计文档（docs/PRODUCT_AUDIT.md，v0.8.22）", () => {
+  const AUDIT = path.join(ROOT, "docs", "PRODUCT_AUDIT.md");
+
+  it("开头必须有「阅读须知」，并指向当前事实源（覆盖审计/能力总表）", () => {
+    const md = fs.readFileSync(AUDIT, "utf-8");
+    expect(md).toContain("阅读须知");
+    expect(md).toContain("2026-07-05 的审计快照");
+    expect(md).toContain("COVERAGE_AUDIT.md");
+    expect(md).toContain("CAPABILITY_MATRIX.md");
+  });
+
+  it("有「后记（续）：v0.4.1 → …」段落，且写明审计遗留项的现状", () => {
+    const md = fs.readFileSync(AUDIT, "utf-8");
+    expect(md).toMatch(/## 后记（续）：v0\.4\.1 → v\d+\.\d+\.\d+/);
+    expect(md).toContain("审计遗留问题清单的现状");
+    // 必须诚实保留「仍未做」项（防止被删干净）
+    expect(md).toContain("仍不存在");
+    expect(md).toContain("未做（M3）");
   });
 });

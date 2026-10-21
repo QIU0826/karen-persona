@@ -454,6 +454,8 @@ export interface RuntimeStateSnapshot {
   facts: number;
   /** 收集到的表情包数量（默认采集关，通常 0） */
   stickers: number;
+  /** 本局生成图数量（扫 KAREN_DATA_DIR/generated，验证生图链路真的跑了） */
+  generatedImages: number;
   /** 主动性：今天计划的由头数 + 已发出次数 */
   initiative: { planItems: number; sent: number };
   /** 关系：亲密度 + 五维 + 阶段 */
@@ -473,6 +475,7 @@ export function collectRuntimeState(dataDir: string): RuntimeStateSnapshot {
     digests: { daily: 0, weekly: 0 },
     facts: 0,
     stickers: 0,
+    generatedImages: 0,
     initiative: { planItems: 0, sent: 0 },
     relationship: { closeness: 0, dims: null, phase: null },
     reflection: { phase: "none", topic: null },
@@ -519,6 +522,22 @@ export function collectRuntimeState(dataDir: string): RuntimeStateSnapshot {
       } finally {
         db.close();
       }
+    }
+
+    // 生成图：data/generated/YYYY-MM-DD/*.png
+    try {
+      const generatedRoot = path.join(dataDir, "generated");
+      if (fs.existsSync(generatedRoot)) {
+        for (const day of fs.readdirSync(generatedRoot)) {
+          const dir = path.join(generatedRoot, day);
+          if (!fs.statSync(dir).isDirectory()) continue;
+          empty.generatedImages += fs
+            .readdirSync(dir)
+            .filter((name) => /\.(png|jpg|jpeg|webp)$/i.test(name)).length;
+        }
+      }
+    } catch {
+      // 生成目录不存在/被清理：保持 0
     }
 
     // 人格状态 JSON：五维 / 反思 / 主动计数
@@ -1508,6 +1527,9 @@ export function renderReport(result: LongrunResult, existingReport?: string | nu
         lines.push(`| 用户事实 | ${rs.facts > 0 ? "✅" : "—"} | ${rs.facts} 条 |`);
         lines.push(
           `| 表情包收集 | ${rs.stickers > 0 ? "✅" : "—（采集开关默认关）"} | ${rs.stickers} 张 |`,
+        );
+        lines.push(
+          `| 本机生图 | ${rs.generatedImages > 0 ? "✅" : "—（图片请求少/未开生图/回退图库）"} | 生成 ${rs.generatedImages} 张 |`,
         );
         lines.push(
           `| 意图式主动 | ${rs.initiative.planItems > 0 ? "✅" : "—（需心跳生成计划）"} | 今日由头 ${rs.initiative.planItems} 个 / 已发 ${rs.initiative.sent} 次 |`,

@@ -170,11 +170,18 @@ export function isTypoEligibleText(text: string): boolean {
 
 // ── 错字生成 ─────────────────────────────────────
 
-/** 文本里可动手脚的位置（中文/字母/数字，不是标点）。 */
+/**
+ * 文本里可动手脚的位置（中文/字母，**不含数字**）。
+ *
+ * v0.8.23：真实长跑评审发现「多云，42度」这种播报被撤回改成 24 度——
+ * 数字一换就变成事实错误（42℃ 荒谬），看起来像系统故障而不是"手滑打错"。
+ * 所以数字一律不当错字目标；纯数字文本仍然可发（只是不会被改）。
+ */
 function speakableIndices(chars: string[]): number[] {
   const indices: number[] = [];
   for (let i = 0; i < chars.length; i++) {
-    if (CJK_OR_ALNUM.test(chars[i])) indices.push(i);
+    const ch = chars[i];
+    if (CJK_OR_ALNUM.test(ch) && !/[0-9０-９]/.test(ch)) indices.push(i);
   }
   return indices;
 }
@@ -191,7 +198,16 @@ function duplicateChar(chars: string[], random: () => number): string[] | null {
 function swapAdjacentChars(chars: string[], random: () => number): string[] | null {
   const pairs: Array<[number, number]> = [];
   for (let i = 0; i < chars.length - 1; i++) {
-    if (CJK_OR_ALNUM.test(chars[i]) && CJK_OR_ALNUM.test(chars[i + 1]) && chars[i] !== chars[i + 1]) {
+    const a = chars[i];
+    const b = chars[i + 1];
+    const isDigit = /[0-9０-９]/;
+    if (
+      CJK_OR_ALNUM.test(a) &&
+      CJK_OR_ALNUM.test(b) &&
+      a !== b &&
+      !isDigit.test(a) &&
+      !isDigit.test(b)
+    ) {
       pairs.push([i, i + 1]);
     }
   }
@@ -205,6 +221,7 @@ function swapAdjacentChars(chars: string[], random: () => number): string[] | nu
 function replaceHomophone(chars: string[], random: () => number): string[] | null {
   const candidates: Array<[number, string]> = [];
   for (let i = 0; i < chars.length; i++) {
+    if (/[0-9０-９]/.test(chars[i])) continue;
     for (const [from, to] of HOMOPHONE_PAIRS) {
       if (chars[i] === from) candidates.push([i, to]);
     }

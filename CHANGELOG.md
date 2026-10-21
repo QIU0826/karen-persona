@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.8.23 — 2026-10-21
+
+**本机生图真正跑通**（v0.7 遗留的最后一块阻塞），并修掉真实长跑暴露的两个小 bug。
+
+### Unblocked：sd xl-turbo 模型下载
+
+HF 直连不通、`huggingface_hub` 默认走 **Xet CDN（us.aws.cdn.hf.co）也不可达**、
+`hf-mirror.com` 单连接被限速（0.3–0.7MB/s）。最终方案：
+
+1. 镜像 + 禁用 Xet 只下配置与 fp16 小权重（HTTP 正常）；
+2. **unet fp16 5.14GB 用分块并发 curl**（128MB/块、4 路、失败重试），聚合 2–4MB/s，约 40 分钟；
+3. 解引用复制到本地模型目录 `~/Library/Application Support/karen/models/sdxl-turbo/`（1.7GB）；
+4. `npm run image:start` 用本地目录 + `HF_HUB_OFFLINE=1` 启动，避免回源卡住。
+
+**实测（M5 Pro / MPS，832×1216，1 step）**：首次请求含加载 ≈12s；**热态 2.1–2.2s/张**；
+单张 1.6–1.8MB。模型总占用约 6.8GB（可整目录删）。
+
+### Added
+
+- `npm run image:smoke`（`scripts/image-smoke.ts`）：真出图 / PNG 合法 / 同 seed 可复现 /
+  换 seed 不同图 / 落盘与清理 / **产品路径 `trySharePhoto` 返回 `source=generated`**。
+- `npm run image:start`（`scripts/image-start.ts`）：本地模型目录启动服务，缺权重时给出可执行提示。
+- mock 长跑报告 §4b 新增「本机生图 N 张」指标（扫 `data/generated/`，验证生图链路真的跑了）。
+- `.env.example` 补生图开关段；`.env` 已开启 `KAREN_IMAGE_GEN=on`（服务未起时静默回退图库）。
+
+### Verified（真实链路，非单测）
+
+```
+image:smoke：生成 1774KB / 2195ms，落盘统计 files=1，trySharePhoto → source=generated 配文「刚拍的」✅
+mock 桥接 6 轮（真实 DeepSeek，--photo-probability 1，KAREN_IMAGE_GEN=on）：
+  §4b 本机生图 ✅ 生成 2 张；多媒体：照片 6 / 贴纸 0 / 表情 0 / 语音 0；成本 ¥0.0397
+```
+
+### Fixed（真实长跑评审暴露）
+
+1. **打错字撤回会改数字**：`swapAdjacentChars` 把「多云，24度」换成「多云，42度」再撤回，
+   评审判为「像系统播报故障」——数字一换就是事实错误（42℃ 荒谬）。
+   修法：错字目标排除数字（中文/字母仍可打错），数字原样保留；补 2 条单测（60 组随机下数字不变）。
+2. **生成图配文连续重复**：「喏，刚拍的 / 刚拍的」同一句连用两次。修法：生成图路径也做
+   最近 3 句避重（与本地图库同策略）。
+
+### Testing
+
+- 109 个测试文件 / 1298 用例通过；`tsc --noEmit` 0 错误；`npm run lint` 0 违规；
+  `npm run image:smoke` 全过；mock 长跑真实发出 2 张生成图。
+
 ## v0.8.22 — 2026-10-21
 
 **文档数字 ↔ 代码事实自动核对**（`src/eval/doc-facts.test.ts`，17 条），
@@ -35,7 +81,7 @@ v0.8.19 的贴纸断言在全量并行时两次假失败：不是产品问题，
 
 ### Testing
 
-- 109 个测试文件 / 1294 个用例通过（+1 文件 / +17 用例），全量连跑 2 次稳定；
+- 109 个测试文件 / 1298 个用例通过（+1 文件 / +17 用例），全量连跑 2 次稳定；
   `tsc --noEmit` 0 错误；`npm run lint` 0 违规；`eval:offline` 5 项达标。
 
 ## v0.8.21 — 2026-10-21
