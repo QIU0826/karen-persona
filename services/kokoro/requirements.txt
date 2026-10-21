@@ -1,0 +1,5 @@
+kokoro==0.9.4
+misaki[zh]>=0.9
+soundfile
+fastapi
+uvicorn

@@ -22,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { encode as encodeSilk } from "silk-wasm";
 import { createLogger } from "../obs/logger.js";
+import { isNeuralTtsEnabled, synthesizeWithKokoro } from "./neural-tts.js";
 import { buildSayText, planSpeechStyle, type SpeechStyle } from "./tts-style.js";
 
 const log = createLogger("tts");
@@ -254,7 +255,7 @@ export async function isSpeechAvailable(
   opts: { platform?: NodeJS.Platform; which?: (command: string) => Promise<boolean> } = {}
 ): Promise<boolean> {
   const platform = opts.platform ?? process.platform;
-  if (platform !== "darwin") return false;
+  if (platform !== "darwin") return isNeuralTtsEnabled();
   const which = opts.which ?? defaultWhich;
   try {
     return await which("say");
@@ -275,7 +276,7 @@ export async function synthesizeSpeech(
   deps: SpeechDeps = {}
 ): Promise<SpeechResult | null> {
   const platform = deps.platform ?? process.platform;
-  if (platform !== "darwin") {
+  if (platform !== "darwin" && !isNeuralTtsEnabled()) {
     log.debug("tts.skipped", { reason: "platform_unsupported", platform });
     return null;
   }
@@ -322,35 +323,52 @@ export async function synthesizeSpeech(
 
   let tempDir: string | null = null;
   try {
-    tempDir = await fs.mkdtemp(path.join(deps.tmpDir ?? os.tmpdir(), "karen-tts-"));
-    const wavPath = path.join(tempDir, "speech.wav");
-    const runCommand = deps.runCommand ?? defaultRunCommand;
-    const args = [
-      "-v",
-      voice,
-      "-r",
-      String(finalRate),
-      "-o",
-      wavPath,
-      "--file-format=WAVE",
-      "--data-format=LEI16@24000",
-      sayText,
-    ];
+    let wav: Buffer | null = null;
+    let wavSource: "say" | "kokoro" = "say";
 
-    try {
-      await runCommand("say", args, { timeoutMs });
-    } catch (err) {
-      log.warn("tts.failed", { reason: "say_failed", code: safeErrorCode(err) });
-      return null;
+    // v0.9.15：神经 TTS（Kokoro，开源中文少女音色）优先；失败静默回退 say
+    if (isNeuralTtsEnabled()) {
+      const kokoro = await synthesizeWithKokoro(spoken, {
+        // say 语速 185 ≈ 自然语速；映射到 Kokoro 的 speed（0.7–1.3）
+        speed: Math.max(0.7, Math.min(1.3, finalRate / DEFAULT_TTS_RATE)),
+        timeoutMs,
+      });
+      if (kokoro) {
+        wav = kokoro.wav;
+        wavSource = "kokoro";
+      }
     }
 
-    const readFile = deps.readFile ?? ((filePath: string) => fs.readFile(filePath));
-    let wav: Buffer;
-    try {
-      wav = await readFile(wavPath);
-    } catch (err) {
-      log.warn("tts.failed", { reason: "wav_read_failed", code: safeErrorCode(err) });
-      return null;
+    tempDir = await fs.mkdtemp(path.join(deps.tmpDir ?? os.tmpdir(), "karen-tts-"));
+    if (!wav) {
+      const wavPath = path.join(tempDir, "speech.wav");
+      const runCommand = deps.runCommand ?? defaultRunCommand;
+      const args = [
+        "-v",
+        voice,
+        "-r",
+        String(finalRate),
+        "-o",
+        wavPath,
+        "--file-format=WAVE",
+        "--data-format=LEI16@24000",
+        sayText,
+      ];
+
+      try {
+        await runCommand("say", args, { timeoutMs });
+      } catch (err) {
+        log.warn("tts.failed", { reason: "say_failed", code: safeErrorCode(err) });
+        return null;
+      }
+
+      const readFile = deps.readFile ?? ((filePath: string) => fs.readFile(filePath));
+      try {
+        wav = await readFile(wavPath);
+      } catch (err) {
+        log.warn("tts.failed", { reason: "wav_read_failed", code: safeErrorCode(err) });
+        return null;
+      }
     }
     if (!isWavBuffer(wav)) {
       log.warn("tts.failed", { reason: "wav_invalid", bytes: wav.length });
@@ -390,6 +408,7 @@ export async function synthesizeSpeech(
 
     const silkBase64 = Buffer.from(data).toString("base64");
     log.debug("tts.ok", {
+      backend: wavSource,
       chars: charCount(spoken),
       duration_ms: durationMs,
       silk_bytes: data.byteLength,

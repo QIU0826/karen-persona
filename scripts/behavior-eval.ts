@@ -20,6 +20,7 @@ import { loadConfig } from "../src/data/store.js";
 import { loadPersona } from "../src/persona/loader.js";
 import { buildPrompt } from "../src/persona/prompt-builder.js";
 import { formatUserFacts, type UserFact } from "../src/data/user-facts.js";
+import { buildAnchorInjection, buildDailyInjection, type AnchorRow, type DailyDigestRow } from "../src/data/memory-v2.js";
 import {
   buildMentionPacingNote,
   detectSelfMention,
@@ -44,6 +45,8 @@ interface EvalMessage {
   text: string;
   /** 记忆召回期望命中的实体（任一字符串出现即算召回） */
   expect?: string[];
+  /** 该探针考的是哪一层记忆（用于分层归因） */
+  layer?: "facts" | "anchors" | "digest";
 }
 
 const USER_MESSAGES: EvalMessage[] = [
@@ -56,10 +59,14 @@ const USER_MESSAGES: EvalMessage[] = [
   { text: "我周末想去周边逛逛，有啥推荐吗" },
   { text: "说真的，你平时下班都干嘛" },
   // —— 记忆召回探针：这些事实只在「记忆块」里出现过（本轮历史中没有）——
-  { text: "你还记得我叫啥不", expect: ["阿哲"] },
-  { text: "我上次说我在哪个城市来着", expect: ["上海"] },
-  { text: "我是做什么工作的来着", expect: ["程序员", "开发", "写代码"] },
-  { text: "我下周三要去哪出差来着", expect: ["上海", "出差"] },
+  { text: "你还记得我叫啥不", expect: ["阿哲"], layer: "facts" },
+  { text: "我上次说我在哪个城市来着", expect: ["上海"], layer: "facts" },
+  { text: "我是做什么工作的来着", expect: ["程序员", "开发", "写代码"], layer: "facts" },
+  { text: "我下周三要去哪出差来着", expect: ["上海", "出差"], layer: "facts" },
+  { text: "我妈上个月怎么了来着", expect: ["住院", "杭州"], layer: "anchors" },
+  { text: "我说过我最怕什么来着", expect: ["裁员", "被裁"], layer: "anchors" },
+  { text: "我最近在忙什么项目来着", expect: ["晚风信箱", "信箱"], layer: "digest" },
+  { text: "我上次因为啥心情不好来着", expect: ["组长", "批评", "被说"], layer: "digest" },
   { text: "我今天被组长说了几句，有点郁闷" },
   { text: "你晚饭吃了没" },
   { text: "我今天加班到八点，累死了" }, // 重复提问（测复述/复读）
@@ -76,6 +83,70 @@ const MEMORY_FACTS: UserFact[] = [
 ];
 const MEMORY_BLOCK = formatUserFacts(MEMORY_FACTS);
 
+/** 锚点 fixture：模拟「她记得的关键时刻」 */
+const MEMORY_ANCHORS: AnchorRow[] = [
+  {
+    id: 1,
+    persona_id: "小雅",
+    owner_id: "qq:1",
+    kind: "loss",
+    summary: "他妈妈上个月住院，他连夜赶回杭州",
+    quote: null,
+    strength: 0.9,
+    recall_count: 0,
+    last_recalled_at: null,
+    source_msg_ids: null,
+    created_at: 1,
+    valid_from: null,
+    valid_to: null,
+    rewritten_by: null,
+  },
+  {
+    id: 2,
+    persona_id: "小雅",
+    owner_id: "qq:1",
+    kind: "secret",
+    summary: "他说过最怕被裁员，家里压力大",
+    quote: null,
+    strength: 0.8,
+    recall_count: 0,
+    last_recalled_at: null,
+    source_msg_ids: null,
+    created_at: 2,
+    valid_from: null,
+    valid_to: null,
+    rewritten_by: null,
+  },
+];
+
+/** 日记忆 fixture：模拟「最近几天聊过的事」 */
+const MEMORY_DIGESTS: DailyDigestRow[] = [
+  {
+    id: 1,
+    persona_id: "小雅",
+    owner_id: "qq:1",
+    day: "2026-10-19",
+    summary: "他月底要上线晚风信箱项目，天天加班",
+    mood: null,
+    events_json: null,
+    open_threads_json: null,
+    created_at: 1,
+  },
+  {
+    id: 2,
+    persona_id: "小雅",
+    owner_id: "qq:1",
+    day: "2026-10-20",
+    summary: "他被组长点名批评，心情不好",
+    mood: null,
+    events_json: null,
+    open_threads_json: null,
+    created_at: 2,
+  },
+];
+const ANCHOR_BLOCK = buildAnchorInjection(MEMORY_ANCHORS);
+const DIGEST_BLOCK = buildDailyInjection(MEMORY_DIGESTS);
+
 /** 固定的「她今天的一天」（两个变体用同一份，保证可比） */
 const TODAY_LIFE = [
   "早上老周翻账本，念叨水电又超了",
@@ -90,13 +161,16 @@ interface Variant {
   pacing: boolean;
   /** 是否启用「反问钩子」（v0.9.9 实验） */
   questionHook?: boolean;
-  /** 是否注入「你确定记得的关于对方的事」记忆块（v0.9.14 实验） */
-  memoryOn?: boolean;
+  /** 注入哪几层记忆（v0.9.15 分层归因实验） */
+  memory?: Array<"facts" | "anchors" | "digest">;
 }
 
 const VARIANTS: Variant[] = [
-  { id: "baseline", label: "基线（无记忆块）", pacing: false },
-  { id: "memory-on", label: "记忆块注入（v0.9.14 实验）", pacing: false, memoryOn: true },
+  { id: "baseline", label: "基线（无记忆）", pacing: false },
+  { id: "facts-only", label: "仅用户事实", pacing: false, memory: ["facts"] },
+  { id: "anchors-only", label: "仅锚点（关键时刻）", pacing: false, memory: ["anchors"] },
+  { id: "digest-only", label: "仅日记忆", pacing: false, memory: ["digest"] },
+  { id: "memory-full", label: "三层全给", pacing: false, memory: ["facts", "anchors", "digest"] },
 ];
 
 /** 简单可复现 PRNG（mulberry32），让概率触发在多次运行间可复现 */
@@ -119,9 +193,11 @@ interface RunResult {
   metrics: BehaviorRunMetrics;
   usage: { prompt: number; completion: number };
   avgLatencyMs: number;
-  /** 记忆召回：探针条数 / 命中条数 */
+  /** 记忆召回：探针条数 / 命中条数（总计） */
   recallCases: number;
   recallHits: number;
+  /** 分层召回（facts/anchors/digest） */
+  recallByLayer: Record<string, { hits: number; cases: number }>;
 }
 
 function buildEntityKeywords(persona: Awaited<ReturnType<typeof loadPersona>>): string[] {
@@ -200,10 +276,21 @@ async function main(): Promise<number> {
       const random = seededRandom(seed * 1000 + variant.id.length);
       let recallCases = 0;
       let recallHits = 0;
+      const recallByLayer: Record<string, { hits: number; cases: number }> = {
+        facts: { hits: 0, cases: 0 },
+        anchors: { hits: 0, cases: 0 },
+        digest: { hits: 0, cases: 0 },
+      };
       for (const message of USER_MESSAGES) {
         const userText = message.text;
         const notes: string[] = [];
-        if (variant.memoryOn) notes.push(MEMORY_BLOCK);
+        if (variant.memory) {
+          for (const layer of variant.memory) {
+            if (layer === "facts") notes.push(MEMORY_BLOCK);
+            else if (layer === "anchors") notes.push(ANCHOR_BLOCK);
+            else notes.push(DIGEST_BLOCK);
+          }
+        }
         if (variant.pacing) notes.push(buildMentionPacingNote(mentionHistory));
         if (
           variant.questionHook &&
@@ -242,7 +329,13 @@ async function main(): Promise<number> {
         const reply = response.choices[0]?.message?.content?.trim() ?? "";
         if (message.expect && message.expect.length > 0) {
           recallCases += 1;
-          if (message.expect.some((word) => reply.includes(word))) recallHits += 1;
+          const hit = message.expect.some((word) => reply.includes(word));
+          if (hit) recallHits += 1;
+          if (message.layer) {
+            const bucket = recallByLayer[message.layer]!;
+            bucket.cases += 1;
+            if (hit) bucket.hits += 1;
+          }
         }
         usage.prompt += response.usage?.prompt_tokens ?? 0;
         usage.completion += response.usage?.completion_tokens ?? 0;
@@ -265,6 +358,7 @@ async function main(): Promise<number> {
         avgLatencyMs: Math.round(latencySum / USER_MESSAGES.length),
         recallCases,
         recallHits,
+        recallByLayer,
       });
       process.stdout.write(
         `  [${variant.id} seed ${seed}] 自述 ${Math.round(metrics.mentionRate * 100)}% 字数 ${metrics.avgChars.toFixed(1)} 问句 ${Math.round(metrics.questionRate * 100)}% 重复对 ${metrics.duplicatePairs}\n`,
@@ -281,11 +375,16 @@ async function main(): Promise<number> {
     summary[variant.id] = agg;
     console.log(
       (() => {
+        const layerLabel = (layer: "facts" | "anchors" | "digest"): string => {
+          const cases = runs.reduce((sum, run) => sum + (run.recallByLayer[layer]?.cases ?? 0), 0);
+          const hits = runs.reduce((sum, run) => sum + (run.recallByLayer[layer]?.hits ?? 0), 0);
+          return cases > 0 ? `${hits}/${cases}（${Math.round((hits / cases) * 100)}%）` : "—";
+        };
         const recallCases = runs.reduce((sum, run) => sum + run.recallCases, 0);
         const recallHits = runs.reduce((sum, run) => sum + run.recallHits, 0);
-        const recallLabel =
+        const totalLabel =
           recallCases > 0 ? `${recallHits}/${recallCases}（${Math.round((recallHits / recallCases) * 100)}%）` : "—";
-        return `| ${variant.label} | ${recallLabel} | ${formatRangePercent(agg.mentionRate)} | ${formatRangeNumber(agg.avgChars)} | ${formatRangePercent(agg.questionRate)} | ${formatRangeNumber(agg.duplicatePairs)} | ${formatRangeNumber(agg.repeatedOpenerPairs)} | ${Math.round(runs.reduce((sum, run) => sum + run.avgLatencyMs, 0) / runs.length)}ms |`;
+        return `| ${variant.label} | ${layerLabel("facts")} | ${layerLabel("anchors")} | ${layerLabel("digest")} | ${totalLabel} | ${formatRangePercent(agg.mentionRate)} | ${formatRangeNumber(agg.avgChars)} | ${formatRangePercent(agg.questionRate)} | ${Math.round(runs.reduce((sum, run) => sum + run.avgLatencyMs, 0) / runs.length)}ms |`;
       })(),
     );
   }
@@ -343,14 +442,34 @@ async function main(): Promise<number> {
 
   // 变体差异（相对基线；只报均值差，样本小不下结论）
   const baseline = summary.baseline;
-  const pacing = summary["question-hook"] ?? summary["mention-pacing"];
-  if (baseline && pacing) {
-    const delta = (a: number, b: number): string => `${a >= b ? "+" : ""}${Math.round((a - b) * 100)}pp`;
-    console.log("\n— 实验变体 vs 基线（均值差）—");
-    console.log(`自述提及率：${delta(pacing.mentionRate.mean, baseline.mentionRate.mean)}`);
-    console.log(`平均字数：${pacing.avgChars.mean.toFixed(1)} vs ${baseline.avgChars.mean.toFixed(1)}`);
-    console.log(`问句率：${delta(pacing.questionRate.mean, baseline.questionRate.mean)}`);
-    console.log(`完全重复对：${pacing.duplicatePairs.mean.toFixed(1)} vs ${baseline.duplicatePairs.mean.toFixed(1)}`);
+  const full = summary["memory-full"];
+  if (baseline && full) {
+    const recallRate = (variantId: string, layer?: "facts" | "anchors" | "digest"): number | null => {
+      const runs = results.filter((result) => result.variant === variantId);
+      let cases = 0;
+      let hits = 0;
+      for (const run of runs) {
+        if (layer) {
+          cases += run.recallByLayer[layer]?.cases ?? 0;
+          hits += run.recallByLayer[layer]?.hits ?? 0;
+        } else {
+          cases += run.recallCases;
+          hits += run.recallHits;
+        }
+      }
+      return cases > 0 ? hits / cases : null;
+    };
+    const pct = (value: number | null): string => (value === null ? "—" : `${Math.round(value * 100)}%`);
+    const delta = (a: number | null, b: number | null): string =>
+      a === null || b === null ? "—" : `${a >= b ? "+" : ""}${Math.round((a - b) * 100)}pp`;
+    console.log("\n— 三层全给 vs 基线 —");
+    for (const layer of ["facts", "anchors", "digest"] as const) {
+      console.log(
+        `${{ facts: "用户事实", anchors: "锚点", digest: "日记忆" }[layer]}召回：${pct(recallRate("baseline", layer))} → ${pct(recallRate("memory-full", layer))}`,
+      );
+    }
+    console.log(`总召回：${pct(recallRate("baseline"))} → ${pct(recallRate("memory-full"))}（${delta(recallRate("memory-full"), recallRate("baseline"))}）`);
+    console.log(`自然度之外，本次评测只看召回与延迟；分层贡献见上表`);
     console.log(
       "\n注意：这是离线提示级评测，不是真实 QQ 对话；结论应看范围是否重叠，" +
         "范围大幅重叠时不能宣称「有效」。",

@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.9.15 — 2026-10-21
+
+**语音音色换血：从 macOS `say` 换到开源神经 TTS（Kokoro-82M，Apache-2.0，中文少女音色）**。
+
+### 背景
+
+「语音太 AI」是长期未解项。根因在 §4.1 已确认：`say` 的拼接式 TTS 天花板就在那里。
+本机已有 Python 3.12（uv 管理），Kokoro-82M 只有 82M 参数、CPU 推理比实时快 5 倍，
+且自带 4 个中文女声 embedding（Apache-2.0），是当前性价比最高的替换方案。
+
+### Added
+
+- `services/kokoro/`：本机服务（FastAPI，127.0.0.1:18086）
+  - `POST /synthesize` {text, voice?, speed?} → 24kHz PCM16 WAV；`GET /health`
+  - 音色白名单 `zf_xiaoxiao` / `zf_xiaobei` / `zf_xiaoyi`（`zf_xiaoni` 实测 ASR CER 53%，弃用）
+- `src/ai/neural-tts.ts`：Node 客户端（开关/音色白名单/超时/**失败返回 null 不抛**）
+- `tts.ts` 集成：`KAREN_TTS_BACKEND=kokoro` 时先走 Kokoro，失败静默回退 `say`；
+  语速按 say 语速线性映射到 Kokoro speed（0.7–1.3）；`isSpeechAvailable` 在启用时对非 macOS 也返回 true
+- `npm run kokoro:start` / `npm run kokoro:smoke`（五段验证：健康 / 三音色合成 / ASR 可懂度 /
+  产品链路 SILK / say 回退，零 API 成本）
+- 试听样本：`assets/voice-samples/`（3 音色 × 短句/长句 + Tingting 对照）
+- 测试 `src/ai/neural-tts.test.ts`（14 条：默认关/白名单/成功/HTTP 失败/非 WAV/网络异常/空文本/健康检查/集成走 kokoro 不调 say/失败回退 say/未启用不发请求）
+
+### 实测（本机 M5 Pro，CPU）
+
+| 音色 | 音高中位数 | ASR CER | 合成延迟（4.8s 语音） |
+|---|---|---|---|
+| `system-tingting`（原） | 235Hz | 6.2% | ~1s |
+| `zf_xiaoxiao`（默认） | 232Hz | 3.1–5.0% | 0.8–0.9s |
+| `zf_xiaobei` | 229Hz | 3.1–5.0% | ~1.0s |
+| `zf_xiaoyi` | 296Hz | 0–5.0% | ~0.9s |
+
+RTF 0.16–0.20x；产品链路 SILK 18KB/4.86s 全过；say 回退路径同轮验证通过。
+
+### 说明
+
+- **默认关**（`KAREN_TTS_BACKEND=kokoro` 才启用），不改变现有部署行为；本机已写入 `.env` 并重启桥接
+- 仍**未做「她自己的声音」零样本克隆**：那需要 10–20s 参考音（用户侧）或开源授权参考音；
+  本轮评估了 OpenVoice V2 参考音路线，最终选择直接换开源音色（更简单、更快、许可干净）
+- 模型 327MB 不入库（`services/kokoro/models/` 已 gitignore），安装步骤见 `docs/VOICE_QUALITY.md §5`
+
 ## v0.9.14 — 2026-10-21
 
 **验证核心机制：记忆注入真的被用上了**（冷召回 33% → 100%，首次明确正结果）。
