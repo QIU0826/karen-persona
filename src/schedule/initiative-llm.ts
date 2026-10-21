@@ -63,3 +63,30 @@ export function deserializePlan(json: string): DailyInitiativePlan | null {
     return null;
   }
 }
+
+/**
+ * 生成「她今天的一天」（v0.9.6）。失败返回 null（调度层下次再试，不影响对话）。
+ */
+export async function generateDailyLifeWithLLM(prompt: { system: string; user: string }): Promise<string | null> {
+  try {
+    const modelConfig = getChatModel();
+    const client = new OpenAI({
+      apiKey: modelConfig.apiKey,
+      baseURL: modelConfig.baseUrl,
+      timeout: 15_000,
+    });
+    const response = await client.chat.completions.create({
+      model: modelConfig.model,
+      messages: [
+        { role: "system", content: prompt.system },
+        { role: "user", content: prompt.user },
+      ],
+      temperature: 1.0,
+      max_tokens: 300,
+      thinking: { type: "disabled" },
+    } as never);
+    return response.choices[0]?.message?.content?.trim() ?? null;
+  } catch {
+    return null;
+  }
+}

@@ -32,6 +32,8 @@ import {
   type UserFact,
 } from "../data/user-facts.js";
 import { deleteEpisode, searchEpisodesByKeyword } from "../data/vector.js";
+import { readTodayDailyLife } from "../pipeline/orchestrator.js";
+import { formatDailyLife } from "../impulse/daily-life.js";
 
 export interface ExportSummary {
   path: string;
@@ -177,6 +179,23 @@ export function buildRelationsText(state: ConversationState): string {
   return lines.join("\n");
 }
 
+/** /life：她今天真实发生的小事（生活流，v0.9.6）。 */
+export function buildLifeText(state: ConversationState): string {
+  const events = readTodayDailyLife(state);
+  if (events.length === 0) {
+    return [
+      "她今天还没有生活记录（可能还没生成，或模型生成失败）。",
+      "说明：每天第一次聊天/心跳时会让她生成「今天发生的小事」，用于主动找你时分享自己的日常。",
+    ].join("\n");
+  }
+  return [
+    "【她今天的一天】",
+    formatDailyLife(events).split("；").map((line) => `- ${line}`).join("\n"),
+    "",
+    "说明：这些是她的日常素材——主动消息、回复里的自我暴露都从这里取，避免每天说同一句。",
+  ].join("\n");
+}
+
 export function buildPauseText(paused: boolean): string {
   return paused
     ? "已暂停主动消息（她不会突然找你，但你发消息她仍会回）。发送 /resume 恢复。"
@@ -196,6 +215,7 @@ export function buildHelpText(): string {
     "/relations: 五维关系现状（亲密/信任/互惠/依赖/张力）",
     "/reflect: 她的反思弧线（察觉/嘴硬/认了/慢慢改）",
     "/fact: 查看她记得的关于你的事（可确认/否掉）",
+    "/life: 她今天真实发生的小事（生活流）",
     "/age: 查看年龄确认状态",
     "/help: 这条帮助",
   ].join("\n");
@@ -338,6 +358,9 @@ export async function handleControlCommand(
       return true;
     case "relations":
       deps.reply(buildRelationsText(state));
+      return true;
+    case "life":
+      deps.reply(buildLifeText(state));
       return true;
     case "fact": {
       const owner = state.owner;

@@ -147,6 +147,14 @@ export function ensureMemoryV2Schema(db: Database): void {
       asked_at INTEGER NOT NULL,
       PRIMARY KEY (owner_id, topic)
     );
+    CREATE TABLE IF NOT EXISTS daily_life (
+      persona_id TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      life_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (persona_id, owner_id, day)
+    );
     CREATE TABLE IF NOT EXISTS job_runs (
       job TEXT NOT NULL,
       period TEXT NOT NULL,

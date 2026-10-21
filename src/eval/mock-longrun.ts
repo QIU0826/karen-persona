@@ -506,6 +506,8 @@ export interface RuntimeStateSnapshot {
   generatedImages: number;
   /** 主动性：今天计划的由头数 + 已发出次数 */
   initiative: { planItems: number; sent: number };
+  /** 她今天的一天（生活流）：条数 + 前两条文本 */
+  dailyLife: { events: number; samples: string[] };
   /** 关系：亲密度 + 五维 + 阶段 */
   relationship: { closeness: number; dims: Record<string, number> | null; phase: string | null };
   /** 反思阶段（觉察/嘴硬/认了/慢慢改/none） */
@@ -525,6 +527,7 @@ export function collectRuntimeState(dataDir: string): RuntimeStateSnapshot {
     stickers: 0,
     generatedImages: 0,
     initiative: { planItems: 0, sent: 0 },
+    dailyLife: { events: 0, samples: [] },
     relationship: { closeness: 0, dims: null, phase: null },
     reflection: { phase: "none", topic: null },
     proactive: { sentToday: 0, lastGateReason: null },
@@ -567,6 +570,22 @@ export function collectRuntimeState(dataDir: string): RuntimeStateSnapshot {
           // 没有计划表/没有计划
         }
         empty.initiative.sent = countOf("SELECT COUNT(*) AS c FROM initiative_stats");
+        try {
+          const life = db
+            .prepare("SELECT life_json FROM daily_life ORDER BY day DESC LIMIT 1")
+            .get() as { life_json?: string } | undefined;
+          if (life?.life_json) {
+            const parsed = JSON.parse(life.life_json) as { events?: Array<{ text?: string }> };
+            const events = Array.isArray(parsed.events) ? parsed.events : [];
+            empty.dailyLife.events = events.length;
+            empty.dailyLife.samples = events
+              .map((event) => String(event.text ?? ""))
+              .filter(Boolean)
+              .slice(0, 2);
+          }
+        } catch {
+          // 没有生活流表/没有记录
+        }
       } finally {
         db.close();
       }
@@ -1588,6 +1607,9 @@ export function renderReport(result: LongrunResult, existingReport?: string | nu
         );
         lines.push(
           `| 意图式主动 | ${rs.initiative.planItems > 0 ? "✅" : "—（需心跳生成计划）"} | 今日由头 ${rs.initiative.planItems} 个 / 已发 ${rs.initiative.sent} 次 |`,
+        );
+        lines.push(
+          `| 她的一天（生活流） | ${rs.dailyLife.events > 0 ? "✅" : "—（首次回复后异步生成）"} | ${rs.dailyLife.events} 条${rs.dailyLife.samples.length ? `：${rs.dailyLife.samples.join(" / ")}` : ""} |`,
         );
         lines.push(
           `| 五维关系 | ${dims ? "✅" : "—"} | 亲密度 ${rs.relationship.closeness.toFixed(2)}${dims ? `；亲密 ${dims.intimacy} / 信任 ${dims.trust} / 张力 ${dims.tension} / 互惠 ${dims.reciprocity} / 依赖 ${dims.dependency}` : ""} |`,

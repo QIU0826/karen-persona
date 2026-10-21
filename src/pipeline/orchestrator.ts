@@ -35,6 +35,18 @@ import {
   pickDueInitiative,
   type DailyInitiativePlan,
 } from "../impulse/initiative-plan.js";
+import {
+  buildDailyLifePrompt,
+  dailyLifeToSignals,
+  deserializeDailyLife,
+  formatDailyLife,
+  parseDailyLife,
+  pickLifeEvent,
+  serializeDailyLife,
+  type DailyLifeEvent,
+} from "../impulse/daily-life.js";
+import { getDailyLife, saveDailyLife } from "../data/daily-life.js";
+import { generateDailyLifeWithLLM } from "../schedule/initiative-llm.js";
 import { buildInitiativeReplyHint } from "../impulse/initiative-reply.js";
 import {
   getInitiativePlan,
@@ -1127,15 +1139,19 @@ export async function ensureDailyInitiativePlan(state: ConversationState): Promi
 
     const digests = listRecentDigests(db, state.storagePersona, state.owner, 3);
     // v0.9.4：把她自己的生活线索喂给计划生成（原来只喂他的事 → 主动只会追问对方）
+    // v0.9.6：优先用「今天真实发生的小事」，没有才回退静态人设素材
     const now = new Date();
     const weatherRaw = state.weatherPerception?.raw;
-    const lifeSignals = buildLifeSignals({
-      world: (state.persona as { world?: Parameters<typeof buildLifeSignals>[0]["world"] }).world ?? null,
-      hour: now.getHours(),
-      weekday: now.getDay() === 0 ? 7 : now.getDay(),
-      emotionLabel: describeEmotion(state.emotionState),
-      weather: weatherRaw ? { condition: weatherRaw.condition, temperature: weatherRaw.temp } : null,
-    });
+    const todayEvents = await ensureDailyLife(state);
+    const lifeSignals = todayEvents.length > 0
+      ? dailyLifeToSignals(todayEvents)
+      : buildLifeSignals({
+          world: (state.persona as { world?: Parameters<typeof buildLifeSignals>[0]["world"] }).world ?? null,
+          hour: now.getHours(),
+          weekday: now.getDay() === 0 ? 7 : now.getDay(),
+          emotionLabel: describeEmotion(state.emotionState),
+          weather: weatherRaw ? { condition: weatherRaw.condition, temperature: weatherRaw.temp } : null,
+        });
     const prompt = buildDailyPlanPrompt({
       herName: state.persona.name,
       userName: state.config.your_name,
@@ -1168,6 +1184,68 @@ export async function ensureDailyInitiativePlan(state: ConversationState): Promi
   } catch {
     // 计划失败不影响对话
   }
+}
+
+/** 正在生成中的「她的一天」key（同一人设/owner/天只生成一次） */
+const dailyLifeInflight = new Set<string>();
+
+/** 读今天的生活流（同步、只读；没有返回空数组）。 */
+export function readTodayDailyLife(state: ConversationState): DailyLifeEvent[] {
+  try {
+    const db = getVectorDb();
+    const row = getDailyLife(db, state.storagePersona, state.owner, localDayKey(Date.now()));
+    if (!row) return [];
+    return deserializeDailyLife(row.life_json)?.events ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 确保「她今天的一天」已生成（v0.9.6）。
+ * 每天一次小调用；失败下次再试；不阻塞主流程时由调用方 fire-and-forget。
+ */
+export async function ensureDailyLife(state: ConversationState): Promise<DailyLifeEvent[]> {
+  try {
+    const db = getVectorDb();
+    const day = localDayKey(Date.now());
+    const existing = getDailyLife(db, state.storagePersona, state.owner, day);
+    if (existing) return deserializeDailyLife(existing.life_json)?.events ?? [];
+
+    const now = new Date();
+    const weatherRaw = state.weatherPerception?.raw;
+    const prompt = buildDailyLifePrompt({
+      herName: state.persona.name,
+      day,
+      weekday: now.getDay() === 0 ? 7 : now.getDay(),
+      world: (state.persona as { world?: Parameters<typeof buildDailyLifePrompt>[0]["world"] }).world ?? null,
+      weather: weatherRaw ? { condition: weatherRaw.condition, temperature: weatherRaw.temp } : null,
+    });
+    const raw = await generateDailyLifeWithLLM(prompt);
+    if (!raw) return [];
+    const plan = parseDailyLife(raw, day);
+    if (!plan) return [];
+    saveDailyLife(db, {
+      personaId: state.storagePersona,
+      ownerId: state.owner,
+      day,
+      lifeJson: serializeDailyLife(plan),
+    });
+    console.log(`  [她的一天] ${day} 生成 ${plan.events.length} 条：${formatDailyLife(plan.events)}`);
+    return plan.events;
+  } catch {
+    return [];
+  }
+}
+
+/** 正常回复前顺手准备今天的生活流（fire-and-forget，不增加回复延迟）。 */
+function kickDailyLife(state: ConversationState): void {
+  const key = `${state.storagePersona}@${state.owner}@${localDayKey(Date.now())}`;
+  if (dailyLifeInflight.has(key)) return;
+  dailyLifeInflight.add(key);
+  void ensureDailyLife(state)
+    .catch(() => undefined)
+    .finally(() => dailyLifeInflight.delete(key));
 }
 
 /** 正在生成中的「今日由头计划」key（同一人设/owner/天只生成一次） */
@@ -1342,6 +1420,10 @@ function buildTalkMoveInjection(
   const key = `${state.owner ?? "cli"}|${state.storagePersona}`;
   const recent = recentTalkMoves.get(key) ?? [];
   const now = new Date();
+  // v0.9.6：优先用「今天真实发生的小事」；没有才回退静态人设素材
+  const todayEvents = readTodayDailyLife(state);
+  const pickedToday = pickLifeEvent(todayEvents, now.getHours());
+  const todaySignal = pickedToday?.text;
   // v0.9.5：给她一句具体的生活素材（否则 self-disclose 提示只能空泛地"补一句近况"）
   const lifeSignals = buildLifeSignals({
     world: (state.persona as { world?: Parameters<typeof buildLifeSignals>[0]["world"] }).world ?? null,
@@ -1353,9 +1435,8 @@ function buildTalkMoveInjection(
       : null,
     random: () => Math.random(),
   });
-  const lifeSignal = lifeSignals.length > 0
-    ? lifeSignals[Math.floor(Math.random() * lifeSignals.length)]
-    : undefined;
+  const lifeSignal = todaySignal ??
+    (lifeSignals.length > 0 ? lifeSignals[Math.floor(Math.random() * lifeSignals.length)] : undefined);
   const decision = decideTalkMove(
     {
       userText: userInput,
@@ -1630,6 +1711,7 @@ export async function processMessage(
   const recentReplies = extractRecentReplies(session.messages, DEFAULT_LONG_RANGE_REPLY_COUNT);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
   kickInitiativePlan(state);
+  kickDailyLife(state);
   // 用户点名要照片/表情包/语音：让她的语气和程序实际会发的动作对齐
   const mediaRequest = detectMediaRequest(userInput);
   const fullSystem =
@@ -2118,6 +2200,7 @@ export async function* processMessageStream(
   const recentReplies = extractRecentReplies(session.messages, DEFAULT_LONG_RANGE_REPLY_COUNT);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
   kickInitiativePlan(state);
+  kickDailyLife(state);
   const mediaRequest = detectMediaRequest(userInput);
   // 相识守卫：用户问「怎么认识」且无依据 → 逐条过滤编造场景
   const meetingUngrounded =
@@ -2817,6 +2900,7 @@ export async function processProactive(
   const recentReplies = extractRecentReplies(session.messages, DEFAULT_LONG_RANGE_REPLY_COUNT);
   const avoidRepeatNote = buildAvoidRepeatInjection(recentReplies);
   kickInitiativePlan(state);
+  kickDailyLife(state);
   // T1 快照 → 最近状态弧（主动消息也从最近的关系走势出发）
   const t1ArcContext = getT1ArcContext(state.storagePersona);
   if (t1ArcContext) logs.push("[T1] 注入最近状态弧");

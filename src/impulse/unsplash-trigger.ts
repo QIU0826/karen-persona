@@ -304,8 +304,10 @@ export async function trySharePhoto(
   if (generated) return generated;
 
   // ── 无 Key：本地图库兜底 ─────────────────────
+  // v0.9.6 修：这里原来漏传 preferEra，导致用户在问「现在/此刻」时
+  // 仍可能发「昨天拍的雪」（真实长跑评审抓到的时间错位）。
   if (!hasUnsplashKey()) {
-    return shareLocalPhoto(state, options.preferredTags);
+    return shareLocalPhoto(state, options.preferredTags, options.preferEra);
   }
 
   // ── query 生成 + 搜索 ────────────────────────

@@ -119,4 +119,17 @@ describe("v0.9 多媒体相关性：没有钩子就不发图", () => {
     expect(photo).not.toBeNull();
     expect(["天这样了", "刚抬头看到的", "这会儿外面挺好看"]).toContain(photo!.caption);
   });
+
+  it("问「现在」+ 无 Key 时本地图库必须用今天的配文（回归：曾发昨天拍的雪）", async () => {
+    // 随机固定 0.1 → era 选择会偏向 today；但这里关键是 preferEra 被透传
+    const photo = await trySharePhoto(makeState() as never, "行，等我找找", {
+      requested: true,
+      userText: "你那边现在啥样，拍张照片看看呗",
+      preferEra: "today",
+    });
+    expect(photo).not.toBeNull();
+    expect(photo!.source).toBe("local");
+    // 「今天」的配文不会出现"昨天/以前"这类时间词（雪景照片的 yesterday 配文是「昨天拍的，雪还没化」）
+    expect(photo!.caption).not.toMatch(/昨天|以前/);
+  });
 });
