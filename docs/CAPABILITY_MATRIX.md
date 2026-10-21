@@ -3,7 +3,7 @@
 > 目的：一眼看清**哪些是真做了、做到什么程度**。每一行都必须能在代码里找到对应，
 > 数字必须能复现（跑法写在「怎么复现」列）。不确定的地方写清楚弱项，不写成优点。
 >
-> 最后更新：2026-10-21（v0.9.12）。配套文档：[README](../README.md)（对外）、
+> 最后更新：2026-10-21（v0.9.13）。配套文档：[README](../README.md)（对外）、
 > [CLAUDE.md](../CLAUDE.md)（开发总控）、[PRODUCT_AUDIT.md](PRODUCT_AUDIT.md)（审计与路线图）。
 
 图例：✅ 可用 ｜ 🚧 有明确限制 ｜ ⛔ 受阻（代码就绪但依赖未到位）
@@ -42,7 +42,7 @@
 | 语音识别（ASR） | `src/ai/asr.ts`、`services/asr/server.py`、`scripts/asr-smoke.ts` | ✅ | **v0.9.0 新增**：faster-whisper CPU int8（small 484MB）；SILK→ASR 1414ms、WAV 962ms；OpenCC t2s 保证简体；`asr:robustness` 语速/台腔/粤语口音/5–10dB 噪声 CER 3.0–10.7%；失败回退 `[语音]` 占位；桥接 E2E 用**真实 SILK 入站**（断言 ASR 收到的是解码后的 WAV）且转写进 prompt；`voice` 长跑 4 轮：入站语音 2/ASR 2，语音事实被记住并答对（[报告](VOICE_ASR_E2E.md)） | 只支持中文；口音/噪声会错字；群聊语音不支持；服务需 `npm run asr:start` |
 | 相识不编造 | `src/persona/meeting-guard.ts` | ✅ | 无依据时确定性删掉编造场景（吧台/下雨/借伞），整条都在编就换含糊回应 | 有依据时仍可能细节漂移 |
 | **多媒体相关性** | `src/impulse/media-relevance.ts`、`src/impulse/photo-library.ts` | ✅ | 只在点名/场景命中/她刚分享生活时发图；场景配文池；21 轮评审 **2/5→4/5**（两轮复现）；**v0.9.12 配文只在照片真有该场景时才用**（旧逻辑不一致率 22%→0%，`photo:scene-eval`） | 抽象话题下宁可少发，图库 20 张；「海边」场景图库没有 |
-| 被点名要媒体会真给 | `src/impulse/media-request.ts` | ✅ | 要照片跳概率判定（亲密度/冷却仍生效）、按场景挑图；要语音/表情提高概率并跳冷却 | 图库 20 张（v0.9.11 本机生成补 5 张），仍会撞图 |
+| 被点名要媒体会真给 | `src/impulse/media-request.ts` | ✅ | 要照片跳概率判定（亲密度/冷却仍生效）、按场景挑图；要语音/表情提高概率并跳冷却 | 图库 24 张（v0.9.11/0.9.13 本机生成补 9 张），仍会撞图 |
 
 ---
 
@@ -65,7 +65,7 @@
 |---|---|---|---|---|
 | 本机生图（diffusers+MPS） | `src/media/comfyui.ts`、`services/image/server.py` | ✅ | `stabilityai/sdxl-turbo` fp16 已本地化（5.14GB）；**热态 2.1–2.2s/张**（832×1216，MPS）；`npm run image:smoke` 全过；mock 长跑真的发出 2 张生成图；失败静默回退图库 | 无角色一致性（只有场景照）；首次请求加载模型约 10s；服务需手动启动（`npm run image:start`） |
 | 生成图治理 | `src/media/generated-store.ts` | ✅ | 按日期落盘、30 天自动清理、可 purge、可统计占用 | 依赖上一行启用才有内容 |
-| 照片分享 | `src/impulse/unsplash-trigger.ts` | ✅ | 时间关系（今天/昨天/以前）+ 场景匹配（晚霞/雨/猫…）+ 亲密度门槛 | 无 Unsplash Key 时 20 张本地图 |
+| 照片分享 | `src/impulse/unsplash-trigger.ts` | ✅ | 时间关系（今天/昨天/以前）+ 场景匹配（晚霞/雨/猫…）+ 亲密度门槛 | 无 Unsplash Key 时 24 张本地图 |
 | 图片识别 | `src/ai/vision.ts` | ✅ | DeepSeek Flash 多模态，`detail=high`，截图逐字转述 ≤200 字 | 中文小字/模糊截图仍可能错 |
 
 ---

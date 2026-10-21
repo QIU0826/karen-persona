@@ -120,6 +120,10 @@ npm run image:smoke
 | `cat-sunbeam.jpg` | 猫晒太阳 | an orange tabby cat lying in a warm sunbeam on a wooden floor, cozy home, slight film grain, phone photo, no text |
 | `rainy-street.jpg` | 雨夜街头 | a rainy evening street seen from under an umbrella, wet pavement with warm shop light reflections, phone photo, first person view, no people visible, no text |
 | `book-iced-coffee.jpg` | 周末书+冰咖啡 | an open book and a glass of iced coffee on a window seat, lazy weekend afternoon, soft light, film grain, photo, no people, no text |
+| `seaside.jpg` | 海边傍晚 | calm seaside beach in the late afternoon, gentle waves on the sand, a few distant seagulls, soft warm light, film grain, photo, no people, no text |
+| `breakfast.jpg` | 早餐 | a simple homemade breakfast on a wooden table: toast with egg, a cup of coffee, morning sunlight, cozy, phone photo, no people, no text |
+| `late-night-noodles.jpg` | 夜宵面 | a bowl of steaming noodles on a kitchen table late at night, warm lamp light, chopsticks, cozy, phone photo, no people, no text |
+| `bubble-tea.jpg` | 奶茶 | a cup of bubble tea with tapioca pearls on a cafe table, soft afternoon light, phone photo, no text |
 
 生成命令（服务已在跑）：
 
@@ -155,5 +159,6 @@ sips -s format jpeg -s formatOptions 82 /tmp/out.png --out assets/photos/xxx.jpg
 旧逻辑逐场景不一致率：咖啡 56%、山 69%、花 73%、雨 33%、店 52%——「标签含多个近义词、
 选到的图只匹配其中一个」就会翻车。
 
-**已知缺口**：「海边」没有映射——图库确实没有海景图，硬映射到湖/码头属于说谎，
-留作后续扩图库时再补。
+**缺口现状（v0.9.13）**：「海边/早餐/夜宵/奶茶」四个原本没有图的场景已补齐，
+`photo:scene-eval` 的场景词覆盖从 13/14 提升到 **100%**（17/17 条话术都能匹配到图），
+平均配文不一致率保持 **0%**。

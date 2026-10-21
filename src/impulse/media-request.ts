@@ -112,6 +112,10 @@ const SCENE_TAG_MAP: ReadonlyArray<{ re: RegExp; tags: string[] }> = [
   { re: /(早上|早晨|清晨)/, tags: ["morning"] },
   { re: /(湖水|湖边|码头|河边)/, tags: ["lake", "pier"] },
   { re: /(看书|读书|书桌|周末在家|翻书)/, tags: ["book"] },
+  { re: /(海边|大海|沙滩|看海)/, tags: ["sea", "beach"] },
+  { re: /(早饭|早餐|早点|早上吃)/, tags: ["breakfast"] },
+  { re: /(夜宵|宵夜|半夜饿)/, tags: ["late_night", "noodle"] },
+  { re: /(奶茶|珍珠奶茶|波波茶)/, tags: ["tea", "bubble_tea"] },
 ];
 
 /**

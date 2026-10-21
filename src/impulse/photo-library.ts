@@ -285,6 +285,55 @@ const PHOTOS: PhotoDef[] = [
       past: ["以前住的地方也有这么个窗台", "这本书还是大学时候买的"],
     },
   },
+  // ── v0.9.13：补齐「海边/早餐/夜宵/奶茶」四个缺口场景（本机 SDXL-Turbo 生成） ──
+  {
+    id: "seaside",
+    file: "seaside.jpg",
+    tags: ["sea", "beach", "water", "calm", "nature"],
+    scene: "dusk",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["傍晚海边，风还挺大", "今天浪不小，站了一会儿"],
+      yesterday: ["昨天也去海边走了走", "昨天的海比今天静"],
+      past: ["好久没看海了，翻到以前拍的", "以前来过这片沙滩"],
+    },
+  },
+  {
+    id: "breakfast",
+    file: "breakfast.jpg",
+    tags: ["breakfast", "food", "morning", "coffee", "bread"],
+    scene: "morning",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["今早随便弄了点", "早饭就这样，凑合吃"],
+      yesterday: ["昨天早上也差不多", "昨天煎蛋煎得比较成功"],
+      past: ["以前住的地方早上光线更好", "刚搬来那会儿就吃这些"],
+    },
+  },
+  {
+    id: "late-night-noodles",
+    file: "late-night-noodles.jpg",
+    tags: ["late_night", "food", "noodle", "night"],
+    scene: "night",
+    eras: ["today", "yesterday"],
+    captions: {
+      today: ["半夜饿了，煮了点面", "这个点才吃上饭"],
+      yesterday: ["昨天也是这个点吃的", "昨天半夜也煮了面"],
+      past: [],
+    },
+  },
+  {
+    id: "bubble-tea",
+    file: "bubble-tea.jpg",
+    tags: ["tea", "drink", "bubble_tea", "cafe", "warm"],
+    scene: "day",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["今天这杯甜了点", "顺手买了一杯"],
+      yesterday: ["昨天那杯更好喝", "昨天也买了，忍不住"],
+      past: ["以前公司楼下就有一家", "很久没喝这家了"],
+    },
+  },
 ];
 
 /** 图库里是否有匹配这些场景标签的照片（用于发图前的相关性判定）。 */

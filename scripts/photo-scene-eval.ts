@@ -34,7 +34,10 @@ const SCENES: Array<{ phrase: string; expectContains?: string[] }> = [
   { phrase: "早上好，拍张清晨的照片" },
   { phrase: "发张城市街头的照片" },
   { phrase: "你平时看书吗，拍张书桌" }, // 图库暂无 book 场景（除新图）
-  { phrase: "海边有照片吗" }, // 图库没有海
+  { phrase: "海边有照片吗" },
+  { phrase: "早饭吃啥了，拍一张" },
+  { phrase: "半夜饿了，有夜宵照片吗" },
+  { phrase: "路边买杯奶茶，拍张看看" },
 ];
 
 interface SceneResult {

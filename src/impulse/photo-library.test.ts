@@ -90,8 +90,8 @@ describe("photo-library 时间关系模型", () => {
     expect(low!.caption.length).toBeGreaterThan(0);
   });
 
-  it("图库有 20 张，连续 12 次选择就有明显多样性（修复「配文重复」）", () => {
-    expect(getPhotoCatalog().length).toBe(20);
+  it("图库有 24 张，连续 12 次选择就有明显多样性（修复「配文重复」）", () => {
+    expect(getPhotoCatalog().length).toBe(24);
     let n = 0;
     const random = () => ((n++ * 37) % 100) / 100;
     const photos = new Set<string>();
@@ -151,12 +151,22 @@ describe("photo-library 时间关系模型", () => {
       photos.add(choice!.photo.id);
       captions.add(choice!.caption);
     }
-    expect(photos.size).toBeGreaterThanOrEqual(18);
+    expect(photos.size).toBeGreaterThanOrEqual(22);
     expect(captions.size).toBeGreaterThanOrEqual(50);
   });
 
-  it("新增的 5 张图都在图库目录里且有对应文件", () => {
-    const ids = ["latte-tulip", "cafe-quiet", "cat-sunbeam", "rainy-street", "book-iced-coffee"];
+  it("新增的图都在图库目录里且有对应文件", () => {
+    const ids = [
+      "latte-tulip",
+      "cafe-quiet",
+      "cat-sunbeam",
+      "rainy-street",
+      "book-iced-coffee",
+      "seaside",
+      "breakfast",
+      "late-night-noodles",
+      "bubble-tea",
+    ];
     const catalog = getPhotoCatalog();
     for (const id of ids) {
       const photo = catalog.find((item) => item.id === id);
