@@ -19,6 +19,7 @@ import "dotenv/config";
 import { loadConfig } from "../src/data/store.js";
 import { loadPersona } from "../src/persona/loader.js";
 import { buildPrompt } from "../src/persona/prompt-builder.js";
+import { formatUserFacts, type UserFact } from "../src/data/user-facts.js";
 import {
   buildMentionPacingNote,
   detectSelfMention,
@@ -38,21 +39,42 @@ import {
   type BehaviorRunMetrics,
 } from "../src/eval/behavior-metrics.js";
 
-/** 固定用户消息序列（覆盖：闲聊/关心/事实/重复提问/情绪/邀约） */
-const USER_MESSAGES = [
-  "在吗，今天过得咋样",
-  "我今天加班到八点，累死了",
-  "你店里今天忙不忙啊",
-  "对了，我叫阿哲，在上海做程序员",
-  "你养的那只猫叫啥来着",
-  "我周末想去周边逛逛，有啥推荐吗",
-  "说真的，你平时下班都干嘛",
-  "我今天被组长说了几句，有点郁闷",
-  "你晚饭吃了没",
-  "我今天加班到八点，累死了", // 重复提问（测复述/复读）
-  "你养的那只猫叫啥来着", // 重复提问
-  "行，那我先去洗澡了，晚点聊",
+/** 固定用户消息序列（覆盖：闲聊/关心/事实/重复提问/情绪/邀约 + 记忆召回探针） */
+interface EvalMessage {
+  text: string;
+  /** 记忆召回期望命中的实体（任一字符串出现即算召回） */
+  expect?: string[];
+}
+
+const USER_MESSAGES: EvalMessage[] = [
+  { text: "在吗，今天过得咋样" },
+  { text: "我今天加班到八点，累死了" },
+  { text: "你店里今天忙不忙啊" },
+  // 注意：姓名/城市/职业**不在本轮历史里说**——它们只存在于记忆块（模拟跨 session 记忆），
+  // 这样召回探针才是真正的「冷召回」测试。
+  { text: "你养的那只猫叫啥来着" },
+  { text: "我周末想去周边逛逛，有啥推荐吗" },
+  { text: "说真的，你平时下班都干嘛" },
+  // —— 记忆召回探针：这些事实只在「记忆块」里出现过（本轮历史中没有）——
+  { text: "你还记得我叫啥不", expect: ["阿哲"] },
+  { text: "我上次说我在哪个城市来着", expect: ["上海"] },
+  { text: "我是做什么工作的来着", expect: ["程序员", "开发", "写代码"] },
+  { text: "我下周三要去哪出差来着", expect: ["上海", "出差"] },
+  { text: "我今天被组长说了几句，有点郁闷" },
+  { text: "你晚饭吃了没" },
+  { text: "我今天加班到八点，累死了" }, // 重复提问（测复述/复读）
+  { text: "行，那我先去洗澡了，晚点聊" },
 ];
+
+/** 记忆块 fixture：模拟「另一个 session 里他说过、被抽取成事实」的内容 */
+const MEMORY_FACTS: UserFact[] = [
+  { ownerId: "qq:1", key: "name", value: "阿哲", category: "profile", updatedAt: 1 },
+  { ownerId: "qq:1", key: "city", value: "上海", category: "profile", updatedAt: 2 },
+  { ownerId: "qq:1", key: "job", value: "程序员，在做星潮的项目", category: "work", updatedAt: 3 },
+  { ownerId: "qq:1", key: "pet", value: "养了只橘猫叫团子", category: "pet", updatedAt: 4 },
+  { ownerId: "qq:1", key: "plan", value: "下周三去上海出差，签星潮的合同", category: "plan", updatedAt: 5 },
+];
+const MEMORY_BLOCK = formatUserFacts(MEMORY_FACTS);
 
 /** 固定的「她今天的一天」（两个变体用同一份，保证可比） */
 const TODAY_LIFE = [
@@ -68,11 +90,13 @@ interface Variant {
   pacing: boolean;
   /** 是否启用「反问钩子」（v0.9.9 实验） */
   questionHook?: boolean;
+  /** 是否注入「你确定记得的关于对方的事」记忆块（v0.9.14 实验） */
+  memoryOn?: boolean;
 }
 
 const VARIANTS: Variant[] = [
-  { id: "baseline", label: "基线", pacing: false },
-  { id: "question-hook", label: "反问钩子（v0.9.9 实验）", pacing: false, questionHook: true },
+  { id: "baseline", label: "基线（无记忆块）", pacing: false },
+  { id: "memory-on", label: "记忆块注入（v0.9.14 实验）", pacing: false, memoryOn: true },
 ];
 
 /** 简单可复现 PRNG（mulberry32），让概率触发在多次运行间可复现 */
@@ -95,6 +119,9 @@ interface RunResult {
   metrics: BehaviorRunMetrics;
   usage: { prompt: number; completion: number };
   avgLatencyMs: number;
+  /** 记忆召回：探针条数 / 命中条数 */
+  recallCases: number;
+  recallHits: number;
 }
 
 function buildEntityKeywords(persona: Awaited<ReturnType<typeof loadPersona>>): string[] {
@@ -171,8 +198,12 @@ async function main(): Promise<number> {
       let latencySum = 0;
 
       const random = seededRandom(seed * 1000 + variant.id.length);
-      for (const userText of USER_MESSAGES) {
+      let recallCases = 0;
+      let recallHits = 0;
+      for (const message of USER_MESSAGES) {
+        const userText = message.text;
         const notes: string[] = [];
+        if (variant.memoryOn) notes.push(MEMORY_BLOCK);
         if (variant.pacing) notes.push(buildMentionPacingNote(mentionHistory));
         if (
           variant.questionHook &&
@@ -184,20 +215,35 @@ async function main(): Promise<number> {
           notes.push(buildQuestionHookNote());
         }
         const note = notes.join("");
+        // 网络抖动重试（DeepSeek 偶发 ETIMEDOUT；不重试会让整轮评测白跑）
+        let response: Awaited<ReturnType<typeof client.chat.completions.create>> | null = null;
+        let lastError: unknown = null;
         const callStartedAt = Date.now();
-        const response = await client.chat.completions.create({
-          model,
-          messages: [
-            { role: "system", content: staticSystem + note },
-            ...history,
-            { role: "user", content: userText },
-          ],
-          temperature: 0.95,
-          max_tokens: 160,
-          thinking: { type: "disabled" },
-        } as never);
+        for (let attempt = 0; attempt < 3 && !response; attempt++) {
+          try {
+            response = await client.chat.completions.create({
+              model,
+              messages: [
+                { role: "system", content: staticSystem + note },
+                ...history,
+                { role: "user", content: userText },
+              ],
+              temperature: 0.95,
+              max_tokens: 160,
+              thinking: { type: "disabled" },
+            } as never);
+          } catch (err) {
+            lastError = err;
+            await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
+          }
+        }
+        if (!response) throw lastError instanceof Error ? lastError : new Error(String(lastError));
         latencySum += Date.now() - callStartedAt;
         const reply = response.choices[0]?.message?.content?.trim() ?? "";
+        if (message.expect && message.expect.length > 0) {
+          recallCases += 1;
+          if (message.expect.some((word) => reply.includes(word))) recallHits += 1;
+        }
         usage.prompt += response.usage?.prompt_tokens ?? 0;
         usage.completion += response.usage?.completion_tokens ?? 0;
         history.push({ role: "user", content: userText });
@@ -217,6 +263,8 @@ async function main(): Promise<number> {
         metrics,
         usage,
         avgLatencyMs: Math.round(latencySum / USER_MESSAGES.length),
+        recallCases,
+        recallHits,
       });
       process.stdout.write(
         `  [${variant.id} seed ${seed}] 自述 ${Math.round(metrics.mentionRate * 100)}% 字数 ${metrics.avgChars.toFixed(1)} 问句 ${Math.round(metrics.questionRate * 100)}% 重复对 ${metrics.duplicatePairs}\n`,
@@ -232,7 +280,13 @@ async function main(): Promise<number> {
     const agg = aggregateBehaviorMetrics(runs.map((run) => run.metrics));
     summary[variant.id] = agg;
     console.log(
-      `| ${variant.label} | ${formatRangePercent(agg.mentionRate)} | ${formatRangeNumber(agg.avgChars)} | ${formatRangePercent(agg.questionRate)} | ${formatRangeNumber(agg.duplicatePairs)} | ${formatRangeNumber(agg.repeatedOpenerPairs)} | ${Math.round(runs.reduce((sum, run) => sum + run.avgLatencyMs, 0) / runs.length)}ms |`,
+      (() => {
+        const recallCases = runs.reduce((sum, run) => sum + run.recallCases, 0);
+        const recallHits = runs.reduce((sum, run) => sum + run.recallHits, 0);
+        const recallLabel =
+          recallCases > 0 ? `${recallHits}/${recallCases}（${Math.round((recallHits / recallCases) * 100)}%）` : "—";
+        return `| ${variant.label} | ${recallLabel} | ${formatRangePercent(agg.mentionRate)} | ${formatRangeNumber(agg.avgChars)} | ${formatRangePercent(agg.questionRate)} | ${formatRangeNumber(agg.duplicatePairs)} | ${formatRangeNumber(agg.repeatedOpenerPairs)} | ${Math.round(runs.reduce((sum, run) => sum + run.avgLatencyMs, 0) / runs.length)}ms |`;
+      })(),
     );
   }
 
@@ -249,18 +303,25 @@ async function main(): Promise<number> {
     const replies = results.filter((result) => result.variant === variant.id).flatMap((run) => run.replies);
     const user = replies.map((reply, index) => `${index + 1}. ${reply || "（空）"}`).join("\n");
     try {
-      const raw = await client.chat.completions
-        .create({
-          model,
-          messages: [
-            { role: "system", content: judgeSystem },
-            { role: "user", content: user },
-          ],
-          temperature: 0.2,
-          max_tokens: 200,
-          thinking: { type: "disabled" },
-        } as never)
-        .then((response) => response.choices[0]?.message?.content ?? "");
+      let raw = "";
+      for (let attempt = 0; attempt < 3 && !raw; attempt++) {
+        try {
+          raw = await client.chat.completions
+            .create({
+              model,
+              messages: [
+                { role: "system", content: judgeSystem },
+                { role: "user", content: user },
+              ],
+              temperature: 0.2,
+              max_tokens: 200,
+              thinking: { type: "disabled" },
+            } as never)
+            .then((response) => response.choices[0]?.message?.content ?? "");
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
+        }
+      }
       const start = raw.indexOf("{");
       const end = raw.lastIndexOf("}");
       const parsed = JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>;
