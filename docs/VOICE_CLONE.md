@@ -95,6 +95,8 @@
 - 开关：`KAREN_TTS_BACKEND=cosyvoice`（**默认仍 kokoro**；实验性，等真人参考音 + 稳定性再考虑默认）
 - 服务：`services/cosyvoice/server.py`（18087），`/health` + `/voices` + `/synthesize`
 - 参考音管理：`data/voice-ref/<id>.wav` + `<id>.json`（ref_text/来源/授权/时长/sha256），不入库
+- **导入工具**：`npm run voice:ref:add -- --input <录音> [--id xiaoya] [--text 逐字稿]`
+  支持 mp3/m4a/aac/wav/aiff，自动转 24k、>10s 截断、ASR 识别参考文本
 - Node 客户端：`src/ai/cosyvoice-tts.ts`；`tts.ts` 回退链 **cosyvoice → kokoro → say**
 - **防复读守卫**（`server.py`）：时长合理性检查（CJK 字数估算 0.55–1.8x）+
   本机 ASR 复核（CER ≤0.25，默认开）+ 最多 3 个种子重试；全失败返回 500 → Node 回退

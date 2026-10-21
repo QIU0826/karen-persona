@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.9.17 — 2026-10-21
+
+**参考音一键导入工具**：任何格式的录音 → 可用的克隆参考音（为「用户提供真人音色」做准备）。
+
+### Added
+
+- `scripts/voice-ref-add.ts` + `npm run voice:ref:add`：
+  `npm run voice:ref:add -- --input ~/Downloads/我的录音.m4a --id xiaoya`
+  - 支持 **mp3 / m4a / aac / wav / aiff**（macOS afconvert 转码）
+  - 统一转 24kHz PCM16 单声道；超过 10s 自动截断；<3s 拒绝、<8s 警告
+  - 自动调本机 ASR 识别参考文本（带 3 次重试；也可 `--text` 手动给，更准）
+  - 写入 `data/voice-ref/<id>.wav` + `<id>.json`（来源/授权/时长/sha256），
+    `data/voice-ref/` 已 gitignore（录音不入库）
+- 修复 WAV 解析：afconvert 输出带 `FLLR` 附加块，原按 44 字节头截断会把音频弄坏
+  → 改为按 RIFF chunk 遍历定位 `fmt`/`data` 并重建标准头
+
+### 说明
+
+- 这是为 v0.9.16 的克隆后端准备的输入工具；默认语音仍是 Kokoro。
+- 测试 117 文件 / 1400 用例通过（工具脚本无新增单测，靠手动 E2E 验证：
+  wav/m4a 两条路径都跑通并清理了测试参考音）。
+
 ## v0.9.16 — 2026-10-21
 
 **接入 Fun-CosyVoice 3.0 零样本音色克隆（实验性可选后端）+ 可信性核验**。

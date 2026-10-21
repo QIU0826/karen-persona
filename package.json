@@ -1,6 +1,6 @@
 {
   "name": "karen-persona",
-  "version": "0.9.16",
+  "version": "0.9.17",
   "description": "QQ AI 虚拟人设聊天系统 - 让通讯录里住进一个有自己生活、情绪和记忆的人",
   "main": "dist/index.js",
   "scripts": {
@@ -59,7 +59,8 @@
     "kokoro:start": "services/kokoro/.venv/bin/python services/kokoro/server.py",
     "kokoro:smoke": "tsx scripts/kokoro-tts-smoke.ts",
     "cosyvoice:start": "services/cosyvoice/.venv/bin/python services/cosyvoice/server.py",
-    "cosyvoice:smoke": "tsx scripts/cosyvoice-smoke.ts"
+    "cosyvoice:smoke": "tsx scripts/cosyvoice-smoke.ts",
+    "voice:ref:add": "tsx scripts/voice-ref-add.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",
