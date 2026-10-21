@@ -10,6 +10,7 @@ data/*.json
 data/*.md
 data/qq/
 data/voice-samples/
+data/voice-ref/
 data/stickers-collected/
 vendor/
 # 本地模型统一放 KAREN_MODELS_DIR（默认 ~/Library/Application Support/karen/models），仓库内不落模型
@@ -31,3 +32,7 @@ data/*.sqlite.bak*
 services/*/.venv/
 services/asr/models/
 services/kokoro/models/
+services/cosyvoice/assets/
+# Python 缓存
+__pycache__/
+*.pyc

@@ -23,6 +23,7 @@ import path from "node:path";
 import { encode as encodeSilk } from "silk-wasm";
 import { createLogger } from "../obs/logger.js";
 import { isNeuralTtsEnabled, synthesizeWithKokoro } from "./neural-tts.js";
+import { isCosyVoiceEnabled, synthesizeWithCosyVoice } from "./cosyvoice-tts.js";
 import { buildSayText, planSpeechStyle, type SpeechStyle } from "./tts-style.js";
 
 const log = createLogger("tts");
@@ -255,7 +256,7 @@ export async function isSpeechAvailable(
   opts: { platform?: NodeJS.Platform; which?: (command: string) => Promise<boolean> } = {}
 ): Promise<boolean> {
   const platform = opts.platform ?? process.platform;
-  if (platform !== "darwin") return isNeuralTtsEnabled();
+  if (platform !== "darwin") return isNeuralTtsEnabled() || isCosyVoiceEnabled();
   const which = opts.which ?? defaultWhich;
   try {
     return await which("say");
@@ -276,7 +277,7 @@ export async function synthesizeSpeech(
   deps: SpeechDeps = {}
 ): Promise<SpeechResult | null> {
   const platform = deps.platform ?? process.platform;
-  if (platform !== "darwin" && !isNeuralTtsEnabled()) {
+  if (platform !== "darwin" && !isNeuralTtsEnabled() && !isCosyVoiceEnabled()) {
     log.debug("tts.skipped", { reason: "platform_unsupported", platform });
     return null;
   }
@@ -324,10 +325,23 @@ export async function synthesizeSpeech(
   let tempDir: string | null = null;
   try {
     let wav: Buffer | null = null;
-    let wavSource: "say" | "kokoro" = "say";
+    let wavSource: "say" | "kokoro" | "cosyvoice" = "say";
 
-    // v0.9.15：神经 TTS（Kokoro，开源中文少女音色）优先；失败静默回退 say
-    if (isNeuralTtsEnabled()) {
+    // v0.9.16：零样本克隆（Fun-CosyVoice 3.0，实验性；CPU RTF≈2x）
+    if (isCosyVoiceEnabled()) {
+      const cloned = await synthesizeWithCosyVoice(spoken, {
+        timeoutMs: Math.max(timeoutMs, 60_000),
+      });
+      if (cloned) {
+        wav = cloned.wav;
+        wavSource = "cosyvoice";
+      }
+    }
+
+    // v0.9.15：神经 TTS（Kokoro，开源中文少女音色）；克隆失败时作为回退
+    const kokoroFallback =
+      isNeuralTtsEnabled() || Boolean((process.env.KOKORO_TTS_URL ?? "").trim());
+    if (!wav && kokoroFallback) {
       const kokoro = await synthesizeWithKokoro(spoken, {
         // say 语速 185 ≈ 自然语速；映射到 Kokoro 的 speed（0.7–1.3）
         speed: Math.max(0.7, Math.min(1.3, finalRate / DEFAULT_TTS_RATE)),

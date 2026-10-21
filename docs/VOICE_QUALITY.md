@@ -81,7 +81,19 @@ node node_modules/tsx/dist/cli.mjs scripts/voice-sample.ts
   音色来源为该仓库提供的 voice embedding，非真人录音采样；生成音频为本项目产物
 - **仍未做**：零样本克隆"她自己的声音"（需要 10–20s 参考音）；情感/语气细粒度控制（目前只有语速映射）
 
-## 6. 局限（别夸大）
+## 6. v0.9.16：实验性零样本克隆（Fun-CosyVoice 3.0）
+
+在 Kokoro 之外，接入 **Fun-CosyVoice3-0.5B**（Apache-2.0）做零样本克隆：
+用户提供 3–10s 参考音即可把她的音色换成该音色。可信性核验与全部实测见
+[docs/VOICE_CLONE.md](VOICE_CLONE.md)，结论摘要：
+
+- 本机 CPU：加载 2.8–4.3s、**RTF 1.9–3.5x**、内存 **8.3GB**（Kokoro 是 0.16–0.20x / ~1GB）
+- 相似度：官方 3.48s 参考音 **0.76**、10.9s 参考音 **0.87**；中文 ASR CER **0%**
+- **稳定性坑**：合成音当参考音会复读（同句 5 次里 1 次 18.4s）→ 生产需**真人 8–10s 参考音**
+- 默认仍 Kokoro（`KAREN_TTS_BACKEND=kokoro`）；克隆是实验性开关（`=cosyvoice`），
+  失败自动回退 Kokoro → say；`npm run cosyvoice:start` / `cosyvoice:smoke`
+
+## 7. 局限（别夸大）
 
 - **我无法判断「像不像真人」**：我只能测基频、停顿、时长这些客观量，听感需要你确认。
 - 语气词、停顿、音高都是**规则驱动**，不是真正的韵律模型；同一风格多次生成，句内起伏模式会重复。

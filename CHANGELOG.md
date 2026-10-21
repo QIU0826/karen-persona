@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.9.16 — 2026-10-21
+
+**接入 Fun-CosyVoice 3.0 零样本音色克隆（实验性可选后端）+ 可信性核验**。
+
+### 背景
+
+用户选定 Fun-CosyVoice 3.0（3–10s 参考音、9 语 + 18 方言、Apache-2.0）作为克隆方案。
+本轮先做**可信性核验**（官方宣称 vs 本机实测），再决定采用深度，不直接替换默认语音。
+
+### Added
+
+- `docs/VOICE_CLONE.md`：完整可信性核验（宣称/核实/实测/伦理/结论评级）
+- `services/cosyvoice/`：Fun-CosyVoice3-0.5B 本机服务（FastAPI，18087）
+  - 参考音注册：`data/voice-ref/<id>.wav` + `<id>.json`（ref_text/来源/授权/时长/sha256）
+  - **防复读守卫**：时长合理性 + 本机 ASR 复核（CER≤0.25）+ 最多 3 种子重试，全失败返回 500
+  - 上游 CPU 适配补丁 4 处（device 硬编码 cuda、`.cuda()` 调用、torchaudio.load→soundfile、Matcha utils 重依赖）
+- `src/ai/cosyvoice-tts.ts`：Node 客户端；`tts.ts` 回退链 **cosyvoice → kokoro → say**
+- `npm run cosyvoice:start` / `npm run cosyvoice:smoke`（健康/克隆/独立ASR/产品SILK/回退链，零 API 成本）
+- 测试：`src/ai/cosyvoice-tts.test.ts`（14 条：开关/URL/成功解析/500/非WAV/网络异常/空文本/健康检查/回退链）
+
+### 实测（M5 Pro，24GB，CPU）
+
+| 指标 | 结果 |
+|---|---|
+| 模型加载 | 2.8–4.3s（5.4GB 权重） |
+| 合成 RTF | **1.86–3.50x**（Kokoro 为 0.16–0.20x，慢 10–20 倍） |
+| 峰值内存 | **8.3GB**（≈"≥8G"宣称，但那是 RAM；官方未写 VRAM） |
+| 中文 CER（ASR 反验） | 稳定样本 **0.0%** |
+| 说话人相似度（campplus cosine） | **0.76**（官方 3.48s demo 参考）/ **0.87**（10.9s 合成参考） |
+| 参考音长度 | 3.48s 可用；4.85s 合成参考不稳；7.28s 部分句子不稳；10.9s 稳定 |
+
+**关键发现（可信性打折项）**：同一句在 7.28s 合成参考音下，5 次随机种子输出时长
+5.96/6.00/8.16/8.44/**18.40s**（18.4s 为复读）；换官方真人参考音后同句完全正常（4.44s、ASR 全对）。
+→ **合成音当参考音不可靠；生产需 8–10s 真人参考音**。另外 150ms 流式需 GPU，本机不可得；
+论文 1.5B 旗舰效果不能直接套到开源 0.5B。
+
+### 决策
+
+- **默认仍 Kokoro**（快、稳、1GB 内存）；CosyVoice 为**实验性可选后端**（`KAREN_TTS_BACKEND=cosyvoice`），
+  等用户提供真人参考音后再考虑默认。
+- 本机已注册占位参考音 `xiaoya`（Kokoro 合成 7.28s，标注"可能不稳/仅演示"）；
+  官方 demo 参考音只做功能测试（授权不明，不进产品素材）。
+
+### Testing
+
+- 117 个测试文件 / 1400 个用例通过；`tsc` 0 错误；lint 0 违规；`eval:offline` 5 项达标；
+  `cosyvoice:smoke` 全过（健康/克隆/独立ASR CER 0%/产品SILK/回退Kokoro）。
+
 ## v0.9.15 — 2026-10-21
 
 **语音音色换血：从 macOS `say` 换到开源神经 TTS（Kokoro-82M，Apache-2.0，中文少女音色）**。
