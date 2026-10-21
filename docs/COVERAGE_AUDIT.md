@@ -1,6 +1,6 @@
 # 能力覆盖审计（Capability Coverage Audit）
 
-> 最后更新：2026-10-21（v0.9.9）
+> 最后更新：2026-10-21（v0.9.10）
 >
 > 目的：回答「文档里写着 ✅ 的能力，到底被验证到什么程度？」
 > 三层口径：**① 文档宣称 → ② 单测覆盖 → ③ 真实链路/端到端覆盖**。
@@ -41,6 +41,7 @@
 | 内置贴纸 | ✅ | ✅ `stickers.test.ts` | `bridge-e2e`：出站 CQ image 发送 | 已验 |
 | 语音消息（TTS→SILK） | ✅/🚧 | ✅ `voice.test.ts`（35 条）+ darwin-only 真实 say→silk | 真实 QQ 语音条只人工验过 1 次；mock OneBot 覆盖协议形态 | 部分验 |
 | 反问钩子（实验，未采纳） | ❌ 未接入 | ✅ `question-hook.test.ts`（10 条，纯函数） | `behavior:eval` 3/5 种子：问句率 +6pp/+0pp，自然度不变 → **不接入生产** | 已验（结论=不采纳） |
+| 模型能力对照（实验） | ❌ 不切换 | — | `behavior:eval --model` 同套评测：flash vs v4-pro 自然度均 4/5、指标重叠；pro 成本 4.5× → 保留 flash 默认 | 已验（结论=不切换） |
 | 离线行为评测框架 | ✅ | ✅ `behavior-metrics.test.ts`（12 条，纯函数指标/聚合） | `behavior:eval` 真实模型 2 变体×3/5 种子×12 条跑通；新增种子化随机 + LLM 自然度评审；**用它证明 v0.9.7 pacing 无收益**（39% vs 47%，区间重叠） | 已验（框架本身） |
 | 自述提及频率控制 | ✅ | ✅ `mention-pacing.test.ts`（11 条）+ talk-moves 概率覆盖 4 条 | 验证台新增「自述提及 X/Y 轮」指标；6 轮 A/B：关 2/6、开 2/6；离线 3 种子评测：39% vs 47%（区间重叠）→ **未测出收益，v0.9.8 起默认关闭**（`KAREN_MENTION_PACING=on` 才开） | 部分验 |
 | 每日生活流（她的一天） | ✅ | ✅ `daily-life.test.ts`（15 条）+ `data/daily-life.test.ts`（4 条，幂等/隔离） | `life:smoke` 真实模型：3 条全部接地人设、无 AI 腔；mock 长跑报告「她的一天 ✅ 3 条」 | 已验 |

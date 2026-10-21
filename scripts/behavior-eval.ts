@@ -29,6 +29,7 @@ import {
   buildQuestionHookNote,
   shouldAddQuestionHook,
 } from "../src/persona/question-hook.js";
+import { computeCostCny } from "../src/obs/cost-tracker.js";
 import {
   aggregateBehaviorMetrics,
   computeBehaviorMetrics,
@@ -93,6 +94,7 @@ interface RunResult {
   mentioned: boolean[];
   metrics: BehaviorRunMetrics;
   usage: { prompt: number; completion: number };
+  avgLatencyMs: number;
 }
 
 function buildEntityKeywords(persona: Awaited<ReturnType<typeof loadPersona>>): string[] {
@@ -115,6 +117,8 @@ async function main(): Promise<number> {
   const seeds = seedsArg >= 0 ? Number(argv[seedsArg + 1]) : 3;
   const variantArg = argv.indexOf("--variant");
   const variantFilter = variantArg >= 0 ? argv[variantArg + 1] : undefined;
+  const modelArg = argv.indexOf("--model");
+  const modelOverride = modelArg >= 0 ? argv[modelArg + 1] : undefined;
   const jsonMode = argv.includes("--json");
   if (!Number.isFinite(seeds) || seeds < 1 || seeds > 10) {
     console.error("--seeds 需要 1-10");
@@ -130,7 +134,7 @@ async function main(): Promise<number> {
     apiKey,
     baseURL: process.env.DEEPSEEK_BASE_URL?.trim() || "https://api.deepseek.com",
   });
-  const model = process.env.DEEPSEEK_FLASH_MODEL?.trim() || "deepseek-flash";
+  const model = modelOverride?.trim() || process.env.DEEPSEEK_FLASH_MODEL?.trim() || "deepseek-flash";
 
   const config = loadConfig();
   const persona = await loadPersona("xiaoya");
@@ -164,6 +168,7 @@ async function main(): Promise<number> {
       const replies: string[] = [];
       const mentioned: boolean[] = [];
       const usage = { prompt: 0, completion: 0 };
+      let latencySum = 0;
 
       const random = seededRandom(seed * 1000 + variant.id.length);
       for (const userText of USER_MESSAGES) {
@@ -179,6 +184,7 @@ async function main(): Promise<number> {
           notes.push(buildQuestionHookNote());
         }
         const note = notes.join("");
+        const callStartedAt = Date.now();
         const response = await client.chat.completions.create({
           model,
           messages: [
@@ -190,6 +196,7 @@ async function main(): Promise<number> {
           max_tokens: 160,
           thinking: { type: "disabled" },
         } as never);
+        latencySum += Date.now() - callStartedAt;
         const reply = response.choices[0]?.message?.content?.trim() ?? "";
         usage.prompt += response.usage?.prompt_tokens ?? 0;
         usage.completion += response.usage?.completion_tokens ?? 0;
@@ -202,22 +209,30 @@ async function main(): Promise<number> {
       }
 
       const metrics = computeBehaviorMetrics(replies, mentioned);
-      results.push({ variant: variant.id, seed, replies, mentioned, metrics, usage });
+      results.push({
+        variant: variant.id,
+        seed,
+        replies,
+        mentioned,
+        metrics,
+        usage,
+        avgLatencyMs: Math.round(latencySum / USER_MESSAGES.length),
+      });
       process.stdout.write(
         `  [${variant.id} seed ${seed}] 自述 ${Math.round(metrics.mentionRate * 100)}% 字数 ${metrics.avgChars.toFixed(1)} 问句 ${Math.round(metrics.questionRate * 100)}% 重复对 ${metrics.duplicatePairs}\n`,
       );
     }
   }
 
-  console.log("\n| 变体 | 自述提及率 | 平均字数 | 问句率 | 完全重复对 | 开头复读对 |");
-  console.log("|---|---|---|---|---|---|");
+  console.log("\n| 变体 | 自述提及率 | 平均字数 | 问句率 | 完全重复对 | 开头复读对 | 平均延迟 |");
+  console.log("|---|---|---|---|---|---|---|");
   const summary: Record<string, ReturnType<typeof aggregateBehaviorMetrics>> = {};
   for (const variant of variants) {
     const runs = results.filter((result) => result.variant === variant.id);
     const agg = aggregateBehaviorMetrics(runs.map((run) => run.metrics));
     summary[variant.id] = agg;
     console.log(
-      `| ${variant.label} | ${formatRangePercent(agg.mentionRate)} | ${formatRangeNumber(agg.avgChars)} | ${formatRangePercent(agg.questionRate)} | ${formatRangeNumber(agg.duplicatePairs)} | ${formatRangeNumber(agg.repeatedOpenerPairs)} |`,
+      `| ${variant.label} | ${formatRangePercent(agg.mentionRate)} | ${formatRangeNumber(agg.avgChars)} | ${formatRangePercent(agg.questionRate)} | ${formatRangeNumber(agg.duplicatePairs)} | ${formatRangeNumber(agg.repeatedOpenerPairs)} | ${Math.round(runs.reduce((sum, run) => sum + run.avgLatencyMs, 0) / runs.length)}ms |`,
     );
   }
 
@@ -288,8 +303,14 @@ async function main(): Promise<number> {
     }),
     { prompt: 0, completion: 0 },
   );
-  const cost = totalUsage.prompt * 0.0000005 + totalUsage.completion * 0.000002;
-  console.log(`\n成本估算：≈¥${cost.toFixed(4)}（prompt ${totalUsage.prompt} / completion ${totalUsage.completion} tokens）`);
+  const cost = computeCostCny({
+    model,
+    promptTokens: totalUsage.prompt,
+    completionTokens: totalUsage.completion,
+  });
+  console.log(
+    `\n模型=${model} ｜ 成本上限估算：≈¥${cost.toFixed(4)}（prompt ${totalUsage.prompt} / completion ${totalUsage.completion} tokens；按缓存全 miss 的上限，缓存命中会更低）`,
+  );
 
   if (jsonMode) {
     console.log(JSON.stringify({ summary, results }, null, 2));
