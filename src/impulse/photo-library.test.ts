@@ -74,8 +74,8 @@ describe("photo-library 时间关系模型", () => {
     const low = pickPhotoShare({ emotion: 0, hour: 14, closeness: 3, random: () => 0.99 });
     expect(low!.era).not.toBe("past");
 
-    // 高亲密度：可以分享以前拍的照片
-    const high = pickPhotoShare({ emotion: 0, hour: 14, closeness: 5, random: () => 0.99 });
+    // 高亲密度：可以分享以前拍的照片（限定标签，避免随机到没有 past 的新图）
+    const high = pickPhotoShare({ emotion: 0, hour: 14, closeness: 5, tags: ["mountain"], random: () => 0.99 });
     expect(high!.era).toBe("past");
     expect(high!.caption).toMatch(/以前|好几年前/);
   });
@@ -89,8 +89,8 @@ describe("photo-library 时间关系模型", () => {
     expect(low!.caption.length).toBeGreaterThan(0);
   });
 
-  it("图库有 15 张，连续 12 次选择就有明显多样性（修复「配文重复」）", () => {
-    expect(getPhotoCatalog().length).toBe(15);
+  it("图库有 20 张，连续 12 次选择就有明显多样性（修复「配文重复」）", () => {
+    expect(getPhotoCatalog().length).toBe(20);
     let n = 0;
     const random = () => ((n++ * 37) % 100) / 100;
     const photos = new Set<string>();
@@ -133,5 +133,35 @@ describe("photo-library 时间关系模型", () => {
         captions: { today: [], yesterday: [], past: [] },
       }),
     ).toBeNull();
+  });
+
+  it("v0.9.11 新增 5 张后：200 次选择能覆盖绝大多数图，配文也足够分散", () => {
+    // 用确定性 LCG（避免简单取模造成的伪模式）
+    let state = 12345;
+    const random = () => {
+      state = (state * 1664525 + 1013904223) % 4294967296;
+      return state / 4294967296;
+    };
+    const photos = new Set<string>();
+    const captions = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      const choice = pickPhotoShare({ emotion: 0, hour: 20, closeness: 5, random });
+      expect(choice).not.toBeNull();
+      photos.add(choice!.photo.id);
+      captions.add(choice!.caption);
+    }
+    expect(photos.size).toBeGreaterThanOrEqual(18);
+    expect(captions.size).toBeGreaterThanOrEqual(50);
+  });
+
+  it("新增的 5 张图都在图库目录里且有对应文件", () => {
+    const ids = ["latte-tulip", "cafe-quiet", "cat-sunbeam", "rainy-street", "book-iced-coffee"];
+    const catalog = getPhotoCatalog();
+    for (const id of ids) {
+      const photo = catalog.find((item) => item.id === id);
+      expect(photo, `缺少 ${id}`).toBeTruthy();
+      expect(photoFilePath(photo!)).toBeTruthy();
+      expect(fs.existsSync(photoFilePath(photo!)!)).toBe(true);
+    }
   });
 });

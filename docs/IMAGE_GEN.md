@@ -107,3 +107,28 @@ npm run image:smoke
 - 实测单张 **2.1–2.2s**（热态，MPS，832×1216），首次请求含加载 ≈12s；代码上限 25s，超时回退。
 - 服务需手动启动（`npm run image:start`）；未启动/加载失败时**静默回退图库**，聊天不受影响。
 - GPU 只有 MPS（M5 Pro），并发下会互相拖慢；因此一次只生成一张，不做批量。
+
+## 7. 本地图库扩充：用本机生图补场景（v0.9.11）
+
+长期问题是本地图库只有 15 张、同类场景重复。v0.9.11 用本机 SDXL-Turbo 生成 5 张补高频场景
+（无人物/无文字/无水印，已逐张目检）：
+
+| 文件 | 场景 | prompt（seed 42, 800×600, steps 4） |
+|---|---|---|
+| `latte-tulip.jpg` | 拉花特写 | a tulip latte art in a ceramic cup on a wooden cafe counter, warm morning sunlight, slight film grain, phone photo, no people, no text |
+| `cafe-quiet.jpg` | 空店午后 | interior of a small cozy coffee shop in the afternoon, empty wooden tables, plants by the window, soft daylight, film photo, no people, no text |
+| `cat-sunbeam.jpg` | 猫晒太阳 | an orange tabby cat lying in a warm sunbeam on a wooden floor, cozy home, slight film grain, phone photo, no text |
+| `rainy-street.jpg` | 雨夜街头 | a rainy evening street seen from under an umbrella, wet pavement with warm shop light reflections, phone photo, first person view, no people visible, no text |
+| `book-iced-coffee.jpg` | 周末书+冰咖啡 | an open book and a glass of iced coffee on a window seat, lazy weekend afternoon, soft light, film grain, photo, no people, no text |
+
+生成命令（服务已在跑）：
+
+```bash
+curl -s -X POST http://127.0.0.1:18084/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"...","width":800,"height":600,"steps":4,"seed":42}' \
+  -o /tmp/out.png
+sips -s format jpeg -s formatOptions 82 /tmp/out.png --out assets/photos/xxx.jpg
+```
+
+注意：服务返回的是**原始 PNG 字节**（不是 JSON），早期脚本按 JSON 解析会报 `utf-8 codec` 错误。

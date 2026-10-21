@@ -223,6 +223,67 @@ const PHOTOS: PhotoDef[] = [
       past: ["翻到以前路过拍的", "以前也见过这么大一片", "好几年前了，那会儿还拍了照"],
     },
   },
+  // ── v0.9.11：本机 SDXL-Turbo 生成，补充"咖啡店/猫/雨夜/周末"等高频场景 ──
+  {
+    id: "latte-tulip",
+    file: "latte-tulip.jpg",
+    tags: ["latte", "coffee", "cafe", "warm", "indoor"],
+    scene: "indoor",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["今天的拉花，终于像个花了", "手一抖，郁金香歪成叶子了"],
+      yesterday: ["昨天的拉花，勉强能看", "昨天练了半天才拉出这杯"],
+      past: ["以前刚学的时候，拉出来一团糊", "这张存了好久，第一次拉出花"],
+    },
+  },
+  {
+    id: "cafe-quiet",
+    file: "cafe-quiet.jpg",
+    tags: ["cafe", "quiet", "indoor", "plants", "afternoon"],
+    scene: "indoor",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["下午店里就我一个人", "这个点安静得能听见钟走"],
+      yesterday: ["昨天下午也是这么空", "昨天的光比今天好看"],
+      past: ["刚来这家店那年，还没这么多绿植", "以前的吧台还是旧木头的"],
+    },
+  },
+  {
+    id: "cat-sunbeam",
+    file: "cat-sunbeam.jpg",
+    tags: ["cat", "animal", "warm", "sunbeam", "quiet"],
+    scene: "any",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["这货又占着太阳地儿了", "今天一天没挪窝"],
+      yesterday: ["昨天也这么躺着，一点不嫌腻", "昨天拍的，睡得四仰八叉"],
+      past: ["小时候还只有这么点大", "以前住的地方，窗台特别晒"],
+    },
+  },
+  {
+    id: "rainy-street",
+    file: "rainy-street.jpg",
+    tags: ["rain", "street", "night", "city", "dusk"],
+    scene: "night",
+    eras: ["today", "yesterday"],
+    captions: {
+      today: ["刚下班，雨还挺大", "今天这雨下得没完没了"],
+      yesterday: ["昨天也是这样，湿漉漉的", "昨天下班路上拍的"],
+      past: [],
+    },
+  },
+  {
+    id: "book-iced-coffee",
+    file: "book-iced-coffee.jpg",
+    tags: ["book", "coffee", "window", "lazy", "weekend", "calm"],
+    scene: "day",
+    eras: ["today", "yesterday", "past"],
+    captions: {
+      today: ["周末就该这么过", "今天哪儿都不想去，就窝着看书"],
+      yesterday: ["昨天也差不多，换了本书", "昨天翻到一半睡着了"],
+      past: ["以前住的地方也有这么个窗台", "这本书还是大学时候买的"],
+    },
+  },
 ];
 
 /** 图库里是否有匹配这些场景标签的照片（用于发图前的相关性判定）。 */

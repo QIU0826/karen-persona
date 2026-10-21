@@ -33,10 +33,10 @@ function countAssets(dir: string): number {
 }
 
 describe("资产数量与文档宣称一致", () => {
-  it("本地图库：实际张数 == 文档写的 15 张", () => {
+  it("本地图库：实际张数 == 文档写的 20 张", () => {
     const count = countAssets("assets/photos");
-    expect(count, "assets/photos 里的图数量变了，记得同步 README/CLAUDE").toBe(15);
-    expect(ALL_DOCS).toContain("15 张");
+    expect(count, "assets/photos 里的图数量变了，记得同步 README/CLAUDE").toBe(20);
+    expect(ALL_DOCS).toContain("20 张");
   });
 
   it("内置贴纸：实际张数 == 文档写的 11 个；贴纸目录里都有对应条目", async () => {
@@ -47,13 +47,13 @@ describe("资产数量与文档宣称一致", () => {
     expect(getStickerCatalog().length, "贴纸目录条目数应与实际文件数一致").toBe(11);
   });
 
-  it("配文池规模在「约 110 条」的合理区间（90–130）", () => {
+  it("配文池规模在「约 130 条」的合理区间（110–150）", () => {
     const src = readSrc("impulse/photo-library.ts");
     const blocks = [...src.matchAll(/captions:\s*\{(.*?)\n\s*\}/gs)].map((m) => m[1] ?? "");
     const total = blocks.reduce((sum, block) => sum + [...block.matchAll(/"[^"]+"/g)].length, 0);
-    expect(total, `配文池实际约 ${total} 条`).toBeGreaterThanOrEqual(90);
-    expect(total).toBeLessThanOrEqual(130);
-    expect(ALL_DOCS).toContain("约 110 条");
+    expect(total, `配文池实际约 ${total} 条`).toBeGreaterThanOrEqual(110);
+    expect(total).toBeLessThanOrEqual(150);
+    expect(ALL_DOCS).toContain("约 130 条");
   });
 });
 
