@@ -34,6 +34,26 @@ const WS_PATH = "/onebot/v11/ws";
 const WS_TOKEN = "e2e-token";
 
 /** 1x1 透明 PNG（足够通过文件头识别/vision 请求）。 */
+/** 最小合法 WAV（44 字节头 + 0.2s 静音），供假 ASR 音频端点使用 */
+const WAV_BYTES = (() => {
+  const samples = 3200; // 0.2s @16kHz
+  const buf = Buffer.alloc(44 + samples * 2);
+  buf.write("RIFF", 0, "ascii");
+  buf.writeUInt32LE(36 + samples * 2, 4);
+  buf.write("WAVE", 8, "ascii");
+  buf.write("fmt ", 12, "ascii");
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(16000, 24);
+  buf.writeUInt32LE(32000, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36, "ascii");
+  buf.writeUInt32LE(samples * 2, 40);
+  return buf;
+})();
+
 const PNG_BYTES = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64",
@@ -84,6 +104,19 @@ async function startFakeOpenAi(): Promise<FakeOpenAi> {
     if (req.method === "GET" && req.url === "/img.png") {
       res.writeHead(200, { "content-type": "image/png", "content-length": PNG_BYTES.length });
       res.end(PNG_BYTES);
+      return;
+    }
+    if (req.method === "GET" && req.url === "/voice.wav") {
+      res.writeHead(200, { "content-type": "audio/wav", "content-length": WAV_BYTES.length });
+      res.end(WAV_BYTES);
+      return;
+    }
+    if (req.method === "POST" && req.url === "/transcribe") {
+      // 假的本地 ASR 服务：固定返回一句中文（E2E 断言这句话进了 prompt）
+      void readBody(req).then(() => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ text: "我明天要去上海出差，可能一周不在" }));
+      });
       return;
     }
     void readBody(req).then((raw) => {
@@ -318,6 +351,21 @@ function imageEvent(imageUrl: string, messageId: number): Record<string, unknown
   };
 }
 
+function voiceEvent(audioUrl: string, messageId: number): Record<string, unknown> {
+  return {
+    post_type: "message",
+    message_type: "private",
+    sub_type: "friend",
+    self_id: BOT_QQ,
+    user_id: TEST_QQ,
+    message_id: messageId,
+    raw_message: `[CQ:record,file=e2e.amr,url=${audioUrl}]`,
+    message: [{ type: "record", data: { file: "e2e.amr", url: audioUrl } }],
+    sender: { user_id: TEST_QQ, nickname: "E2E 测试" },
+    time: Math.floor(Date.now() / 1000),
+  };
+}
+
 function groupEvent(text: string, messageId: number, userId: number = TEST_QQ): Record<string, unknown> {
   return {
     post_type: "message",
@@ -450,10 +498,13 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
       DEEPSEEK_API_KEY: "sk-e2e-test",
       DEEPSEEK_BASE_URL: fake.baseUrl,
       KAREN_DATA_DIR: dataDir,
+      // v0.23：打开语音识别，指向假 ASR 服务（同一 fake 服务提供 /transcribe）
+      KAREN_ASR: "on",
+      KAREN_ASR_URL: fake.baseUrl,
       // v0.8.19：打开表情包采集 + 出站优先用收集库，验证「入站图片 → 本地库 → 再发出去」整条链路
       KAREN_STICKER_COLLECT: "on",
       KAREN_STICKER_USE: "on",
-      LOG_LEVEL: "warn",
+      LOG_LEVEL: "info",
       LOG_FORMAT: "text",
       NO_COLOR: "1",
     });
@@ -561,6 +612,28 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
       }, (rows) => rows.length > 0, "表情包没有被采集入库");
       expect(stickerRows[0]!.mime).toContain("image/png");
       expect(stickerRows[0]!.bytes).toBeGreaterThan(0);
+
+      // 4b2) 语音消息 → 本地 ASR（假服务）→ 文本真的进了模型 prompt
+      {
+        const beforeVoice = fake.requests.length;
+        const beforeActions = actions.length;
+        client.send(voiceEvent(`${fake.baseUrl}/voice.wav`, 41));
+        await client.waitFor(
+          (action, index) =>
+            index >= beforeActions &&
+            action.action === "send_private_msg" &&
+            messageText(action).length > 0,
+        );
+        let heard = false;
+        for (let attempt = 0; attempt < 50; attempt++) {
+          heard = fake.requests
+            .slice(beforeVoice)
+            .some((body) => JSON.stringify(body).includes("我明天要去上海出差"));
+          if (heard) break;
+          await wait(150);
+        }
+        expect(heard, "语音转写文本没有进入模型 prompt（ASR 链路可能没接上）").toBe(true);
+      }
 
       // 4c) 点名要表情包 → 必须从**收集来的库**里发（v0.8.19 修复：原来只有 22% 概率）
       //    注意：桥接是独立进程，vi.spyOn 控制不了它的随机数——它可能顺手再发一张内置贴纸

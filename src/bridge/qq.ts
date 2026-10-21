@@ -94,6 +94,7 @@ import { startWebServer, type WebServerHandle } from "../web/server.js";
 import { isSpeechAvailable, synthesizeSpeech } from "../ai/tts.js";
 import { decideVoice, shouldThrottleVoice, type VoiceSettings } from "../impulse/voice.js";
 import { detectMediaRequest } from "../impulse/media-request.js";
+import { isAsrEnabled, transcribeVoice } from "../ai/asr.js";
 import {
   collectSticker,
   downloadStickerBytes,
@@ -1108,6 +1109,43 @@ function buildPacing(state: ConversationState): PacingResult {
   });
 }
 
+// ── 语音识别（v0.23）──────────────────────────
+
+/** 下载入站语音条的原始字节（QQ 语音是 SILK）；失败返回 null。 */
+async function downloadAudioBytes(url: string | undefined): Promise<Buffer | null> {
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) return null;
+    const len = Number(res.headers.get("content-length"));
+    if (Number.isFinite(len) && len > 8 * 1024 * 1024) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0 || buf.length > 8 * 1024 * 1024) return null;
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 入站语音 → 文字（失败静默回退 `[语音]` 占位，不阻塞回复）。
+ * 隐私：日志只记长度与耗时，不打印识别正文。
+ */
+async function describeVoiceMessage(url: string | undefined): Promise<string | null> {
+  if (!isAsrEnabled()) return null;
+  const bytes = await downloadAudioBytes(url);
+  if (!bytes) {
+    log.info("asr.skipped", { reason: "download_failed" });
+    return null;
+  }
+  const result = await transcribeVoice(bytes);
+  if (!result.ok || !result.text) {
+    log.info("asr.skipped", { reason: result.reason ?? "unknown" });
+    return null;
+  }
+  return `[语音：${result.text}]`;
+}
+
 // ── 表情包持续收集（v0.6）─────────────────────
 
 /**
@@ -1399,10 +1437,15 @@ function maybeSendSticker(
   if (process.env.KAREN_STICKER_USE === "on" && !conflictActive) {
     const owner =
       target.kind === "private" ? ownerForQq(target.userId) : ownerForQq(target.userId);
+    // v0.9.0：用户点名要表情包时不再排除"刚发过的那张"——
+    // 真实长跑 E2E 发现：库里有 1 张、之前顺手发过，点名时被 exclude 掉 → 回退内置贴纸，
+    // 用户视角就是"我要表情包，她给了个没收藏的"。点名时重复同款是正常的。
     const collected = pickCollectedSticker({
       ownerId: owner,
       emotion: emotionTag,
-      excludeIds: userRecentCollectedStickers.get(userIdForSticker(target)) ?? [],
+      excludeIds: opts.requested
+        ? []
+        : (userRecentCollectedStickers.get(userIdForSticker(target)) ?? []),
     });
     // v0.8.19：点名要表情包时必定从收集库出（原来这里只有 22% 概率，
     // 与内置贴纸路径"点名必发"不一致；用户明说要还经常给内置的，显得没在听）。
@@ -1633,6 +1676,12 @@ async function handlePrivateBatch(
         log.info("vision.described", { chars: charCount(desc), source: "private" });
       }
       maybeCollectSticker(media.data.url, ownerForQq(userId), desc);
+    }
+
+    // v0.23：语音识别（QQ 语音条 SILK → 本地 whisper → 文本）
+    if (media?.type === "record") {
+      const transcribed = await describeVoiceMessage(media.data?.url);
+      if (transcribed) syntheticText = transcribed;
     }
 
     // 图片/表情附带文字时保留文字（raw_message 去掉 CQ 码后的残余）

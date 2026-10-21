@@ -205,8 +205,8 @@ describe("产品审计文档（docs/PRODUCT_AUDIT.md，v0.8.22）", () => {
     const md = fs.readFileSync(AUDIT, "utf-8");
     expect(md).toMatch(/## 后记（续）：v0\.4\.1 → v\d+\.\d+\.\d+/);
     expect(md).toContain("审计遗留问题清单的现状");
-    // 必须诚实保留「仍未做」项（防止被删干净）
-    expect(md).toContain("仍不存在");
+    // 必须诚实保留「仍未做」项（防止被删干净）：微信桥接仍是占位桩、多用户托管仍属 M3
+    expect(md).toContain("占位桩");
     expect(md).toContain("未做（M3）");
   });
 });

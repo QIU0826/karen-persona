@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.9.0 — 2026-10-21
+
+**语音识别（ASR）上线**：她终于能听懂你发的语音了。此前用户语音只是 `[语音]` 占位，
+是"像真人"最后一个方向性短板；现在 **发语音 → 本机转文字 → 进对话** 全链路跑通。
+
+### Added
+
+- `services/asr/`：本机 faster-whisper 服务（CTranslate2 CPU int8，模型 `small` 484MB），
+  `POST /transcribe`（WAV）返回简体中文；`npm run asr:start` 启动（默认 127.0.0.1:18085）。
+- `src/ai/asr.ts`：SILK（QQ 语音条）→ silk-wasm 解码 PCM → WAV → 服务识别；
+  开关 `KAREN_ASR=on`、体积上限 8MB、超时 20s；失败**静默回退 `[语音]` 占位**。
+- 桥接入站接线：语音条先转文字再进对话（`[语音：...]`），日志只记字数/耗时（不打印正文）。
+- `npm run asr:smoke`（`scripts/asr-smoke.ts`）：真实链路冒烟——
+  文本 → TTS(SILK) → 解码 → ASR → 文本 完整往返、纯 WAV 直通、垃圾输入降级、开关生效。
+- 桥接 E2E 新增语音场景：假 ASR 服务返回文本，断言**转写文本真的进入模型 prompt**。
+- 11 条单测（`src/ai/asr.test.ts`），含 silk-wasm 真实编解码往返。
+
+### Fixed（真实冒烟 / E2E 暴露）
+
+- **点名要表情包却回退内置贴纸**：收集库只有 1 张、之前顺手发过，被 recent-exclude 掉 →
+  用户明说要表情包却给了一张没收藏的。修法：点名场景不排除"刚发过的那张"（E2E 连跑 6 次稳定）。
+- **whisper 输出繁体**：「天氣/吃飯/開會」——加 `initial_prompt` + **OpenCC t2s** 统一转简体，
+  复验输出「今天天气不错…」「明天下午3点开会」。
+
+### 实测（M5 Pro，CPU int8）
+
+```
+SILK→ASR（约 4s 语音）：1414ms「今天天气不错,我们晚上一起去吃饭吧。」
+WAV→ASR（1.6s 语音）： 962ms「明天下午3点开会。」
+桥接 E2E：转写文本进入 prompt ✅
+```
+
+### 下载（同生图经验）
+
+HF 直连/Xet 均不可达 → hf-mirror：小文件 curl；`model.bin` 484MB 用 64MB×4 路并发下载拼接。
+
+### Testing
+
+- 109 个测试文件 / 1309 个用例通过（+1 文件 / +11 用例）；`tsc` 0 错误；lint 0 违规；
+  `npm run asr:smoke` 全过；`npm run eval:offline` 5 项达标。
+
 ## v0.8.23 — 2026-10-21
 
 **本机生图真正跑通**（v0.7 遗留的最后一块阻塞），并修掉真实长跑暴露的两个小 bug。
