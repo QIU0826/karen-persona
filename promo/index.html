@@ -151,10 +151,10 @@ button{font:inherit;color:inherit;background:none;border:none}
 
 /* ── Hero ─────────────────────────────────────── */
 .hero{position:relative;min-height:100vh;min-height:100svh;display:flex;align-items:center;overflow:hidden}
-.hero-media{position:absolute;top:0;right:0;width:56%;height:100%;z-index:0;overflow:hidden}
-.hero-media img,.hero-media video{width:100%;height:100%;object-fit:cover;object-position:50% 20%}
+.hero-media{position:absolute;top:0;right:0;width:60%;height:100%;z-index:0;overflow:hidden}
+.hero-media img,.hero-media video{width:100%;height:100%;object-fit:cover;object-position:50% 18%}
 .hero-media img{filter:contrast(1.03) saturate(.9);animation:hero-zoom 34s ease-in-out infinite alternate}
-.hero-media video{position:absolute;inset:0;opacity:0;transition:opacity 1.4s ease}
+.hero-media video{position:absolute;inset:0;opacity:0;transition:opacity 1.4s ease;animation:hero-zoom 34s ease-in-out infinite alternate}
 .hero-media video.on{opacity:1}
 .hero-media::before{
   content:"";position:absolute;inset:0;z-index:2;
@@ -168,18 +168,36 @@ button{font:inherit;color:inherit;background:none;border:none}
   background:radial-gradient(90% 85% at 58% 38%,transparent 64%,rgba(8,9,11,.35) 100%);
 }
 .hero-inner{position:relative;z-index:5;width:min(var(--max),calc(100% - 96px));margin:0 auto;padding:140px 0 120px}
-.hero-copy{max-width:680px}
+.hero-copy{max-width:720px}
 .hero h1{
-  margin:26px 0 0;font-size:clamp(52px,7.2vw,104px);
-  line-height:.99;letter-spacing:-.05em;font-weight:500;color:var(--ink);
+  margin:24px 0 0;font-size:clamp(58px,7.6vw,112px);
+  line-height:1;letter-spacing:-.05em;font-weight:500;color:var(--ink);
   text-wrap:balance;font-feature-settings:"palt" 1,"kern" 1;
 }
-.hero h1 .dim{color:#d9d3c7}
+.hero h1 .dim{font-family:var(--serif);color:var(--ink);letter-spacing:-.02em}
 .hero h1 .dot{color:var(--warm)}
 .hero-sub{
-  margin-top:30px;max-width:520px;color:var(--ink-2);
-  font-size:clamp(15.5px,1.15vw,16.5px);line-height:1.9;text-wrap:pretty;
+  margin-top:24px;max-width:500px;color:var(--ink-2);
+  font-size:clamp(15.5px,1.1vw,16px);line-height:1.9;text-wrap:pretty;
 }
+.hero-live{
+  margin-top:30px;max-width:580px;padding-top:18px;border-top:1px solid var(--line-2);
+  display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:baseline;
+}
+.hero-live .lv-time{
+  display:flex;align-items:center;gap:7px;white-space:nowrap;
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--warm);
+}
+.lv-dot{display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--warm);animation:lv-pulse 2.6s ease-in-out infinite}
+@keyframes lv-pulse{0%,100%{opacity:.35}50%{opacity:1}}
+.hero-live .lv-text{
+  font-family:var(--serif);font-size:19px;line-height:1.8;color:var(--ink-2);
+  min-height:1.9em;
+}
+.caret{display:inline-block;width:1px;height:1.05em;background:var(--warm);vertical-align:-2px;margin-left:2px;animation:caret 1.1s steps(1) infinite}
+@keyframes caret{0%,49%{opacity:1}50%,100%{opacity:0}}
+.hero .cta-row{margin-top:30px}
+.hero-note{margin-top:22px}
 .hero-note{
   margin-top:30px;font-family:var(--mono);font-size:11.5px;
   letter-spacing:.08em;color:var(--faint);
@@ -192,24 +210,8 @@ button{font:inherit;color:inherit;background:none;border:none}
 .scroll-cue i{position:relative;display:block;width:48px;height:1px;background:var(--line-2);overflow:hidden}
 .scroll-cue i::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--warm),transparent);transform:translateX(-100%);animation:cue 2.8s var(--ease) infinite}
 .coords{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--faint)}
-.peek{
-  position:absolute;z-index:4;width:252px;padding:13px 15px;
-  border-radius:4px;background:#15161a;
-  animation:float-card 10s ease-in-out infinite;
-}
-.peek .pk{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--muted)}
-.peek .pk b{color:var(--warm-2);font-weight:500;letter-spacing:.06em}
-.peek .pk em{margin-left:auto;font-style:normal;letter-spacing:.06em;color:var(--faint)}
-.peek p{font-size:13px;line-height:1.7;color:var(--ink)}
-.peek-1{right:36%;bottom:19%}
-.peek-2{right:8%;bottom:9%;width:172px;background:var(--blue);border-radius:4px;border-bottom-right-radius:2px;animation-delay:-4.5s}
-.peek-2 p{color:#fff}
-.peek-2 .pk{color:rgba(255,255,255,.66)}
-.peek-2 .pk b{color:#fff}
-.peek-2 .pk em{color:rgba(255,255,255,.6)}
 @keyframes hero-zoom{from{transform:scale(1)}to{transform:scale(1.03)}}
 .no-anim .hero-media img{animation:none}
-@keyframes float-card{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
 @keyframes cue{0%{transform:translateX(-100%)}60%,100%{transform:translateX(100%)}}
 
 /* ── 信号条 ───────────────────────────────────── */
@@ -467,21 +469,17 @@ button{font:inherit;color:inherit;background:none;border:none}
 .longshot .hero{min-height:860px}
 .longshot .nav{position:absolute}
 .longshot .hero-media{height:860px}
-.longshot .peek{animation:none}
 .longshot .reveal{opacity:1!important;transform:none!important}
 
 /* ── 响应式 ───────────────────────────────────── */
 @media (max-width:1180px){
   .wrap,.hero-inner,.interlude-copy{width:calc(100% - 72px)}
-  .peek-1{right:32%}
-  .peek-2{right:7%}
 }
 @media (max-width:1020px){
   .nav-links{gap:24px;font-size:12px}
   .chat-layout{grid-template-columns:1fr;gap:64px}
   .msg-types{margin-top:36px}
   .phone-wrap{order:2}
-  .peek{display:none}
   .moments{grid-template-columns:1fr;grid-template-rows:auto}
   .moment:nth-child(1){grid-column:1;grid-row:auto;border-right:0;padding-right:0}
   .moment:nth-child(2){grid-column:1;grid-row:auto;padding-left:0;padding-bottom:28px;border-top:1px solid var(--line)}
@@ -490,19 +488,21 @@ button{font:inherit;color:inherit;background:none;border:none}
 }
 @media (max-width:900px){
   .longshot .hero{min-height:100svh}
-  .longshot .hero-media{height:52svh;max-height:560px}
+  .longshot .hero-media{height:47svh;max-height:520px}
   /* 手机首屏：人物铺上方，文案压在下方 */
   .hero{display:block;min-height:100svh;overflow:hidden}
-  .hero-media{position:absolute;top:0;left:0;right:0;width:100%;height:52svh;max-height:560px}
+  .hero-media{position:absolute;top:0;left:0;right:0;width:100%;height:47svh;max-height:520px}
   .hero-media::before{background:
     linear-gradient(180deg,rgba(8,9,11,.45) 0%,rgba(8,9,11,.05) 18%,transparent 38%,rgba(8,9,11,.5) 64%,rgba(8,9,11,.94) 88%,var(--bg) 100%),
     linear-gradient(90deg,rgba(8,9,11,.5) 0%,transparent 22%,transparent 78%,rgba(8,9,11,.5) 100%)}
   .hero-media::after{display:none}
   .hero-media img,.hero-media video{object-position:50% 14%}
-  .hero-inner{display:block;width:calc(100% - 72px);padding:calc(52svh - 18px) 0 64px}
+  .hero-inner{display:block;width:calc(100% - 72px);padding:calc(47svh - 18px) 0 56px}
   .hero-copy{max-width:100%}
   .hero h1{font-size:clamp(40px,9.4vw,60px);margin-top:18px}
   .hero-sub{max-width:560px;margin-top:18px}
+  .hero-live{grid-template-columns:1fr;gap:8px;margin-top:22px;padding-top:14px}
+  .hero-live .lv-text{font-size:16.5px;line-height:1.8;min-height:1.9em}
   .hero-foot{position:relative;left:auto;right:auto;bottom:auto;margin-top:26px}
   .coords{display:none}
   .nav-links{display:none}
@@ -576,7 +576,7 @@ button{font:inherit;color:inherit;background:none;border:none}
   .brand-sub{display:none}
   .nav-gh{display:none}
   .nav-cta{padding:7px 12px;font-size:11.5px}
-  .hero-inner{padding-top:calc(52svh - 14px)}
+  .hero-inner{padding-top:calc(47svh - 14px)}
   .hero h1{font-size:clamp(33px,10vw,42px)}
   .hero-sub{font-size:14.5px;line-height:1.85;margin-top:16px}
   .cta-row{margin-top:28px;gap:18px}
@@ -618,28 +618,24 @@ button{font:inherit;color:inherit;background:none;border:none}
   <section class="hero" id="top">
     <div class="hero-media" aria-hidden="true">
       <img src="assets/character-2.jpg" alt="" width="1535" height="2412" fetchpriority="high" decoding="async">
-      <video id="heroVideo" muted loop playsinline preload="none" poster="assets/character-2.jpg"></video>
+      <video id="heroVideo" muted playsinline preload="none" poster="assets/character-2.jpg"></video>
+      <video id="heroVideoB" muted playsinline preload="none" poster="assets/character-2.jpg"></video>
     </div>
 
     <div class="hero-inner">
       <div class="hero-copy">
         <p class="eyebrow">QQ · ONEBOT <span class="sep">/</span> AI PERSONA <span class="sep">/</span> SHANGHAI</p>
         <h1>她不是<br><span class="dim">聊天机器人</span><span class="dot">。</span></h1>
+        <p class="hero-live" aria-hidden="true">
+          <span class="lv-time"><i class="lv-dot"></i>23:41 · QQ</span>
+          <span class="lv-text"><span id="heroTyped"></span><i class="caret"></i></span>
+        </p>
         <p class="hero-sub">小雅，24 岁，上海静安一家咖啡店的店员。她住在你的 QQ 里——<br class="br-wide">有自己的作息、情绪和记性。会在傍晚发来一张晚霞，<br class="br-wide">也会在你说话时，先放下手里的杯子。</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="/">查看体验 <span class="arr">↗</span></a>
           <a class="btn btn-ghost" href="https://github.com/QIU0826/karen-persona" target="_blank" rel="noopener">GitHub <span class="arr">↗</span></a>
         </div>
-        <p class="hero-note">开源 · MIT · 单机运行 · v0.9.20</p>
-      </div>
-
-      <div class="peek peek-1" aria-hidden="true">
-        <div class="pk"><b>小雅</b><em>23:41</em></div>
-        <p>今天打烊晚了点，路上看见一只橘猫。</p>
-      </div>
-      <div class="peek peek-2" aria-hidden="true">
-        <div class="pk"><b>你</b><em>23:42</em></div>
-        <p>还没睡？</p>
+        <p class="hero-note">开源 · MIT · 单机运行 · v0.9.21</p>
       </div>
 
       <div class="hero-foot">
@@ -962,7 +958,7 @@ button{font:inherit;color:inherit;background:none;border:none}
           <a href="#privacy">隐私</a>
           <a href="#top">回到顶部 ↑</a>
         </nav>
-        <span class="footer-meta">v0.9.20 · MIT · © 2026 QIU0826</span>
+        <span class="footer-meta">v0.9.21 · MIT · © 2026 QIU0826</span>
       </div>
       <div class="wrap footer-fine">角色图由作者提供；风景照片来自 Unsplash（Unsplash License）；表情来自 Twemoji（CC-BY 4.0）。本页为单文件静态站，无外部 CDN / 字体 / 统计脚本。</div>
     </footer>
@@ -1019,20 +1015,97 @@ button{font:inherit;color:inherit;background:none;border:none}
     reveals.forEach(function (el) { io.observe(el); });
   }
 
-  // 首屏氛围视频：仅桌面、且用户未要求减少动态/省流量时加载（移动端只留静帧）
-  var video = document.getElementById("heroVideo");
-  var desktop = window.matchMedia("(min-width: 900px)");
-  var conn = navigator.connection;
-  var saveData = !!(conn && conn.saveData);
-  if (video && !reduceMotion && !shot && !longshot && !saveData && desktop.matches) {
-    video.src = "assets/hero-left.mp4";
-    video.addEventListener("canplay", function () {
-      video.classList.add("on");
-      var playPromise = video.play();
-      if (playPromise && playPromise.catch) playPromise.catch(function () {});
+  // 首屏动态人像：两条同一视频交叉淡入，避免 6s 循环时跳帧；移动端/省流量/减少动态只留静帧
+  (function () {
+    var vids = [document.getElementById("heroVideo"), document.getElementById("heroVideoB")].filter(Boolean);
+    if (!vids.length) return;
+    var desktop = window.matchMedia("(min-width: 901px)");
+    var conn = navigator.connection;
+    var saveData = !!(conn && conn.saveData);
+    if (reduceMotion || shot || longshot || saveData || !desktop.matches) return;
+
+    var src = "assets/hero-left.mp4";
+    var active = 0;
+    // 只先加载第一条；第二条等交叉淡入时再从缓存加载，避免首屏重复下载 3.2MB
+    vids[0].src = src;
+    vids[0].load();
+
+    function play(i) {
+      try {
+        var p = vids[i].play();
+        if (p && p.catch) p.catch(function () {});
+      } catch (err) { /* ignore */ }
+    }
+
+    function schedule(duration) {
+      window.setTimeout(function () {
+        var from = vids[active];
+        var to = vids[1 - active];
+        if (!to) return;
+        if (!to.src) { to.src = src; to.load(); }
+        function swap() {
+          try { to.currentTime = 0; } catch (err) { /* ignore */ }
+          to.classList.add("on");
+          from.classList.remove("on");
+          active = 1 - active;
+          play(active);
+          window.setTimeout(function () { try { from.pause(); } catch (err) { /* ignore */ } }, 1200);
+          var d = isFinite(to.duration) && to.duration > 1 ? to.duration : duration;
+          schedule(d);
+        }
+        if (to.readyState >= 2) swap();
+        else to.addEventListener("canplay", swap, { once: true });
+      }, Math.max(1500, (duration - 1.0) * 1000));
+    }
+
+    var first = vids[0];
+    first.addEventListener("canplay", function () {
+      first.classList.add("on");
+      play(0);
+      schedule(isFinite(first.duration) && first.duration > 1 ? first.duration : 6);
     }, { once: true });
-    video.load();
-  }
+
+    // 个别浏览器会拦自动播放：用户第一次碰页面/滚动时再试一次
+    ["pointerdown", "scroll", "touchstart"].forEach(function (evt) {
+      window.addEventListener(evt, function () {
+        if (vids[active].paused) play(active);
+      }, { once: true, passive: true });
+    });
+  })();
+
+  // 首屏「她正在发来的话」：三轮循环；减少动态/截图模式下固定第一句
+  (function () {
+    var typed = document.getElementById("heroTyped");
+    if (!typed) return;
+    var lines = [
+      "今天打烊晚了点，路上看见一只橘猫。",
+      "店里的杯子都洗完了，你还不睡？",
+      "明天想煮新豆子，给你留一杯。"
+    ];
+    if (reduceMotion || shot || longshot) {
+      typed.textContent = lines[0];
+      return;
+    }
+    var li = 0, ci = 0, deleting = false;
+    function tick() {
+      var line = lines[li];
+      if (!deleting) {
+        ci++;
+        typed.textContent = line.slice(0, ci);
+        if (ci >= line.length) { deleting = true; return window.setTimeout(tick, 3400); }
+        return window.setTimeout(tick, 72);
+      }
+      ci--;
+      typed.textContent = line.slice(0, ci);
+      if (ci <= 0) {
+        deleting = false;
+        li = (li + 1) % lines.length;
+        return window.setTimeout(tick, 500);
+      }
+      return window.setTimeout(tick, 26);
+    }
+    window.setTimeout(tick, 1200);
+  })();
 
 
   // 长图截图工具：把页面真实高度写进标题，便于用 --dump-dom 取值
