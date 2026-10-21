@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { assetDir } from "../data/paths.js";
+import { buildSceneCaptionWithTag } from "./media-relevance.js";
 
 export type PhotoScene = "morning" | "day" | "dusk" | "night" | "indoor" | "any";
 export type PhotoEra = "today" | "yesterday" | "past";
@@ -441,4 +442,54 @@ export function photoFilePath(photo: PhotoDef): string | null {
   } catch {
     return null;
   }
+}
+
+export interface LocalPhotoChoiceInput {
+  emotion: number;
+  hour: number;
+  closeness: number;
+  tags?: string[];
+  preferEra?: PhotoEra;
+  excludeIds?: string[];
+  excludeCaptions?: string[];
+  random?: () => number;
+}
+
+export interface LocalPhotoChoice {
+  photo: PhotoDef;
+  era: PhotoEra;
+  caption: string;
+  /** 配文来源：贴题场景配文 / 照片自带 */
+  captionSource: "scene" | "photo";
+}
+
+/**
+ * 选择一张本地图 + 配文（纯函数，v0.9.12）。
+ *
+ * 修的问题：原实现只要用户话里有场景词，就用场景配文**盖掉**照片自带配文——
+ * 但选出来的图不一定真有这个场景（图库没有对应标签时会回退到全库随机），
+ * 于是可能「说晚霞的照片其实是一杯咖啡」，配文还写着「天这样了」。
+ * 现在：只有**图本身带这个场景标签**时才用场景配文，否则用照片自带 era 配文。
+ */
+export function chooseLocalPhotoShare(input: LocalPhotoChoiceInput): LocalPhotoChoice | null {
+  const random = input.random ?? Math.random;
+  const choice = pickPhotoShare({
+    emotion: input.emotion,
+    hour: input.hour,
+    closeness: input.closeness,
+    ...(input.tags && input.tags.length > 0 ? { tags: input.tags } : {}),
+    ...(input.excludeIds ? { excludeIds: input.excludeIds } : {}),
+    ...(input.excludeCaptions ? { excludeCaptions: input.excludeCaptions } : {}),
+    ...(input.preferEra ? { preferEra: input.preferEra } : {}),
+    random,
+  });
+  if (!choice) return null;
+  const scene = buildSceneCaptionWithTag(input.tags, random);
+  const sceneMatchesPhoto = scene ? choice.photo.tags.includes(scene.tag) : false;
+  return {
+    photo: choice.photo,
+    era: choice.era,
+    caption: scene && sceneMatchesPhoto ? scene.caption : choice.caption,
+    captionSource: scene && sceneMatchesPhoto ? "scene" : "photo",
+  };
 }

@@ -111,6 +111,7 @@ const SCENE_TAG_MAP: ReadonlyArray<{ re: RegExp; tags: string[] }> = [
   { re: /(晚饭|吃饭|餐厅|好吃的|宵夜)/, tags: ["food", "dinner"] },
   { re: /(早上|早晨|清晨)/, tags: ["morning"] },
   { re: /(湖水|湖边|码头|河边)/, tags: ["lake", "pier"] },
+  { re: /(看书|读书|书桌|周末在家|翻书)/, tags: ["book"] },
 ];
 
 /**

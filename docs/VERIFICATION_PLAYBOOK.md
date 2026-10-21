@@ -35,7 +35,8 @@ npm run initiative:sim   # 主动消息决策时序（零成本）
 npm run proactive:content-eval  # 主动由头内容 before/after 真实模型评审（约 ¥0.02）
 npm run selfshare:eval   # 回复里自我暴露受控 A/B（约 ¥0.02）
 npm run life:smoke       # 「她的一天」真实链路冒烟（含防编造接地校验，约 ¥0.001）
-npm run behavior:eval    # 离线行为评测（固定消息×多种子，输出均值±范围；约 ¥0.065）（一天 × 四种关系热度 + 产品红线）
+npm run behavior:eval    # 离线行为评测（固定消息×多种子，输出均值±范围；约 ¥0.065）
+npm run photo:scene-eval # 发图场景匹配/配文一致性（零成本，离线确定性）（一天 × 四种关系热度 + 产品红线）
 npm run test:e2e         # mock-OneBot 桥接 E2E（含表情包采集/出站、延迟补发、多用户隔离）
 
 # 真实模型，手动跑（合计约 ¥0.015/轮全跑）

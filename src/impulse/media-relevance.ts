@@ -85,6 +85,7 @@ const SCENE_CAPTIONS: Record<string, string[]> = {
   mountain: ["远远看着", "天晴了才看得见"],
   lake: ["水面挺静", "风一吹全是波纹"],
   morning: ["刚醒", "早上这光还行"],
+  book: ["刚翻了两页", "周末就这样过", "一页没看进去"],
 };
 
 /**
@@ -95,10 +96,21 @@ export function buildSceneCaption(
   sceneTags: string[] | undefined,
   random: () => number = Math.random,
 ): string | null {
+  return buildSceneCaptionWithTag(sceneTags, random)?.caption ?? null;
+}
+
+/**
+ * 同上，但把「配文来自哪个标签」也返回（v0.9.12）。
+ * 调用方用它校验「这张图真的有这个场景」——避免把「天这样了」盖在一张咖啡杯上。
+ */
+export function buildSceneCaptionWithTag(
+  sceneTags: string[] | undefined,
+  random: () => number = Math.random,
+): { caption: string; tag: string } | null {
   for (const tag of sceneTags ?? []) {
     const pool = SCENE_CAPTIONS[tag];
     if (pool && pool.length > 0) {
-      return pool[Math.floor(random() * pool.length)] ?? pool[0]!;
+      return { caption: pool[Math.floor(random() * pool.length)] ?? pool[0]!, tag };
     }
   }
   return null;

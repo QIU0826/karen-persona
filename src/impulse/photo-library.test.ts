@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { chooseLocalPhotoShare } from "./photo-library.js";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MEMORY_MIN_CLOSENESS,
@@ -164,4 +165,75 @@ describe("photo-library 时间关系模型", () => {
       expect(fs.existsSync(photoFilePath(photo!)!)).toBe(true);
     }
   });
+
+describe("chooseLocalPhotoShare：配文不盖到无关图上（v0.9.12）", () => {
+  const makeRandom = (seed: number): (() => number) => {
+    let state = seed >>> 0;
+    return () => {
+      state = (state * 1664525 + 1013904223) % 4294967296;
+      return state / 4294967296;
+    };
+  };
+
+  it("场景配文只在图真有该场景时使用", () => {
+    let sceneCaptions = 0;
+    for (let i = 0; i < 200; i++) {
+      const choice = chooseLocalPhotoShare({
+        emotion: 0,
+        hour: 15,
+        closeness: 5,
+        tags: ["cafe", "coffee", "warm"],
+        random: makeRandom(i + 1),
+      });
+      expect(choice).not.toBeNull();
+      if (choice!.captionSource !== "scene") continue;
+      sceneCaptions += 1;
+      // 用了场景配文 → 图必须带请求标签之一
+      expect(choice!.photo.tags.some((tag) => ["cafe", "coffee", "warm"].includes(tag))).toBe(true);
+    }
+    expect(sceneCaptions).toBeGreaterThan(0);
+  });
+
+  it("没有场景标签时用照片自带配文", () => {
+    const choice = chooseLocalPhotoShare({ emotion: 0, hour: 15, closeness: 5, random: makeRandom(7) });
+    expect(choice).not.toBeNull();
+    expect(choice!.captionSource).toBe("photo");
+  });
+
+  it("场景标签在图库中没有对应图时，回退照片自带配文（不硬套场景配文）", () => {
+    const choice = chooseLocalPhotoShare({
+      emotion: 0,
+      hour: 15,
+      closeness: 5,
+      tags: ["travel", "sky"],
+      random: makeRandom(11),
+    });
+    expect(choice).not.toBeNull();
+    expect(choice!.captionSource).toBe("photo");
+  });
+
+  it("偏好时间关系与排除列表仍然生效", () => {
+    const first = chooseLocalPhotoShare({ emotion: 0, hour: 15, closeness: 5, random: makeRandom(3) });
+    expect(first).not.toBeNull();
+    const second = chooseLocalPhotoShare({
+      emotion: 0,
+      hour: 15,
+      closeness: 5,
+      excludeIds: [first!.photo.id],
+      random: makeRandom(3),
+    });
+    expect(second).not.toBeNull();
+    expect(second!.photo.id).not.toBe(first!.photo.id);
+
+    const past = chooseLocalPhotoShare({
+      emotion: 0,
+      hour: 15,
+      closeness: 5,
+      tags: ["mountain"],
+      preferEra: "past",
+      random: makeRandom(5),
+    });
+    expect(past?.era).toBe("past");
+  });
+});
 });

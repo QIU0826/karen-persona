@@ -13,8 +13,8 @@ import { recordAuxUsage } from "../ai/aux-usage.js";
 import { previewText } from "../obs/safe-text.js";
 import { fetchUnsplashPhoto } from "../ai/image-gen.js";
 import { describeEmotion } from "../persona/emotion.js";
-import { hasPhotosForTags, pickPhotoShare, photoFilePath } from "./photo-library.js";
-import { assessPhotoRelevance, buildSceneCaption } from "./media-relevance.js";
+import { chooseLocalPhotoShare, hasPhotosForTags, photoFilePath } from "./photo-library.js";
+import { assessPhotoRelevance } from "./media-relevance.js";
 import { createLogger } from "../obs/logger.js";
 import { buildScenePrompt, generateImage, isImageGenEnabled } from "../media/comfyui.js";
 import { saveGeneratedImage } from "../media/generated-store.js";
@@ -195,7 +195,7 @@ function shareLocalPhoto(
   const recentIds = recentLocalPhotoIds.get(personaKey) ?? [];
   const recentCaptions = recentPhotoCaptions.get(personaKey) ?? [];
   // 时间关系不是硬过滤：早上可以发「昨天的晚霞」，亲密度够了才会分享「以前的照片」
-  const choice = pickPhotoShare({
+  const choice = chooseLocalPhotoShare({
     emotion: state.emotionState.vector,
     hour: new Date().getHours(),
     closeness: state.persona.relationship.closeness,
@@ -210,19 +210,16 @@ function shareLocalPhoto(
     log.warn("photo.local_missing", { photo_id: choice.photo.id });
     return null;
   }
-  // v0.9：场景命中时用贴题配文（他说晚霞 → 「天这样了」），否则用照片自带配文
-  const sceneCaption = buildSceneCaption(preferredTags);
-  const caption = sceneCaption ?? choice.caption;
   recentLocalPhotoIds.set(personaKey, [...recentIds, choice.photo.id].slice(-3));
-  recentPhotoCaptions.set(personaKey, [...recentCaptions, caption].slice(-5));
+  recentPhotoCaptions.set(personaKey, [...recentCaptions, choice.caption].slice(-5));
   log.info("photo.local", {
     photo_id: choice.photo.id,
     era: choice.era,
-    caption_chars: caption.length,
-    scene_matched: Boolean(preferredTags && preferredTags.length > 0),
-    caption_source: sceneCaption ? "scene" : "photo",
+    caption_chars: choice.caption.length,
+    scene_matched: choice.captionSource === "scene",
+    caption_source: choice.captionSource,
   });
-  return { imageFile, caption, source: "local" };
+  return { imageFile, caption: choice.caption, source: "local" };
 }
 
 /**
