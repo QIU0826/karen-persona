@@ -25,6 +25,7 @@ import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import OpenAI from "openai";
 import Database from "better-sqlite3";
+import { detectSelfMention } from "../persona/mention-pacing.js";
 import { WebSocket } from "ws";
 import { withThinking } from "../ai/chat.js";
 import { computeCostCny } from "../obs/cost-tracker.js";
@@ -424,6 +425,8 @@ export interface LongrunMetrics {
   emojiKaomoji: number;
   /** 入站语音：发了多少条 / ASR 成功几次（后者在 runLongrun 里补） */
   voiceInbound: { sent: number; asrOk: number };
+  /** 回复里提到她自己生活的轮数（v0.9.7 提及频率） */
+  selfMention: { turns: number; rate: number };
   media: {
     image: number;
     imagePhoto: number;
@@ -506,8 +509,8 @@ export interface RuntimeStateSnapshot {
   generatedImages: number;
   /** 主动性：今天计划的由头数 + 已发出次数 */
   initiative: { planItems: number; sent: number };
-  /** 她今天的一天（生活流）：条数 + 前两条文本 */
-  dailyLife: { events: number; samples: string[] };
+  /** 她今天的一天（生活流）：条数 + 前两条文本 + 全部文本（评测自述用） */
+  dailyLife: { events: number; samples: string[]; texts: string[] };
   /** 关系：亲密度 + 五维 + 阶段 */
   relationship: { closeness: number; dims: Record<string, number> | null; phase: string | null };
   /** 反思阶段（觉察/嘴硬/认了/慢慢改/none） */
@@ -527,7 +530,7 @@ export function collectRuntimeState(dataDir: string): RuntimeStateSnapshot {
     stickers: 0,
     generatedImages: 0,
     initiative: { planItems: 0, sent: 0 },
-    dailyLife: { events: 0, samples: [] },
+    dailyLife: { events: 0, samples: [], texts: [] },
     relationship: { closeness: 0, dims: null, phase: null },
     reflection: { phase: "none", topic: null },
     proactive: { sentToday: 0, lastGateReason: null },
@@ -578,10 +581,11 @@ export function collectRuntimeState(dataDir: string): RuntimeStateSnapshot {
             const parsed = JSON.parse(life.life_json) as { events?: Array<{ text?: string }> };
             const events = Array.isArray(parsed.events) ? parsed.events : [];
             empty.dailyLife.events = events.length;
-            empty.dailyLife.samples = events
+            const texts = events
               .map((event) => String(event.text ?? ""))
-              .filter(Boolean)
-              .slice(0, 2);
+              .filter(Boolean);
+            empty.dailyLife.samples = texts.slice(0, 2);
+            empty.dailyLife.texts = texts;
           }
         } catch {
           // 没有生活流表/没有记录
@@ -1026,6 +1030,7 @@ export function computeMetrics(turns: LongrunTurn[]): LongrunMetrics {
     sent: turns.filter((turn) => turn.voiceInbound === true).length,
     asrOk: 0,
   };
+  const selfMention = { turns: 0, rate: 0 };
   const latencies = replied
     .map((turn) => turn.latencyMs)
     .filter((value): value is number => typeof value === "number");
@@ -1092,6 +1097,7 @@ export function computeMetrics(turns: LongrunTurn[]): LongrunMetrics {
     turns: totalTurns,
     repliedTurns: replied.length,
     voiceInbound,
+    selfMention,
     noReplyTurns,
     noReplyRate: totalTurns > 0 ? noReplyTurns / totalTurns : 0,
     noReplyReasons,
@@ -1610,6 +1616,9 @@ export function renderReport(result: LongrunResult, existingReport?: string | nu
         );
         lines.push(
           `| 她的一天（生活流） | ${rs.dailyLife.events > 0 ? "✅" : "—（首次回复后异步生成）"} | ${rs.dailyLife.events} 条${rs.dailyLife.samples.length ? `：${rs.dailyLife.samples.join(" / ")}` : ""} |`,
+        );
+        lines.push(
+          `| 自述提及（她讲自己的频率） | ${rs.dailyLife.events > 0 ? "✅" : "—"} | ${result.metrics.selfMention.turns}/${result.turnsRun} 轮（${Math.round(result.metrics.selfMention.rate * 100)}%） |`,
         );
         lines.push(
           `| 五维关系 | ${dims ? "✅" : "—"} | 亲密度 ${rs.relationship.closeness.toFixed(2)}${dims ? `；亲密 ${dims.intimacy} / 信任 ${dims.trust} / 张力 ${dims.tension} / 互惠 ${dims.reciprocity} / 依赖 ${dims.dependency}` : ""} |`,
@@ -3032,10 +3041,17 @@ export async function runLongrun(partial: RunLongrunOptions): Promise<LongrunRes
     const transcript = buildTranscript(turns);
     const metrics = computeMetrics(turns);
     metrics.voiceInbound.asrOk = bridge.logs.events.filter((event) => event.event === "asr.ok").length;
+    const runtimeState = collectRuntimeState(workspace.dataDir);
+    // v0.9.7：统计有多少轮她提了自己的生活（用当天生活流 + 实体词判定）
+    const mentionedTurns = turns.filter((turn) => {
+      const text = turn.outbound.map((message) => message.text).join(" ");
+      return detectSelfMention(text, runtimeState.dailyLife.texts);
+    }).length;
+    metrics.selfMention.turns = mentionedTurns;
+    metrics.selfMention.rate = turns.length > 0 ? mentionedTurns / turns.length : 0;
     if (metrics.voiceInbound.sent > 0 && metrics.voiceInbound.asrOk === 0) {
       notes.push("入站语音发了但 ASR 一次都没成功（检查 npm run asr:start / KAREN_ASR_URL）");
     }
-    const runtimeState = collectRuntimeState(workspace.dataDir);
     const probes = evaluateProbes(turns, beats);
     const fabrication = detectFabrication(turns, beats);
     const bridgeErrors = collectBridgeErrorSummary(bridge);

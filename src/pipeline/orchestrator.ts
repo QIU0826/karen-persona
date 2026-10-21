@@ -135,6 +135,7 @@ import {
   stripFabricatedMeeting,
 } from "../persona/meeting-guard.js";
 import { decideTalkMove, isTroubleTalk, type TalkMove } from "../persona/talk-moves.js";
+import { buildMentionPacingNote, detectSelfMention, isOverMentionBudget, recordMention, type MentionHistory } from "../persona/mention-pacing.js";
 import {
   ALL_CHANNELS_OFF,
   CHANNEL_LABEL,
@@ -1412,6 +1413,57 @@ const recentTalkMoves = new Map<string, TalkMove[]>();
  * 给这一轮的 system prompt 追加一句内部提示：先接住情绪 / 顺手补一句自己的近况。
  * 只影响措辞，不改变门控与记忆；`KAREN_TALK_MOVES=off` 可整体关闭（A/B 用）。
  */
+/** 每用户最近几轮是否自述（v0.9.7：控制她说自己的频率） */
+const selfMentionHistory = new Map<string, MentionHistory>();
+
+function mentionKey(state: ConversationState): string {
+  return `${state.owner ?? "cli"}|${state.storagePersona}`;
+}
+
+/** 她生活里的实体词（人设世界 + 今天的生活流），用于判断回复有没有在讲自己 */
+function selfMentionKeywords(state: ConversationState): { keywords: string[]; lifeTexts: string[] } {
+  const lifeEvents = readTodayDailyLife(state);
+  const lifeTexts = lifeEvents.map((event) => event.text);
+  const world = (state.persona as {
+    world?: {
+      socialCircle?: Array<{ name?: string }>;
+      goals?: Array<{ goal?: string }>;
+      stressSources?: string[];
+      dailyRhythm?: Array<{ activity?: string }>;
+    };
+  }).world;
+  const keywords = new Set<string>();
+  for (const person of world?.socialCircle ?? []) if (person.name) keywords.add(person.name);
+  for (const entry of world?.dailyRhythm ?? []) {
+    for (const word of (entry.activity ?? "").match(/[\u4e00-\u9fff]{2,4}/g) ?? []) keywords.add(word);
+  }
+  for (const goal of world?.goals ?? []) {
+    for (const word of (goal.goal ?? "").match(/[\u4e00-\u9fff]{2,4}/g) ?? []) keywords.add(word);
+  }
+  return { keywords: [...keywords], lifeTexts };
+}
+
+/**
+ * 超预算时注入的内部提示（v0.9.7）。`KAREN_MENTION_PACING=off` 可关（A/B 用）。
+ */
+function buildMentionPacingInjection(state: ConversationState): string {
+  if ((process.env.KAREN_MENTION_PACING ?? "").toLowerCase() === "off") return "";
+  return buildMentionPacingNote(selfMentionHistory.get(mentionKey(state)) ?? []);
+}
+
+/** 回复生成后记录：这一轮有没有讲她自己的生活 */
+function recordSelfMention(state: ConversationState, reply: string): void {
+  if ((process.env.KAREN_MENTION_PACING ?? "").toLowerCase() === "off") return;
+  const key = mentionKey(state);
+  try {
+    const { keywords, lifeTexts } = selfMentionKeywords(state);
+    const mentioned = detectSelfMention(reply, lifeTexts, keywords);
+    selfMentionHistory.set(key, recordMention(selfMentionHistory.get(key) ?? [], mentioned));
+  } catch {
+    // 频率统计失败不影响对话
+  }
+}
+
 function buildTalkMoveInjection(
   state: ConversationState,
   userInput: string,
@@ -1450,8 +1502,23 @@ function buildTalkMoveInjection(
         end: state.config.quiet_hours_end,
       },
     },
-    { enabled: process.env.KAREN_TALK_MOVES !== "off" },
+    {
+      enabled: process.env.KAREN_TALK_MOVES !== "off",
+      // v0.9.7：最近 3 轮已经讲过自己 → 明显调低 self-disclose 概率；讲过两轮 → 直接不提
+      ...(() => {
+        if ((process.env.KAREN_MENTION_PACING ?? "").toLowerCase() === "off") return {};
+        const recentMentions = (selfMentionHistory.get(mentionKey(state)) ?? []).slice(-3).filter(Boolean).length;
+        if (recentMentions >= 2) return { selfDiscloseProbability: 0 };
+        if (recentMentions === 1) return { selfDiscloseProbability: 0.12 };
+        return {};
+      })(),
+    },
   );
+  // v0.9.7：已经说过自己太多轮了 → 这轮不做 self-disclose（提示由 mention-pacing 统一给）
+  const overMentionBudget = isOverMentionBudget(selfMentionHistory.get(mentionKey(state)) ?? []);
+  if (decision.move === "self-disclose" && overMentionBudget) {
+    return "";
+  }
   if (decision.move !== "none") {
     recentTalkMoves.set(key, [...recent, decision.move].slice(-4));
     console.log(`  [说话动作] ${decision.move}（${decision.reason}）`);
@@ -1730,6 +1797,7 @@ export async function processMessage(
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
     buildTalkMoveInjection(state, userInput, crisis) +
+    buildMentionPacingInjection(state) +
     buildInitiativeReplyNote(state, userInput, Boolean(crisis)) +
     `\n${momentTag}`;
   const messages = buildChatMessages(session, fullSystem);
@@ -1744,6 +1812,8 @@ export async function processMessage(
     rawReply = guarded.text;
     logs.push("[去AI味] 移除记忆防御话术");
   }
+  // v0.9.7：记录这一轮有没有讲她自己的生活（用于提及频率预算）
+  recordSelfMention(state, rawReply);
   // 相识场景守卫：用户问「怎么认识的」且记忆里没有任何依据时，删掉编造的具体场景
   const meetingUngrounded =
     isAskingHowWeMet(userInput) &&
@@ -2228,6 +2298,7 @@ export async function* processMessageStream(
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
     buildTalkMoveInjection(state, userInput, crisis) +
+    buildMentionPacingInjection(state) +
     buildInitiativeReplyNote(state, userInput, Boolean(crisis)) +
     `\n${momentTag}`;
 
@@ -2326,6 +2397,9 @@ export async function* processMessageStream(
       console.log("  [相识] 全篇编造，改用含糊回应");
       yield { text: fallback };
     }
+
+    // v0.9.7：记录这一轮有没有讲她自己的生活（用于提及频率预算）
+    recordSelfMention(state, sentReply || fullReply);
 
     // 后处理：QQ 表情
     const rendered = renderExpression(fullReply, {

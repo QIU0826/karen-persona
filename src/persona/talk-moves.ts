@@ -110,7 +110,15 @@ function none(reason: string): TalkMoveDecision {
  */
 export function decideTalkMove(
   ctx: TalkMoveContext,
-  deps: { random?: () => number; enabled?: boolean } = {},
+  deps: {
+    random?: () => number;
+    enabled?: boolean;
+    /**
+     * 自述概率覆盖（v0.9.7）：最近已经讲过自己时由调用方调低，
+     * 避免「素材变多 → 每轮都播报日常」。
+     */
+    selfDiscloseProbability?: number;
+  } = {},
 ): TalkMoveDecision {
   if (deps.enabled === false) return none("disabled");
   if (ctx.isCrisis) return none("crisis");
@@ -129,7 +137,9 @@ export function decideTalkMove(
   if (recent.slice(-2).includes("self-disclose")) return none("cooldown");
 
   const random = deps.random ?? Math.random;
-  if (random() >= SELF_DISCLOSE_PROBABILITY) return none("probability_miss");
+  const probability = deps.selfDiscloseProbability ?? SELF_DISCLOSE_PROBABILITY;
+  if (probability <= 0) return none("mention_budget");
+  if (random() >= probability) return none("probability_miss");
   const note = selfShareMaterialEnabled()
     ? buildSelfDiscloseNote(ctx.lifeSignal)
     : SELF_DISCLOSE_NOTE;

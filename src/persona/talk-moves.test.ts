@@ -133,3 +133,36 @@ describe("self-disclose 素材注入（v0.9.5）", () => {
     expect(decision.note).not.toContain("最近在学会拉花");
   });
 });
+
+describe("自述概率覆盖（v0.9.7 提及频率）", () => {
+  const ctx = {
+    userText: "今天上班好累啊",
+    hour: 15,
+    closeness: 5,
+    lifeSignal: "最近在学会拉花",
+  };
+
+  it("概率覆盖为 0 时不做 self-disclose（记 mention_budget）", () => {
+    const decision = decideTalkMove(ctx, { random: () => 0, enabled: true, selfDiscloseProbability: 0 });
+    expect(decision.move).toBe("none");
+    expect(decision.reason).toBe("mention_budget");
+  });
+
+  it("覆盖为 1 时必定做（随机 0.99 也命中）", () => {
+    expect(decideTalkMove(ctx, { random: () => 0.99, enabled: true, selfDiscloseProbability: 1 }).move).toBe(
+      "self-disclose",
+    );
+  });
+
+  it("覆盖为 0.12 时随机 0.5 不命中", () => {
+    expect(decideTalkMove(ctx, { random: () => 0.5, enabled: true, selfDiscloseProbability: 0.12 }).move).toBe("none");
+  });
+
+  it("empathize 分支不受概率影响（先接情绪）", () => {
+    const decision = decideTalkMove(
+      { ...ctx, userText: "今天被老板骂了，好烦" },
+      { random: () => 0, enabled: true, selfDiscloseProbability: 0 },
+    );
+    expect(decision.move).toBe("empathize");
+  });
+});
