@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.9.22 — 2026-10-22
+
+**后半页把「很轻的动态人像背景」加回来。**
+
+用户反馈：从第三板块（主动性）开始背景基本是纯黑；还是喜欢之前那版「背景后面有一张很轻的动态图」，希望把之前给的视频和谐地放到 03 之后。
+
+### Changed（`promo/index.html`）
+
+- 03 主动性 → 04 记忆 → 05 隐私 共用一层 **sticky 动态背景**（恢复 `ambient-loop.mp4`，720×1280 / 6.1s / 666KB）；outro 仍保留自己的角色图
+- 强度压到「很轻」：视频 opacity .24 + blur 1.8px + 降饱和 + 上下渐隐 mask，再叠强 shade；文字对比度优先，人物只当纹理
+- 进入范围才加载/播放（IntersectionObserver + 400px 预载），离开暂停；`prefers-reduced-motion` 用静态 `character-3.jpg`，省流量不加载
+- 顶部从间奏淡入、底部在隐私结束后淡出，不硬切；移动端也加载这层 666KB 背景（首屏 3.2MB 视频仍不加载）
+- 版本号同步 v0.9.22
+
+### Verified
+
+- CDP 实测：滚动到 03 后 `ambient-video` 在播（readyState 4、无 error、t≈3.3s）；scope 从 03 开始、高约 3764px
+- 页面高度 8688、scrollWidth 1440；390 宽无横向溢出
+- `npm test` **121 文件 / 1429 用例**通过；`tsc`/lint 0；`eval:offline` 5/5
+
 ## v0.9.21 — 2026-10-21
 
 **宣传页首屏改版：动态人像 + 她正在发来的话。**
