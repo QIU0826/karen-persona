@@ -86,13 +86,16 @@ export function hasAnyMediaRequest(request: MediaRequest): boolean {
 export function buildMediaRequestNote(request: MediaRequest): string {
   const lines: string[] = [];
   if (request.photo) {
-    lines.push("他现在想看你拍的照片：方便就现在拍一张发过去（系统会附上照片），别推说改天/等我哪天；不方便就直说。");
+    lines.push(
+      "他现在想看你拍的照片（照片由系统发出）：自然回一句就行，不要在文字里写 [图片]/[照片] 这类标记，" +
+        "也别每次都用「等等/马上/我拍给你」开头；不想发就直说。",
+    );
   }
   if (request.sticker) {
-    lines.push("他想要个表情包：可以顺手丢一个过去（系统会发），别只说「我有」却不给。");
+    lines.push("他想要个表情包（系统会发）：别在文字里写 [表情包]/[表情] 标记，也别只说「我有」却不给。");
   }
   if (request.voice) {
-    lines.push("他想听你说话：可以发一条短语音过去（系统会发），不用刻意解释「我要发语音了」。");
+    lines.push("他想听你说话（语音由系统发出）：别在文字里写 [语音] 标记，也不用解释「我要发语音了」。");
   }
   if (lines.length === 0) return "";
   return `\n[本条内部提示，不要照抄] ${lines.join(" ")}`;

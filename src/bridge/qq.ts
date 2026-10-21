@@ -102,6 +102,8 @@ import {
   pickCollectedSticker,
 } from "../data/sticker-library.js";
 import { isWithinTurnDuplicate } from "../persona/anti-repetition.js";
+import { stripOutboundMediaMarkers } from "../persona/outbound-markers.js";
+import { shouldSendPhotoCaption } from "../impulse/photo-caption.js";
 import {
   DEFAULT_TYPO_RECALL_SETTINGS,
   type TypoRecallSettings,
@@ -844,7 +846,10 @@ async function main() {
         }
 
         const pendingSnapshot = userPending.get(userId) ?? 0;
-        const lines = result.reply.split("\n").filter(Boolean);
+        const lines = result.reply
+          .split("\n")
+          .map((line) => stripOutboundMediaMarkers(line))
+          .filter(Boolean);
         for (const line of lines) {
           // 中断检测：主动 burst 中用户回复了就停
           const nowPending = userPending.get(userId) ?? 0;
@@ -1021,7 +1026,11 @@ async function readOutboundPhotoBase64(
   return null;
 }
 
-async function sendPhotoToUser(userId: number, photo: OutboundPhoto): Promise<void> {
+async function sendPhotoToUser(
+  userId: number,
+  photo: OutboundPhoto,
+  replyText = "",
+): Promise<void> {
   try {
     const resolved = await readOutboundPhotoBase64(photo);
     if (!resolved) {
@@ -1029,8 +1038,9 @@ async function sendPhotoToUser(userId: number, photo: OutboundPhoto): Promise<vo
       return;
     }
 
-    if (photo.caption) {
-      sendPrivateMsg(userId, photo.caption);
+    // v0.9.19：文字已经在说照片 / 偶尔干发时，不再补一条固定配文
+    if (shouldSendPhotoCaption({ replyText, caption: photo.caption })) {
+      sendPrivateMsg(userId, photo.caption!);
       await sleep(700);
     }
     sendPrivateMsg(userId, asCqCode(`[CQ:image,file=base64://${resolved.base64}]`));
@@ -1046,15 +1056,19 @@ async function sendPhotoToUser(userId: number, photo: OutboundPhoto): Promise<vo
 }
 
 /** 群聊发图（仅 group_photo_enabled=true 时调用）：先配文再图片，与私聊一致。 */
-async function sendPhotoToGroup(groupId: number, photo: OutboundPhoto): Promise<void> {
+async function sendPhotoToGroup(
+  groupId: number,
+  photo: OutboundPhoto,
+  replyText = "",
+): Promise<void> {
   try {
     const resolved = await readOutboundPhotoBase64(photo);
     if (!resolved) {
       log.warn("photo.outbound_failed", { group_id: groupId, source: photo.file ? "local" : "url" });
       return;
     }
-    if (photo.caption) {
-      sendGroupMsg(groupId, photo.caption);
+    if (shouldSendPhotoCaption({ replyText, caption: photo.caption })) {
+      sendGroupMsg(groupId, photo.caption!);
       await sleep(700);
     }
     sendGroupMsg(groupId, asCqCode(`[CQ:image,file=base64://${resolved.base64}]`));
@@ -1318,7 +1332,7 @@ async function streamPrivateReply(params: {
     }
 
     if (frag.image) {
-      await sendPhotoToUser(userId, frag.image);
+      await sendPhotoToUser(userId, frag.image, sentText);
       photoSent = true;
       continue;
     }
@@ -1331,16 +1345,17 @@ async function streamPrivateReply(params: {
       continue;
     }
 
-    if (!frag.text) continue;
+    const outboundText = stripOutboundMediaMarkers(frag.text);
+    if (!outboundText) continue;
 
     // 当轮去重：同一轮里几乎相同的话只发一次（流式分条常见）
-    if (isWithinTurnDuplicate(frag.text, sentFragments)) {
+    if (isWithinTurnDuplicate(outboundText, sentFragments)) {
       log.info("reply.dropped_within_turn_duplicate", { user_id: userId });
       continue;
     }
     // 单轮气泡上限：超出的先攒着，等这轮结束合并成一条发（不丢内容）
     if (textBubbles >= MAX_TEXT_BUBBLES) {
-      mergedTail += (mergedTail ? "\n" : "") + frag.text;
+      mergedTail += (mergedTail ? "\n" : "") + outboundText;
       continue;
     }
 
@@ -1353,7 +1368,7 @@ async function streamPrivateReply(params: {
     }
 
     if (sentCount > 0) {
-      await sleep(typingTimeFor(frag.text, pacing));
+      await sleep(typingTimeFor(outboundText, pacing));
       if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
         state.interrupted = true;
         log.info("reply.interrupted", { user_id: userId, stage: "streaming" });
@@ -1366,20 +1381,23 @@ async function streamPrivateReply(params: {
     // 每轮只在第一条文字气泡上尝试一次「打错字→撤回→重发」；延迟补发不演
     if (!typoDecided && logPrefix === "回复") {
       typoDecided = true;
-      await sendPrivateBubbleWithTypoRecall(userId, frag.text, state, safetySent);
+      await sendPrivateBubbleWithTypoRecall(userId, outboundText, state, safetySent);
     } else {
-      sendPrivateMsg(userId, frag.text);
+      sendPrivateMsg(userId, outboundText);
     }
-    sentText += (sentText ? "\n" : "") + frag.text;
+    sentText += (sentText ? "\n" : "") + outboundText;
     log.info("reply.sent", {
       user_id: userId,
-      chars: charCount(frag.text),
+      chars: charCount(outboundText),
       deferred: logPrefix !== "回复",
     });
     sentCount++;
   }
 
   // 超出气泡上限的内容合并成一条发出（保持在 4 条以内，又不会丢话）
+  if (mergedTail.trim()) {
+    mergedTail = stripOutboundMediaMarkers(mergedTail);
+  }
   if (mergedTail.trim()) {
     await sleep(typingTimeFor(mergedTail, pacing));
     if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
@@ -1911,8 +1929,9 @@ async function sendGroupReplies(
   if (plan.textLines.length === 0 && !plan.qqFaceCq && !plan.photo) return 0;
 
   let sent = 0;
-  for (let i = 0; i < plan.textLines.length; i++) {
-    const line = plan.textLines[i];
+  const textLines = plan.textLines.map((line) => stripOutboundMediaMarkers(line)).filter(Boolean);
+  for (let i = 0; i < textLines.length; i++) {
+    const line = textLines[i]!;
     const delayMs = line.length <= 3 ? 600 + Math.random() * 800 :
                     line.length <= 15 ? 1000 + Math.random() * 1500 :
                     1500 + Math.random() * 2500;
@@ -1933,7 +1952,7 @@ async function sendGroupReplies(
   // 主动分享的照片（默认关闭；仅团体发图开启时）
   if (plan.photo) {
     await sleep(800 + Math.random() * 800);
-    await sendPhotoToGroup(groupId, plan.photo);
+    await sendPhotoToGroup(groupId, plan.photo, textLines.join("\n"));
     sent++;
   }
 

@@ -122,6 +122,7 @@ import { getTrendingTopics, matchTrendingTopics, buildTrendingContext } from "..
 import { deriveStance } from "../world/stance.js";
 import { perceiveTime, buildMomentTag } from "../world/time-awareness.js";
 import { renderExpression } from "../impulse/renderer.js";
+import { stripOutboundMediaMarkers } from "../persona/outbound-markers.js";
 import { trySharePhoto } from "../impulse/unsplash-trigger.js";
 import {
   buildMediaRequestNote,
@@ -1842,6 +1843,7 @@ export async function processMessage(
       : meetingGuard.text;
     if (meetingGuard.changed) logs.push("[相识] 拦截编造的具体相识场景");
   }
+  rawReply = stripOutboundMediaMarkers(rawReply);
   noteRepetitionIfAny(rawReply, recentReplies, (line) => logs.push(line));
 
   // N. 表达渲染
@@ -2341,7 +2343,7 @@ export async function* processMessageStream(
         // 只在自然句末（换行/句号/问号/感叹/省略号）分条；
         // 逗号不再分条，避免「，」结尾的 AI 味碎片
         if (BREAKS.test(token)) {
-          const frag = cleanFragment(buffer);
+          const frag = stripOutboundMediaMarkers(cleanFragment(buffer));
           if (frag) {
             const safe = stripMemoryDeflection(frag);
             if (safe.changed) deflected = true;
@@ -2362,7 +2364,7 @@ export async function* processMessageStream(
       }
 
       // 发送剩余内容
-      const tail = cleanFragment(buffer);
+      const tail = stripOutboundMediaMarkers(cleanFragment(buffer));
       if (tail) {
         const safe = stripMemoryDeflection(tail);
         if (safe.changed) deflected = true;
@@ -2382,7 +2384,7 @@ export async function* processMessageStream(
         fullReply = await chat(messages, persona, { ragContext });
         const lines = fullReply.split("\n").filter(Boolean);
         for (const line of lines) {
-          const frag = line.trim();
+          const frag = stripOutboundMediaMarkers(line.trim());
           if (!frag) continue;
           const safe = stripMemoryDeflection(frag);
           if (safe.changed) deflected = true;
@@ -3025,7 +3027,7 @@ export async function processProactive(
   const messages = buildChatMessages(session, fullSystem);
 
   // LLM 调用
-  let rawReply = await chat(messages, persona);
+  let rawReply = stripOutboundMediaMarkers(await chat(messages, persona));
   const proactiveGuarded = stripMemoryDeflection(rawReply);
   if (proactiveGuarded.changed) {
     rawReply = proactiveGuarded.text;

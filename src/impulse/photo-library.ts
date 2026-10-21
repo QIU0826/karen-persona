@@ -533,12 +533,37 @@ export function chooseLocalPhotoShare(input: LocalPhotoChoiceInput): LocalPhotoC
     random,
   });
   if (!choice) return null;
+  const excluded = new Set(input.excludeCaptions ?? []);
   const scene = buildSceneCaptionWithTag(input.tags, random);
   const sceneMatchesPhoto = scene ? choice.photo.tags.includes(scene.tag) : false;
+  // v0.9.19：场景配文也要遵守「最近 5 条不重复」（原来只有照片自带配文去重，
+  // 场景配文池很小，用户会连续看到「天这样了」）
+  if (scene && sceneMatchesPhoto && !excluded.has(scene.caption)) {
+    return {
+      photo: choice.photo,
+      era: choice.era,
+      caption: scene.caption,
+      captionSource: "scene",
+    };
+  }
+  // 照片自带配文里挑一条没用过的；都被用过了才允许重复
+  const own = [
+    ...choice.photo.captions.today,
+    ...choice.photo.captions.yesterday,
+    ...choice.photo.captions.past,
+  ].filter((caption) => !excluded.has(caption));
+  if (own.length > 0) {
+    return {
+      photo: choice.photo,
+      era: choice.era,
+      caption: own[Math.floor(random() * own.length)] ?? own[0]!,
+      captionSource: "photo",
+    };
+  }
   return {
     photo: choice.photo,
     era: choice.era,
-    caption: scene && sceneMatchesPhoto ? scene.caption : choice.caption,
-    captionSource: scene && sceneMatchesPhoto ? "scene" : "photo",
+    caption: choice.caption,
+    captionSource: "photo",
   };
 }

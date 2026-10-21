@@ -15,6 +15,7 @@ import { fetchUnsplashPhoto } from "../ai/image-gen.js";
 import { describeEmotion } from "../persona/emotion.js";
 import { chooseLocalPhotoShare, hasPhotosForTags, photoFilePath } from "./photo-library.js";
 import { assessPhotoRelevance } from "./media-relevance.js";
+import { replyRefusesPhoto } from "./photo-refusal.js";
 import { createLogger } from "../obs/logger.js";
 import { buildScenePrompt, generateImage, isImageGenEnabled } from "../media/comfyui.js";
 import { saveGeneratedImage } from "../media/generated-store.js";
@@ -150,6 +151,8 @@ async function tryGeneratedPhoto(
   if (!isImageGenEnabled()) return null;
   // 点名要图时不赌概率，直接尝试（他要看"现在的"）
   if (!options.requested && random() > GENERATED_PHOTO_RATIO) return null;
+  // v0.9.19：她这轮文字明确拒绝发照片时，尊重她的话（嘴和手不能不一致）
+  if (options.requested && replyRefusesPhoto(options.lastReply)) return null;
 
   const hour = new Date().getHours();
   const prompt = buildScenePrompt({
@@ -270,6 +273,12 @@ export async function trySharePhoto(
   // 她在这个点回消息时顺手发张图（晚霞/店里/路上）是自然的。
   if (!lastReply || lastReply.trim().length === 0) return null;
 
+  // v0.9.19：她文字里明确拒绝发照片（「不要/在上班/改天」）→ 尊重她，别嘴手不一致
+  if (options.requested && replyRefusesPhoto(lastReply)) {
+    log.info("photo.skipped_refusal", { reason: "reply_refuses_photo" });
+    return null;
+  }
+
   const moodBonus = Math.abs(state.emotionState.vector) * 0.04;
   const closenessBonus = (state.persona.relationship.closeness - minCloseness) * 0.015;
   const probability =
@@ -297,7 +306,7 @@ export async function trySharePhoto(
   cooldownMap.set(personaId, Date.now());
 
   // v0.7：约 20% 的照片用本机 ComfyUI 生成（失败静默回退图库）
-  const generated = await tryGeneratedPhoto(state, options);
+  const generated = await tryGeneratedPhoto(state, { ...options, lastReply: options.lastReply ?? lastReply });
   if (generated) return generated;
 
   // ── 无 Key：本地图库兜底 ─────────────────────
