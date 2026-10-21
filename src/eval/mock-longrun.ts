@@ -114,7 +114,7 @@ export const SETUP_STEPS: SetupStep[] = [
   },
 ];
 
-export type BeatTag = "fact" | "chat" | "media" | "probe" | "emotion" | "ending";
+export type BeatTag = "fact" | "chat" | "media" | "probe" | "emotion" | "ending" | "voice";
 export type ProbeKey = "memory-cat" | "memory-trip" | "memory-name" | "fabrication-origin";
 
 export interface ScenarioBeat {
@@ -126,6 +126,8 @@ export interface ScenarioBeat {
   fixedText?: string;
   /** 分两条短消息发（模拟真人打字停顿） */
   burst?: boolean;
+  /** 以**语音消息**下发（TTS 合成 SILK，走真实入站格式；需 --voice-in 且 ASR 服务在线） */
+  voice?: string;
   probe?: ProbeKey;
   /** 探针期望关键词（任一命中即通过） */
   expect?: string[];
@@ -280,11 +282,53 @@ export const DAILY_SCENARIO: ScenarioBeat[] = [
   },
 ];
 
-export type ScenarioName = "daily";
+export type ScenarioName = "daily" | "voice";
+
+/**
+ * 「voice」场景：验证**她听得懂语音**这条链路（真实 SILK 入站 + 本地 ASR）。
+ * 前两条语音说日常/情绪，第三条语音说一条事实，最后用文字回问 → 检验
+ * 「语音 → 转写 → 事实抽取 → 记忆召回」整条产品闭环。
+ */
+export const VOICE_SCENARIO: ScenarioBeat[] = [
+  {
+    id: "voice-greeting",
+    tag: "chat",
+    intent: "打个招呼，问她今天怎么样",
+    fixedText: "在吗，今天过得咋样？",
+  },
+  {
+    id: "voice-tired",
+    tag: "voice",
+    intent: "用语音说今天加班很累、回家路上还下雨了",
+    voice: "今天加班到很晚，回家路上还下雨了，鞋都湿了。",
+    fixedText: "今天加班到很晚，回家路上还下雨了，鞋都湿了。",
+  },
+  {
+    id: "voice-trip",
+    tag: "voice",
+    intent: "用语音说一条事实：下周三去上海见客户签星潮合同",
+    voice: "我下周三要去上海见客户，签星潮的合同，可能要去三天。",
+    fixedText: "我下周三要去上海见客户，签星潮的合同，可能要去三天。",
+  },
+  {
+    id: "voice-probe",
+    tag: "probe",
+    intent: "用文字回问刚才语音里说的行程（检验语音信息是否真的记住了）",
+    fixedText: "对了，我下周三要去哪来着？",
+    probe: "memory-trip",
+    expect: ["上海"],
+  },
+];
 
 export function getScenario(name: ScenarioName): ScenarioBeat[] {
   if (name === "daily") return DAILY_SCENARIO;
+  if (name === "voice") return VOICE_SCENARIO;
   throw new Error(`未知场景: ${String(name)}`);
+}
+
+/** 所有场景的最大轮数（--turns 校验用） */
+export function maxScenarioTurns(): number {
+  return Math.max(DAILY_SCENARIO.length, VOICE_SCENARIO.length);
 }
 
 /** 默认基线轮数：覆盖全部关键探针（15 轮内包含名字/猫/出差/编造检测）。 */
@@ -331,6 +375,8 @@ export interface LongrunTurn {
   latencyMs: number | null;
   outbound: CollectedMessage[];
   status: "reply" | "no_reply";
+  /** 本轮是否以**入站语音**（SILK）形式发出 */
+  voiceInbound?: boolean;
   noReplyReason?: "timeout" | "deferred" | "reply_failed";
   /** 桥接/模拟器异常（不含消息正文） */
   error?: string;
@@ -376,6 +422,8 @@ export interface LongrunMetrics {
     totalChars: number;
   };
   emojiKaomoji: number;
+  /** 入站语音：发了多少条 / ASR 成功几次（后者在 runLongrun 里补） */
+  voiceInbound: { sent: number; asrOk: number };
   media: {
     image: number;
     imagePhoto: number;
@@ -631,6 +679,8 @@ export interface LongrunCliOptions {
   budgetCny: number;
   replyTimeoutMs: number;
   voice: boolean;
+  /** 入站语音：用真实 SILK 语音消息跑（需本地 ASR 服务在线） */
+  voiceInbound: boolean;
   photoProbability: number;
   review: boolean;
   tag: string;
@@ -953,6 +1003,10 @@ export function computeMetrics(turns: LongrunTurn[]): LongrunMetrics {
     noReplyReasons[reason] = (noReplyReasons[reason] ?? 0) + 1;
   }
 
+  const voiceInbound = {
+    sent: turns.filter((turn) => turn.voiceInbound === true).length,
+    asrOk: 0,
+  };
   const latencies = replied
     .map((turn) => turn.latencyMs)
     .filter((value): value is number => typeof value === "number");
@@ -1018,6 +1072,7 @@ export function computeMetrics(turns: LongrunTurn[]): LongrunMetrics {
   return {
     turns: totalTurns,
     repliedTurns: replied.length,
+    voiceInbound,
     noReplyTurns,
     noReplyRate: totalTurns > 0 ? noReplyTurns / totalTurns : 0,
     noReplyReasons,
@@ -1419,7 +1474,7 @@ export function renderReport(result: LongrunResult, existingReport?: string | nu
     `- 延迟：p50 ${formatSeconds(m.latency.p50)} / p95 ${formatSeconds(m.latency.p95)} / max ${formatSeconds(m.latency.max)}`,
   );
   lines.push(
-    `- 多媒体：照片 ${m.media.imagePhoto}、贴纸 ${m.media.imageSticker}、QQ 表情 ${m.media.face}、表情包 ${m.media.mface}、语音 ${m.media.record}`,
+    `- 多媒体：照片 ${m.media.imagePhoto}、贴纸 ${m.media.imageSticker}、QQ 表情 ${m.media.face}、表情包 ${m.media.mface}、语音 ${m.media.record}；**入站语音 ${m.voiceInbound.sent} 条 / ASR 成功 ${m.voiceInbound.asrOk} 次**`,
   );
   lines.push(
     `- 记忆探针：${result.probes.filter((p) => p.passed).length}/${result.probes.length} 通过；编造检测：${result.fabrication?.flagged ? "⚠️ 命中启发式标记" : "未命中启发式标记"}`,
@@ -1701,6 +1756,7 @@ export function parseLongrunCliArgs(argv: string[]): LongrunCliOptions {
     replyTimeoutMs: DEFAULT_REPLY_TIMEOUT_MS,
     // 语音链路已由 Lead 接线并通过真实链路验证：基线默认开启（--no-voice 可关）
     voice: true,
+    voiceInbound: false,
     photoProbability: 0.3,
     review: true,
     tag: defaultRunTag(),
@@ -1730,6 +1786,10 @@ export function parseLongrunCliArgs(argv: string[]): LongrunCliOptions {
       options.voice = false;
       continue;
     }
+    if (arg === "--voice-in") {
+      options.voiceInbound = true;
+      continue;
+    }
     if (arg === "--no-review") {
       options.review = false;
       continue;
@@ -1740,15 +1800,17 @@ export function parseLongrunCliArgs(argv: string[]): LongrunCliOptions {
     switch (arg) {
       case "--turns": {
         const turns = parsePositiveInt(value, arg);
-        if (turns < 1 || turns > DAILY_SCENARIO.length) {
-          throw new Error(`--turns 需要 1-${DAILY_SCENARIO.length}，收到: ${turns}`);
+        if (turns < 1 || turns > maxScenarioTurns()) {
+          throw new Error(`--turns 需要 1-${maxScenarioTurns()}，收到: ${turns}`);
         }
         options.turns = turns;
         break;
       }
       case "--scenario":
-        if (value !== "daily") throw new Error(`未知场景: ${value}（目前只有 daily）`);
-        options.scenario = "daily";
+        if (value !== "daily" && value !== "voice") {
+          throw new Error(`未知场景: ${value}（可选 daily / voice）`);
+        }
+        options.scenario = value;
         break;
       case "--gap-ms":
         options.gapMs = parsePositiveInt(value, arg);
@@ -1986,11 +2048,62 @@ function resolveNodeBinary(repoRoot: string): string {
   return process.execPath;
 }
 
+/**
+ * 语音资产服务：把 TTS 编出来的 SILK 字节挂到本地 HTTP，供 bridge 按 URL 下载
+ * （模拟 NapCat 下发语音条的 `url` 字段）。
+ */
+export class VoiceAssetServer {
+  private server: http.Server | null = null;
+  private readonly assets = new Map<string, Buffer>();
+  private port = 0;
+  private seq = 0;
+
+  async start(): Promise<void> {
+    if (this.server) return;
+    this.server = http.createServer((req, res) => {
+      const match = /^\/voice\/(\d+)\.silk$/.exec(req.url ?? "");
+      const bytes = match ? this.assets.get(match[1] ?? "") : undefined;
+      if (!bytes) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      res.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-length": bytes.length,
+      });
+      res.end(bytes);
+    });
+    await new Promise<void>((resolve) => {
+      this.server!.listen(0, "127.0.0.1", () => {
+        const address = this.server!.address();
+        this.port = typeof address === "object" && address ? address.port : 0;
+        resolve();
+      });
+    });
+  }
+
+  /** 发布一段 SILK，返回可下载 URL */
+  publish(bytes: Buffer): string {
+    const id = String(++this.seq);
+    this.assets.set(id, bytes);
+    return `http://127.0.0.1:${this.port}/voice/${id}.silk`;
+  }
+
+  async close(): Promise<void> {
+    const server = this.server;
+    this.server = null;
+    if (!server) return;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
 /** 启动真实 bridge 子进程（cwd=临时工作区；绝对路径指向仓库里的 tsx/qq.ts）。 */
 export function spawnBridgeProcess(
   repoRoot: string,
   workspace: MockWorkspace,
   deepseek: RepoDeepSeekEnv,
+  asrUrl?: string,
 ): BridgeProcessHandle {
   const nodeBinary = resolveNodeBinary(repoRoot);
   const tsxCli = path.join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs");
@@ -2021,6 +2134,11 @@ import ${JSON.stringify(bridgeEntry)};
     KAREN_MOCK_LONGRUN: "1",
   });
   if (deepseek.baseUrl) env.DEEPSEEK_BASE_URL = deepseek.baseUrl;
+  // 入站语音场景：打开桥接的 ASR，并指向本地识别服务
+  if (asrUrl) {
+    env.KAREN_ASR = "on";
+    env.KAREN_ASR_URL = asrUrl;
+  }
 
   const child = spawn(nodeBinary, [tsxCli, wrapperEntry], {
     cwd: workspace.workDir,
@@ -2284,6 +2402,28 @@ export class MockOneBotClient {
         JSON.stringify({ status: "ok", retcode: 0, data, echo: request.echo }),
       );
     }
+  }
+
+  /** 发一条私聊**语音**事件（真实 SILK；url 指向本地资产服务）。 */
+  sendVoiceMessage(url: string): { messageId: number; at: number } {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error(`mock OneBot WS 未连接（${this.closedInfo || "未打开"}）`);
+    }
+    const messageId = this.nextMessageId++;
+    const event = {
+      post_type: "message",
+      message_type: "private",
+      sub_type: "friend",
+      self_id: BOT_QQ,
+      user_id: MOCK_QQ,
+      message_id: messageId,
+      raw_message: `[CQ:record,file=voice.silk,url=${url}]`,
+      message: [{ type: "record", data: { file: "voice.silk", url } }],
+      sender: { user_id: MOCK_QQ, nickname: "阿哲", sex: "male", age: 25 },
+      time: Math.floor(Date.now() / 1000),
+    };
+    this.ws.send(JSON.stringify(event));
+    return { messageId, at: Date.now() };
   }
 
   /** 发一条私聊事件（模拟用户打字）；返回 message_id 与发送时间。 */
@@ -2678,14 +2818,35 @@ async function runBeat(
   facts: string[],
   quietMs: number,
   maxCollectMs: number,
+  voiceAssets?: { publish: (bytes: Buffer) => string },
 ): Promise<RunBeatOutcome> {
   const sentTexts = await simulateUserMessages(simulator, beat, { recent, facts });
   const sentAt = Date.now();
   let firstSentAt: number | null = null;
-  for (let i = 0; i < sentTexts.length; i++) {
-    if (i > 0) await wait(1200 + Math.random() * 1200);
-    const sent = client.sendPrivateMessage(sentTexts[i]);
-    if (firstSentAt === null) firstSentAt = sent.at;
+  let voiceInbound = false;
+  if (beat.voice && voiceAssets) {
+    // 真实入站形态：TTS → SILK → 本地 HTTP → bridge 下载后走 ASR
+    try {
+      const { synthesizeSpeech } = await import("../ai/tts.js");
+      const speech = await synthesizeSpeech(beat.voice, { styleEnabled: false });
+      if (speech) {
+        const url = voiceAssets.publish(Buffer.from(speech.silkBase64, "base64"));
+        const sent = client.sendVoiceMessage(url);
+        firstSentAt = sent.at;
+        voiceInbound = true;
+        sentTexts.length = 0;
+        sentTexts.push(`[语音] ${beat.voice}`);
+      }
+    } catch {
+      // TTS 不可用（非 macOS 等）→ 回退文字发送
+    }
+  }
+  if (!voiceInbound) {
+    for (let i = 0; i < sentTexts.length; i++) {
+      if (i > 0) await wait(1200 + Math.random() * 1200);
+      const sent = client.sendPrivateMessage(sentTexts[i]);
+      if (firstSentAt === null) firstSentAt = sent.at;
+    }
   }
   const since = firstSentAt ?? sentAt;
 
@@ -2713,6 +2874,7 @@ async function runBeat(
     latencyMs: firstReplyAt !== null ? firstReplyAt - since : null,
     outbound,
     status: outbound.length > 0 ? "reply" : "no_reply",
+    voiceInbound,
   };
   if (turn.status === "no_reply") {
     turn.noReplyReason =
@@ -2743,6 +2905,7 @@ export async function runLongrun(partial: RunLongrunOptions): Promise<LongrunRes
     budgetCny: partial.budgetCny,
     replyTimeoutMs: partial.replyTimeoutMs,
     voice: partial.voice,
+    voiceInbound: partial.voiceInbound ?? false,
     photoProbability: partial.photoProbability,
     review: partial.review,
     tag: partial.tag,
@@ -2759,7 +2922,14 @@ export async function runLongrun(partial: RunLongrunOptions): Promise<LongrunRes
     turns: beats.length,
   });
   const simulator = createSimulator(deepseek.apiKey, deepseek.baseUrl);
-  const bridge = spawnBridgeProcess(repoRoot, workspace, deepseek);
+  // 入站语音：需要本地 ASR 服务；TTS 合成 SILK 由本地资产服务下发
+  const asrUrl =
+    options.voiceInbound && beats.some((beat) => Boolean(beat.voice))
+      ? process.env.KAREN_ASR_URL?.trim() || "http://127.0.0.1:18085"
+      : undefined;
+  const voiceAssets = asrUrl ? new VoiceAssetServer() : null;
+  if (voiceAssets) await voiceAssets.start();
+  const bridge = spawnBridgeProcess(repoRoot, workspace, deepseek, asrUrl);
   let client: MockOneBotClient | null = null;
   let reportWritten = "";
   const reportPath = path.resolve(repoRoot, options.out);
@@ -2801,6 +2971,7 @@ export async function runLongrun(partial: RunLongrunOptions): Promise<LongrunRes
         facts,
         quietMs,
         maxCollectMs,
+        voiceAssets ?? undefined,
       );
       const { turn } = outcome;
       turns.push(turn);
@@ -2838,6 +3009,10 @@ export async function runLongrun(partial: RunLongrunOptions): Promise<LongrunRes
     const health = await fetchBridgeHealth(workspace.healthPort);
     const transcript = buildTranscript(turns);
     const metrics = computeMetrics(turns);
+    metrics.voiceInbound.asrOk = bridge.logs.events.filter((event) => event.event === "asr.ok").length;
+    if (metrics.voiceInbound.sent > 0 && metrics.voiceInbound.asrOk === 0) {
+      notes.push("入站语音发了但 ASR 一次都没成功（检查 npm run asr:start / KAREN_ASR_URL）");
+    }
     const runtimeState = collectRuntimeState(workspace.dataDir);
     const probes = evaluateProbes(turns, beats);
     const fabrication = detectFabrication(turns, beats);
@@ -2938,6 +3113,11 @@ export async function runLongrun(partial: RunLongrunOptions): Promise<LongrunRes
       // ignore
     }
     await bridge.stop();
+    try {
+      await voiceAssets?.close();
+    } catch {
+      // ignore
+    }
     if (!options.keep) {
       try {
         fs.rmSync(workspace.workDir, { recursive: true, force: true });

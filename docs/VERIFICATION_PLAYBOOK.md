@@ -43,6 +43,8 @@ npm run proactive:smoke  # 主动消息 plan 场景：像不像念稿           
 npm run rollup:smoke     # 周汇总：7 天全覆盖 / 话题不被截断 / 幂等
 npm run image:smoke      # 本机生图：真出图 / 可复现 / 落盘 / 产品路径（需先 image:start）
 npm run asr:smoke        # 语音识别：TTS(SILK)→解码→ASR 往返 / WAV 直通 / 降级（需先 asr:start）
+node node_modules/tsx/dist/cli.mjs scripts/mock-onebot-longrun.ts \
+  --scenario voice --turns 4 --voice-in   # 语音入站长跑：真实 SILK 入站→ASR→记忆→回问（约 ¥0.02）
 
 # 真机（需要真实 QQ 有历史消息）
 npm run qq:watch -- --once --since 2026-10-18T00:00:00

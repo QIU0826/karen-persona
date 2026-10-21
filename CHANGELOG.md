@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.9.2 — 2026-10-21
+
+**语音入站真实长跑验证**：验证台新增 `voice` 场景与 `--voice-in`，用**真实 SILK 语音**跑完整产品闭环，
+并留下可复现报告 [docs/VOICE_ASR_E2E.md](docs/VOICE_ASR_E2E.md)。
+
+### Added
+
+- `src/eval/mock-longrun.ts`：
+  - 新场景 **`voice`**（4 轮）：打招呼 → 语音说「加班很累/下雨」→ 语音说事实（下周三去上海签星潮合同）
+    → 文字回问「我下周三要去哪来着？」
+  - `--voice-in`：把 TTS 合成的 SILK 经**本地 HTTP 资产服务**下发（模拟 NapCat 的语音条 url），
+    bridge 走真实下载 → silk-wasm 解码 → 本地 ASR；
+  - 桥接子进程自动注入 `KAREN_ASR=on` + `KAREN_ASR_URL`（仅语音场景）；
+  - 报告新增指标：**入站语音 N 条 / ASR 成功 N 次**；ASR 全失败时自动写入 notes 提示。
+
+### Verified（真实运行，非单测）
+
+```
+场景 voice / 4 轮 / 真实 bridge + 真实 DeepSeek + 真实本机 faster-whisper
+入站语音 2 条 / ASR 成功 2 次
+记忆探针 1/1 通过 —— 问「我下周三要去哪来着？」她答「上海呀 星潮的合同 三天」
+延迟 p50 4.3s / p95 6.1s（含 ASR）；成本 ¥0.0217
+LLM 评审：连贯 4/5、记忆 4/5、真人感 4/5、主动 3/5、多媒体 3/5
+```
+
+**这条跑通的不是"接口调用"，而是产品闭环**：语音 → 转写 → 事实抽取 → 记忆召回 → 用文字答对。
+
+### Docs
+
+- 新增 `docs/VOICE_ASR_E2E.md`（本次运行的完整报告 + 复现命令 + 能/不能证明什么）
+- `docs/ASR.md` 增加「真实长跑验证」章节；验证手册加入该命令；覆盖审计补证据
+
+### Testing
+
+- 110 个测试文件 / 1309 个用例通过；`tsc` 0 错误；lint 0 违规；`eval:offline` 5 项达标；
+  harness 单测 33 条全过。
+
 ## v0.9.1 — 2026-10-21
 
 **ASR 入站形态补验**：v0.9.0 的桥接 E2E 直接喂了 WAV，但 **NapCat/QQ 实际下发的是 SILK**——

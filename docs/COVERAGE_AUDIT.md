@@ -1,6 +1,6 @@
 # 能力覆盖审计（Capability Coverage Audit）
 
-> 最后更新：2026-10-21（v0.9.1）
+> 最后更新：2026-10-21（v0.9.2）
 >
 > 目的：回答「文档里写着 ✅ 的能力，到底被验证到什么程度？」
 > 三层口径：**① 文档宣称 → ② 单测覆盖 → ③ 真实链路/端到端覆盖**。
@@ -40,7 +40,7 @@
 | 表情包持续收集 | 🚧 | ✅ `sticker-library.test.ts` | `bridge-e2e`：入站图片→入库（真实 bridge 子进程） | 已验（采集） |
 | 内置贴纸 | ✅ | ✅ `stickers.test.ts` | `bridge-e2e`：出站 CQ image 发送 | 已验 |
 | 语音消息（TTS→SILK） | ✅/🚧 | ✅ `voice.test.ts`（35 条）+ darwin-only 真实 say→silk | 真实 QQ 语音条只人工验过 1 次；mock OneBot 覆盖协议形态 | 部分验 |
-| 语音识别（ASR） | ✅ | ✅ `asr.test.ts`（11 条，含 silk-wasm 真实编解码往返） | `asr:smoke` 真实服务：SILK→ASR 1414ms「今天天气不错…」/ WAV 962ms「明天下午3点开会。」；桥接 E2E **真实 SILK 入站**（断言送给 ASR 的是解码后的 WAV）且转写进 prompt | 已验 |
+| 语音识别（ASR） | ✅ | ✅ `asr.test.ts`（11 条，含 silk-wasm 真实编解码往返） | `asr:smoke` 真实服务：SILK→ASR 1414ms「今天天气不错…」/ WAV 962ms「明天下午3点开会。」；桥接 E2E **真实 SILK 入站**（断言送给 ASR 的是解码后的 WAV）且转写进 prompt；`--scenario voice --voice-in` 真实长跑：入站语音 2 条 / ASR 成功 2 次，语音说的事实被记住，文字回问 1/1 通过 | 已验 |
 | 相识不编造 | ✅ | ✅ `meeting-guard.test.ts` | 21 轮回归：P0 编造「咖啡店」修复后复验改口 | 已验 |
 | 多媒体相关性 | ✅ | ✅ `media-relevance.test.ts` | 21 轮评审 2/5 → **4/5**（两轮复现） | 已验（定性） |
 | 被点名要媒体会真给 | ✅ | ✅ `media-request.test.ts` | `bridge-e2e` 图片链路；21 轮中照片请求兑现 | 已验 |

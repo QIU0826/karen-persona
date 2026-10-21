@@ -3,7 +3,7 @@
 > 目的：一眼看清**哪些是真做了、做到什么程度**。每一行都必须能在代码里找到对应，
 > 数字必须能复现（跑法写在「怎么复现」列）。不确定的地方写清楚弱项，不写成优点。
 >
-> 最后更新：2026-10-21（v0.9.1）。配套文档：[README](../README.md)（对外）、
+> 最后更新：2026-10-21（v0.9.2）。配套文档：[README](../README.md)（对外）、
 > [CLAUDE.md](../CLAUDE.md)（开发总控）、[PRODUCT_AUDIT.md](PRODUCT_AUDIT.md)（审计与路线图）。
 
 图例：✅ 可用 ｜ 🚧 有明确限制 ｜ ⛔ 受阻（代码就绪但依赖未到位）
@@ -39,7 +39,7 @@
 | 表情包持续收集 | `src/data/sticker-library.ts`、`src/bridge/qq.ts` | 🚧 | 入站图片自动入库：sha256 去重、库容 500、单文件≤2MB、可一键清空 | **采集默认关**（`KAREN_STICKER_COLLECT=on`）；出站使用默认关（`KAREN_STICKER_USE=on`） |
 | 内置贴纸 | `src/impulse/stickers.ts` | ✅ | 11 个 Twemoji（CC-BY 4.0），22% 概率顺手发、收到表情时 55%、5 分钟冷却 | 数量少，靠上一行补 |
 | 语音消息（TTS） | `src/ai/tts.ts`、`src/impulse/voice.ts` | ✅/🚧 | macOS `say`→WAV→SILK→QQ 语音条；实测 2.4s 语音 ≈9.3KB | **音色仍偏 AI**（用户明确反馈）；非 macOS 降级文字；群聊未接 |
-| 语音识别（ASR） | `src/ai/asr.ts`、`services/asr/server.py`、`scripts/asr-smoke.ts` | ✅ | **v0.9.0 新增**：faster-whisper CPU int8（small 484MB）；SILK→ASR 1414ms、WAV 962ms；OpenCC t2s 保证简体；失败回退 `[语音]` 占位；桥接 E2E 用**真实 SILK 入站**（断言 ASR 收到的是解码后的 WAV）且转写进 prompt | 只支持中文；口音/噪声会错字；群聊语音不支持；服务需 `npm run asr:start` |
+| 语音识别（ASR） | `src/ai/asr.ts`、`services/asr/server.py`、`scripts/asr-smoke.ts` | ✅ | **v0.9.0 新增**：faster-whisper CPU int8（small 484MB）；SILK→ASR 1414ms、WAV 962ms；OpenCC t2s 保证简体；失败回退 `[语音]` 占位；桥接 E2E 用**真实 SILK 入站**（断言 ASR 收到的是解码后的 WAV）且转写进 prompt；`voice` 长跑 4 轮：入站语音 2/ASR 2，语音事实被记住并答对（[报告](VOICE_ASR_E2E.md)） | 只支持中文；口音/噪声会错字；群聊语音不支持；服务需 `npm run asr:start` |
 | 相识不编造 | `src/persona/meeting-guard.ts` | ✅ | 无依据时确定性删掉编造场景（吧台/下雨/借伞），整条都在编就换含糊回应 | 有依据时仍可能细节漂移 |
 | **多媒体相关性** | `src/impulse/media-relevance.ts` | ✅ | 只在点名/场景命中/她刚分享生活时发图；场景配文池；21 轮评审 **2/5→4/5**（两轮复现） | 抽象话题下宁可少发，图库只有 15 张 |
 | 被点名要媒体会真给 | `src/impulse/media-request.ts` | ✅ | 要照片跳概率判定（亲密度/冷却仍生效）、按场景挑图；要语音/表情提高概率并跳冷却 | 图库只有 15 张，仍会撞图 |
