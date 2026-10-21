@@ -19,6 +19,7 @@ import { createSilenceState, type SilenceState } from "../impulse/silence-arc.js
 import type { CausalChain } from "../evolution/causal-chain.js";
 import { createNarrativeArc, type NarrativeArc } from "../evolution/narrative-reconstruct.js";
 import { createRelationshipState, type RelationshipState } from "../persona/relationship.js";
+import { normalizeDeferredImpulse, type DeferredImpulse } from "../impulse/initiative-defer.js";
 import { createRelationshipDims } from "../persona/relationship-dims.js";
 import { createReflectionState, type ReflectionState } from "../evolution/reflection.js";
 import type { WeatherInfo } from "../world/weather.js";
@@ -70,6 +71,8 @@ export interface PersistedPersonaState {
   weather: { raw: WeatherInfo; fetchedAt: number } | null;
   lastGate: PersistedGateRecord | null;
   proactivePaused: boolean;
+  /** v0.9.18：深夜被免打扰挡下、等早上补发的主动冲动 */
+  deferredProactive?: DeferredImpulse | null;
   /** 多用户隔离：文件后缀（"" = 历史/主用户） */
   storageKey?: string;
 }
@@ -122,6 +125,7 @@ export function createPersistedPersonaState(personaId: string, initialCloseness 
     weather: null,
     lastGate: null,
     proactivePaused: false,
+    deferredProactive: null,
   };
 }
 
@@ -266,6 +270,7 @@ function normalize(raw: unknown, personaId: string, initialCloseness: number): P
     weather,
     lastGate,
     proactivePaused: boolean(raw.proactivePaused, false),
+    deferredProactive: normalizeDeferredImpulse(raw.deferredProactive),
   };
 }
 

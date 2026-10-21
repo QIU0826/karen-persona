@@ -215,6 +215,12 @@ import {
   type PersistedPersonaState,
 } from "../data/state-store.js";
 import {
+  buildDeferredCandidate,
+  createDeferredImpulse,
+  resolveDeferredImpulse,
+  type DeferredImpulse,
+} from "../impulse/initiative-defer.js";
+import {
   evaluateRelationshipEvent,
   applyRelationshipEvent,
   touchInteraction,
@@ -330,6 +336,8 @@ export interface ConversationState {
   lastGate: GateRecord | null;
   /** M1-gov: 主动消息是否暂停（/pause），持久化 */
   proactivePaused: boolean;
+  /** v0.9.18：深夜被免打扰挡下、等早上补发的主动冲动 */
+  deferredProactive: DeferredImpulse | null;
   /** 多用户隔离：owner（qq:<id> / cli:local） */
   owner: string;
   /** 多用户隔离：会话/状态文件后缀（"" = 历史/主用户） */
@@ -474,6 +482,7 @@ export async function initConversation(
     relationshipState,
     lastGate: persisted?.lastGate ?? null,
     proactivePaused: persisted?.proactivePaused ?? false,
+    deferredProactive: persisted?.deferredProactive ?? null,
     owner: scope.owner,
     storageKey: scope.storageKey,
     storagePersona: scope.storagePersona,
@@ -794,6 +803,7 @@ export function persistRuntimeState(state: ConversationState): void {
       weather: { raw: state.weatherPerception.raw, fetchedAt: state.weatherFetchedAt },
       lastGate: state.lastGate,
       proactivePaused: state.proactivePaused,
+      deferredProactive: state.deferredProactive,
       storageKey: state.storageKey,
     };
     savePersonaState(snapshot);
@@ -2711,6 +2721,30 @@ export async function processProactive(
   const MAX_PROACTIVE_PER_DAY = 4;
   const MIN_PROACTIVE_GAP_MS = 30 * 60 * 1000;
 
+  // ── 0. 昨夜被免打扰挡下的冲动：早上补发（v0.9.18）───
+  let deferredCandidate: ImpulseCandidate | null = null;
+  if (state.deferredProactive) {
+    const userLastMessageAt =
+      [...session.messages].reverse().find((m) => m.role === "user")?.timestamp ?? null;
+    const resolution = resolveDeferredImpulse({
+      deferred: state.deferredProactive,
+      now: now.getTime(),
+      hour,
+      userLastMessageAt,
+      lastProactiveSentAt: state.lastProactiveSentAt || null,
+      quietHours: { startHour: config.quiet_hours_start, endHour: config.quiet_hours_end },
+    });
+    if (resolution.action === "drop") {
+      state.deferredProactive = null;
+      logs.push(`[主动] 昨夜冲动丢弃：${resolution.reason}`);
+    } else if (resolution.action === "reuse") {
+      deferredCandidate = buildDeferredCandidate(resolution.impulse);
+      logs.push("[主动] 昨夜冲动 → 今天早上补发候选");
+    } else if (resolution.action === "wait") {
+      logs.push(`[主动] 昨夜冲动等待：${resolution.reason}`);
+    }
+  }
+
   // ── 1. 收集生活流候选（她自己的生活里正在发生的事）───
 
   const candidates: ImpulseCandidate[] = [];
@@ -2806,6 +2840,8 @@ export async function processProactive(
   } catch {
     // 计划异常不影响主动消息
   }
+
+  if (deferredCandidate) candidates.push(deferredCandidate);
 
   // ── 2. 四条链路决策（v0.4.0：补话 / 沉默保温 / 生活流 / 冷场开话题）───
   // 沉默保温由决策模块按沉默时长判定，不再只看阶段 4。
@@ -2918,6 +2954,10 @@ export async function processProactive(
     } else {
       logs.push(`[主动] 门控延迟(${picked.source}): ${gate.reason}`);
     }
+    // v0.9.18：记下这个冲动，早上免打扰结束后再补发（而不是就此消失）
+    state.deferredProactive = createDeferredImpulse(now.getTime(), picked);
+    persistRuntimeState(state);
+    logs.push("[主动] 冲动已暂存，等免打扰结束后补发");
     markProactiveBlocked(state.owner, `消息门延迟：${gate.reason}`);
     return { sent: false, logs, decision };
   }
@@ -3042,6 +3082,11 @@ export async function processProactive(
   persistRuntimeState(state);
 
   logs.push(`[主动] 已发送: ${previewText(reply)}`);
+  // 已成功发出（无论用没用补发候选），昨夜冲动即被消化
+  if (state.deferredProactive) {
+    state.deferredProactive = null;
+    persistRuntimeState(state);
+  }
   return { sent: true, reply, logs, qqFace: rendered.qqFace, channel: usedChannel };
 }
 

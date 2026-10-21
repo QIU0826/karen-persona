@@ -117,3 +117,32 @@ describe("反思状态持久化（v0.8）", () => {
     }
   });
 });
+
+describe("深夜主动冲动的暂存与早上补发（v0.9.18）", () => {
+  it("deferredProactive 能持久化并完整读回", async () => {
+    const m = await import("./state-store.js");
+    const state = m.createPersistedPersonaState("小雅", 3);
+    state.deferredProactive = {
+      at: new Date("2026-10-20T23:40:00+08:00").getTime(),
+      source: "因果链",
+      description: "店里来了个难缠的客人，想吐槽",
+      intensity: 0.6,
+    };
+    m.savePersonaState(state);
+    const loaded = m.loadPersonaState("小雅");
+    expect(loaded?.deferredProactive).toEqual(state.deferredProactive);
+  });
+
+  it("坏字段/旧版本状态文件不会崩：deferredProactive 归一化为 null", async () => {
+    const m = await import("./state-store.js");
+    const state = m.createPersistedPersonaState("小雅", 3);
+    m.savePersonaState(state);
+    const file = `${dir}/persona-state-小雅.json`;
+    const raw = JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>;
+    raw.deferredProactive = { at: "bad", description: 123 };
+    fs.writeFileSync(file, JSON.stringify(raw), "utf-8");
+    const loaded = m.loadPersonaState("小雅");
+    expect(loaded).not.toBeNull();
+    expect(loaded!.deferredProactive).toBeNull();
+  });
+});
