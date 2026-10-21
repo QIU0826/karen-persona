@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.9.1 — 2026-10-21
+
+**ASR 入站形态补验**：v0.9.0 的桥接 E2E 直接喂了 WAV，但 **NapCat/QQ 实际下发的是 SILK**——
+解码分支没被端到端覆盖。本轮改成真实 SILK 入站，链路形态与线上一致。
+
+### Verified
+
+- 桥接 E2E 的假语音端点改为 `GET /voice.silk`：测试内用 silk-wasm 把 WAV 编成 SILK 下发；
+  桥接收到后必须**先解码成 WAV** 再送 ASR。
+- 断言（不只是"有调用"）：
+  1. ASR 服务收到的音频体以 `RIFF....WAVE` 开头（证明 SILK 解码真的发生了，不是透传）；
+  2. 解码后 WAV 体积 >100 字节（解码失败会太小）；
+  3. 转写文本真的进入了模型 prompt。
+- 与 `asr:smoke` 互补：smoke 用 **真实 whisper 服务** + 真实 TTS SILK；E2E 用假服务但
+  **完整桥接进程 + 真实 SILK 编解码**，两条路径合起来覆盖「SILK→WAV→提示词」。
+
+### Added
+
+- `FakeOpenAi.transcribeBodies`：记录 ASR 收到的二进制体，供断言音频格式。
+
+### Testing
+
+- 110 个测试文件 / 1309 个用例通过；`tsc` 0 错误；lint 0 违规；`eval:offline` 5 项达标；
+  桥接 E2E 连跑 6 次稳定。
+
 ## v0.9.0 — 2026-10-21
 
 **语音识别（ASR）上线**：她终于能听懂你发的语音了。此前用户语音只是 `[语音]` 占位，

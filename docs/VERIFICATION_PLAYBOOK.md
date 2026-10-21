@@ -137,7 +137,13 @@ v0.8.19 的贴纸断言就因此在全量跑里失败过两次。
 报的是 `RuntimeError: Task error: File reconstruction error: CAS Client Error`。
 → 设置 `HF_HUB_DISABLE_XET=1` 或改用镜像 + 分块 curl；并注意 `| tail` 会把失败吞成 exit 0。
 
-### 坑 6：临时目录的异步任务会在 cleanup 后报错
+### 坑 6：验证入站媒体要用「真实编码形态」，别用方便格式直通
+
+v0.9.0 的 ASR E2E 直接喂 WAV，结果**SILK 解码分支从没被端到端覆盖**——而 QQ/NapCat 下发的是 SILK。
+→ 测试里用真实编码器（silk-wasm）生成 SILK 下发，并断言服务收到的是「解码后的 WAV」，
+  否则"链路通了"只是测试自己绕过了最难的一段。
+
+### 坑 7：临时目录的异步任务会在 cleanup 后报错
 
 冒烟脚本 `fs.rmSync(tmp)` 之后，后台的 embedding 升级/成本写入还在跑，
 会刷 `database connection is not open` 噪声日志。

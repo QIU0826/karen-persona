@@ -66,7 +66,18 @@ let wsClosed = "";
 interface FakeOpenAi {
   baseUrl: string;
   requests: Array<Record<string, unknown>>;
+  /** ASR /transcribe 收到的音频体（用于断言「SILK 被解码成了 WAV」） */
+  transcribeBodies: Buffer[];
   close: () => Promise<void>;
+}
+
+function readBodyBuffer(req: http.IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -100,6 +111,8 @@ function sseChunk(model: string, delta: Record<string, unknown>, finish: string 
 
 async function startFakeOpenAi(): Promise<FakeOpenAi> {
   const requests: Array<Record<string, unknown>> = [];
+  const transcribeBodies: Buffer[] = [];
+  let silkCache: Buffer | null = null;
   const server = http.createServer((req, res) => {
     if (req.method === "GET" && req.url === "/img.png") {
       res.writeHead(200, { "content-type": "image/png", "content-length": PNG_BYTES.length });
@@ -111,9 +124,31 @@ async function startFakeOpenAi(): Promise<FakeOpenAi> {
       res.end(WAV_BYTES);
       return;
     }
+    if (req.method === "GET" && req.url === "/voice.silk") {
+      // 真实形态：QQ/NapCat 下发的是 SILK，桥接必须先解码再送 ASR
+      void (async () => {
+        try {
+          if (!silkCache) {
+            const { encode } = await import("silk-wasm");
+            const encoded = await encode(WAV_BYTES, 0);
+            silkCache = Buffer.from(encoded.data);
+          }
+          res.writeHead(200, {
+            "content-type": "application/octet-stream",
+            "content-length": silkCache.length,
+          });
+          res.end(silkCache);
+        } catch {
+          res.writeHead(500);
+          res.end();
+        }
+      })();
+      return;
+    }
     if (req.method === "POST" && req.url === "/transcribe") {
-      // 假的本地 ASR 服务：固定返回一句中文（E2E 断言这句话进了 prompt）
-      void readBody(req).then(() => {
+      // 假的本地 ASR 服务：记录收到的音频体（断言 SILK→WAV），固定返回一句中文
+      void readBodyBuffer(req).then((body) => {
+        transcribeBodies.push(body);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ text: "我明天要去上海出差，可能一周不在" }));
       });
@@ -187,6 +222,7 @@ async function startFakeOpenAi(): Promise<FakeOpenAi> {
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     requests,
+    transcribeBodies,
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections?.();
@@ -613,11 +649,12 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
       expect(stickerRows[0]!.mime).toContain("image/png");
       expect(stickerRows[0]!.bytes).toBeGreaterThan(0);
 
-      // 4b2) 语音消息 → 本地 ASR（假服务）→ 文本真的进了模型 prompt
+      // 4b2) 语音消息（真实 SILK）→ 解码 WAV → 本地 ASR → 文本真的进了模型 prompt
       {
         const beforeVoice = fake.requests.length;
         const beforeActions = actions.length;
-        client.send(voiceEvent(`${fake.baseUrl}/voice.wav`, 41));
+        const beforeAsr = fake.transcribeBodies.length;
+        client.send(voiceEvent(`${fake.baseUrl}/voice.silk`, 41));
         await client.waitFor(
           (action, index) =>
             index >= beforeActions &&
@@ -633,6 +670,14 @@ describe("QQ 桥接端到端（fake OneBot + fake DeepSeek）", () => {
           await wait(150);
         }
         expect(heard, "语音转写文本没有进入模型 prompt（ASR 链路可能没接上）").toBe(true);
+
+        // 断言桥接真的把 SILK 解码成了 WAV 才发给 ASR（而不是原样透传）
+        const asrBodies = fake.transcribeBodies.slice(beforeAsr);
+        expect(asrBodies.length, "ASR 服务没收到请求").toBeGreaterThan(0);
+        const audio = asrBodies[0]!;
+        expect(audio.subarray(0, 4).toString("ascii"), "发给 ASR 的不是 WAV（SILK 没被解码）").toBe("RIFF");
+        expect(audio.subarray(8, 12).toString("ascii")).toBe("WAVE");
+        expect(audio.length, "解码后的 WAV 太小，可能解码失败").toBeGreaterThan(100);
       }
 
       // 4c) 点名要表情包 → 必须从**收集来的库**里发（v0.8.19 修复：原来只有 22% 概率）
