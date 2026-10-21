@@ -1341,13 +1341,29 @@ function buildTalkMoveInjection(
 ): string {
   const key = `${state.owner ?? "cli"}|${state.storagePersona}`;
   const recent = recentTalkMoves.get(key) ?? [];
+  const now = new Date();
+  // v0.9.5：给她一句具体的生活素材（否则 self-disclose 提示只能空泛地"补一句近况"）
+  const lifeSignals = buildLifeSignals({
+    world: (state.persona as { world?: Parameters<typeof buildLifeSignals>[0]["world"] }).world ?? null,
+    hour: now.getHours(),
+    weekday: now.getDay() === 0 ? 7 : now.getDay(),
+    emotionLabel: describeEmotion(state.emotionState),
+    weather: state.weatherPerception?.raw
+      ? { condition: state.weatherPerception.raw.condition, temperature: state.weatherPerception.raw.temp }
+      : null,
+    random: () => Math.random(),
+  });
+  const lifeSignal = lifeSignals.length > 0
+    ? lifeSignals[Math.floor(Math.random() * lifeSignals.length)]
+    : undefined;
   const decision = decideTalkMove(
     {
       userText: userInput,
-      hour: new Date().getHours(),
+      hour: now.getHours(),
       closeness: state.persona.relationship.closeness,
       isCrisis: crisis !== null,
       recentMoves: recent,
+      lifeSignal,
       quietHours: {
         start: state.config.quiet_hours_start,
         end: state.config.quiet_hours_end,

@@ -29,6 +29,11 @@ export interface TalkMoveContext {
   recentMoves?: TalkMove[];
   /** 免打扰时段（start==end 视为关闭） */
   quietHours?: { start: number; end: number };
+  /**
+   * 她自己的生活素材（v0.9.5）：例如「这会儿在咖啡店工作」「最近在学会拉花」。
+   * 有素材时 self-disclose 提示会给一句具体可说的内容，而不是空泛地"补一句近况"。
+   */
+  lifeSignal?: string;
 }
 
 export interface TalkMoveDecision {
@@ -64,6 +69,28 @@ const EMPATHIZE_NOTE =
 
 const SELF_DISCLOSE_NOTE =
   "\n[内部提示] 这轮如果你只是回答，可以在最后顺手补一句你自己的近况或念头（一句就够），让话题往前走，但别抢他的话头。";
+
+/**
+ * self-disclose 的内部提示（v0.9.5）。
+ *
+ * 背景：旧提示只说"补一句自己的近况"，没给素材——模型要么不说，要么说得很空。
+ * 现在把她的真实生活线索（作息/目标/压力源/朋友/天气）塞进去当"可说的一件事"，
+ * 让她讲的是**具体的生活**，而不是泛泛的"我今天还行"。
+ */
+function buildSelfDiscloseNote(lifeSignal?: string): string {
+  const signal = (lifeSignal ?? "").replace(/\s+/g, " ").trim();
+  if (!signal) return SELF_DISCLOSE_NOTE;
+  return (
+    "\n[内部提示] 这轮可以在回完他之后，顺手说你自己的**一件具体的小事**（一句就够，别展开）：" +
+    `「${signal}」。` +
+    "用你自己的话讲，像随口提一句，不要照抄、不要说教、不要每轮都提。"
+  );
+}
+
+/** A/B 开关：`KAREN_SELF_SHARE_MATERIAL=off` 时退回旧版空泛提示（仅评测用） */
+function selfShareMaterialEnabled(): boolean {
+  return (process.env.KAREN_SELF_SHARE_MATERIAL ?? "").toLowerCase() !== "off";
+}
 
 function isQuietHour(hour: number, quiet?: { start: number; end: number }): boolean {
   if (!quiet || quiet.start === quiet.end) return false;
@@ -103,5 +130,8 @@ export function decideTalkMove(
 
   const random = deps.random ?? Math.random;
   if (random() >= SELF_DISCLOSE_PROBABILITY) return none("probability_miss");
-  return { move: "self-disclose", reason: "self_disclose", note: SELF_DISCLOSE_NOTE };
+  const note = selfShareMaterialEnabled()
+    ? buildSelfDiscloseNote(ctx.lifeSignal)
+    : SELF_DISCLOSE_NOTE;
+  return { move: "self-disclose", reason: "self_disclose", note };
 }

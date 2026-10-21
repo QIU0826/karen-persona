@@ -1,6 +1,6 @@
 {
   "name": "karen-persona",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "description": "QQ AI 虚拟人设聊天系统 - 让通讯录里住进一个有自己生活、情绪和记忆的人",
   "main": "dist/index.js",
   "scripts": {
@@ -44,6 +44,7 @@
     "eval:offline": "tsx scripts/eval-offline.ts",
     "initiative:sim": "tsx scripts/initiative-sim.ts",
     "proactive:content-eval": "tsx scripts/proactive-content-eval.ts",
+    "selfshare:eval": "tsx scripts/selfshare-eval.ts",
     "anchor:smoke": "tsx scripts/anchor-smoke.ts",
     "digest:smoke": "tsx scripts/digest-smoke.ts",
     "refine:smoke": "tsx scripts/refine-smoke.ts",
