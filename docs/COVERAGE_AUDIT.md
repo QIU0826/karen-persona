@@ -1,6 +1,6 @@
 # 能力覆盖审计（Capability Coverage Audit）
 
-> 最后更新：2026-10-21（v0.9.7）
+> 最后更新：2026-10-21（v0.9.8）
 >
 > 目的：回答「文档里写着 ✅ 的能力，到底被验证到什么程度？」
 > 三层口径：**① 文档宣称 → ② 单测覆盖 → ③ 真实链路/端到端覆盖**。
@@ -40,7 +40,8 @@
 | 表情包持续收集 | 🚧 | ✅ `sticker-library.test.ts` | `bridge-e2e`：入站图片→入库（真实 bridge 子进程） | 已验（采集） |
 | 内置贴纸 | ✅ | ✅ `stickers.test.ts` | `bridge-e2e`：出站 CQ image 发送 | 已验 |
 | 语音消息（TTS→SILK） | ✅/🚧 | ✅ `voice.test.ts`（35 条）+ darwin-only 真实 say→silk | 真实 QQ 语音条只人工验过 1 次；mock OneBot 覆盖协议形态 | 部分验 |
-| 自述提及频率控制 | ✅ | ✅ `mention-pacing.test.ts`（11 条）+ talk-moves 概率覆盖 4 条 | 验证台新增「自述提及 X/Y 轮」指标；6 轮 A/B：关 2/6、开 2/6 → **未测出稳定差异**（如实记录，保留为安全阀） | 部分验 |
+| 离线行为评测框架 | ✅ | ✅ `behavior-metrics.test.ts`（12 条，纯函数指标/聚合） | `behavior:eval` 真实模型 2 变体×3 种子×12 条跑通；**用它证明 v0.9.7 pacing 无收益**（39% vs 47%，区间重叠） | 已验（框架本身） |
+| 自述提及频率控制 | ✅ | ✅ `mention-pacing.test.ts`（11 条）+ talk-moves 概率覆盖 4 条 | 验证台新增「自述提及 X/Y 轮」指标；6 轮 A/B：关 2/6、开 2/6；离线 3 种子评测：39% vs 47%（区间重叠）→ **未测出收益，v0.9.8 起默认关闭**（`KAREN_MENTION_PACING=on` 才开） | 部分验 |
 | 每日生活流（她的一天） | ✅ | ✅ `daily-life.test.ts`（15 条）+ `data/daily-life.test.ts`（4 条，幂等/隔离） | `life:smoke` 真实模型：3 条全部接地人设、无 AI 腔；mock 长跑报告「她的一天 ✅ 3 条」 | 已验 |
 | 回复里的自我暴露 | ✅ | ✅ `talk-moves.test.ts`（15 条，含素材注入/开关/冷却） | `selfshare:eval` 受控 A/B：含她生活内容 8/10→10/10、自然度 4→5；mock 长跑 A/B **未测出差异**（场景本身已多自述，±1 噪声） | 部分验 |
 | 语音识别（ASR） | ✅ | ✅ `asr.test.ts`（11 条，含 silk-wasm 真实编解码往返） | `asr:smoke` 真实服务：SILK→ASR 1414ms「今天天气不错…」/ WAV 962ms「明天下午3点开会。」；桥接 E2E **真实 SILK 入站**（断言送给 ASR 的是解码后的 WAV）且转写进 prompt；`--scenario voice --voice-in` 真实长跑：入站语音 2 条 / ASR 成功 2 次，语音说的事实被记住，文字回问 1/1 通过 | 已验 |

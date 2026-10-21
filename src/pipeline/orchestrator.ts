@@ -1447,12 +1447,15 @@ function selfMentionKeywords(state: ConversationState): { keywords: string[]; li
  * 超预算时注入的内部提示（v0.9.7）。`KAREN_MENTION_PACING=off` 可关（A/B 用）。
  */
 function buildMentionPacingInjection(state: ConversationState): string {
-  if ((process.env.KAREN_MENTION_PACING ?? "").toLowerCase() === "off") return "";
+  // v0.9.8：两种独立评测（mock 长跑 + 离线 3 种子）都未测出 pacing 降低自述率，
+  // 因此**默认关闭**（避免为未验证的收益付 prompt token）；显式 =on 才启用。
+  if ((process.env.KAREN_MENTION_PACING ?? "").toLowerCase() !== "on") return "";
   return buildMentionPacingNote(selfMentionHistory.get(mentionKey(state)) ?? []);
 }
 
 /** 回复生成后记录：这一轮有没有讲她自己的生活 */
 function recordSelfMention(state: ConversationState, reply: string): void {
+  // 记录始终进行（用于验证台指标）；是否使用提示由 buildMentionPacingInjection 决定
   if ((process.env.KAREN_MENTION_PACING ?? "").toLowerCase() === "off") return;
   const key = mentionKey(state);
   try {
@@ -1506,7 +1509,7 @@ function buildTalkMoveInjection(
       enabled: process.env.KAREN_TALK_MOVES !== "off",
       // v0.9.7：最近 3 轮已经讲过自己 → 明显调低 self-disclose 概率；讲过两轮 → 直接不提
       ...(() => {
-        if ((process.env.KAREN_MENTION_PACING ?? "").toLowerCase() === "off") return {};
+        if ((process.env.KAREN_MENTION_PACING ?? "").toLowerCase() !== "on") return {};
         const recentMentions = (selfMentionHistory.get(mentionKey(state)) ?? []).slice(-3).filter(Boolean).length;
         if (recentMentions >= 2) return { selfDiscloseProbability: 0 };
         if (recentMentions === 1) return { selfDiscloseProbability: 0.12 };
