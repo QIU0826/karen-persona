@@ -31,7 +31,8 @@
 ```bash
 # 零成本，CI 跑
 npm run eval:offline     # 记忆 40 条 + 锚点 30 条指标守门
-npm run initiative:sim   # 主动消息决策时序（一天 × 四种关系热度 + 产品红线）
+npm run initiative:sim   # 主动消息决策时序（零成本）
+npm run proactive:content-eval  # 主动由头内容 before/after 真实模型评审（约 ¥0.02）（一天 × 四种关系热度 + 产品红线）
 npm run test:e2e         # mock-OneBot 桥接 E2E（含表情包采集/出站、延迟补发、多用户隔离）
 
 # 真实模型，手动跑（合计约 ¥0.015/轮全跑）

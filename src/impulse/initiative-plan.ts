@@ -51,8 +51,106 @@ export function isInWindow(hour: number, start: number, end: number): boolean {
 }
 
 /**
+ * 从「她的世界」里抽取今天的生活线索（v0.9.4）。
+ *
+ * 背景：v0.9.3 前的计划生成只喂了日记忆/未完成话题——那些几乎全是**他的事**，
+ * 所以主动消息只会"追问对方"，评审指出「几乎不分享自己的日常」。
+ * persona.world 里本来就有她的闺蜜/老板/目标/压力源/作息，这里把它们变成线索。
+ *
+ * 纯函数（随机源可注入），便于单测；返回 2–4 条中文短句。
+ */
+export interface LifeSignalWorld {
+  socialCircle?: Array<{ name?: string; relation?: string; influence?: string }>;
+  dailyRhythm?: Array<{ activity?: string; day?: string; time?: string }>;
+  goals?: Array<{ goal?: string; progress?: string }>;
+  stressSources?: string[];
+}
+
+export function buildLifeSignals(input: {
+  world?: LifeSignalWorld | null;
+  hour: number;
+  /** 1=周一 … 7=周日 */
+  weekday: number;
+  emotionLabel?: string;
+  weather?: { condition?: string; temperature?: number } | null;
+  /** 随机源（测试注入） */
+  random?: () => number;
+}): string[] {
+  const world = input.world ?? {};
+  const random = input.random ?? Math.random;
+  const pick = <T>(list: T[]): T | null => {
+    if (list.length === 0) return null;
+    const index = Math.min(list.length - 1, Math.floor(random() * list.length));
+    return list[index] ?? null;
+  };
+  const dayNames = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  const dayName = dayNames[input.weekday - 1] ?? "";
+  const signals: string[] = [];
+
+  // 1) 此刻/接下来在做什么（她的作息）
+  const rhythm = (world.dailyRhythm ?? []).filter((entry) => entry.activity && entry.time);
+  const todayRhythm = rhythm.filter(
+    (entry) => entry.day === "每天" || entry.day === dayName || entry.day === `每${dayName}`,
+  );
+  for (const entry of todayRhythm) {
+    const time = entry.time ?? "";
+    const range = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/.exec(time.trim());
+    const at = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
+    if (range) {
+      const start = Number(range[1]);
+      const end = Number(range[3]);
+      const inRange = start <= end
+        ? input.hour >= start && input.hour < end
+        : input.hour >= start || input.hour < end;
+      if (inRange) {
+        signals.push(`这会儿在${entry.activity}`);
+        break;
+      }
+    } else if (at) {
+      const hour = Number(at[1]);
+      if (hour === input.hour || (hour === input.hour + 1 && hour > input.hour)) {
+        signals.push(`${hour > input.hour ? "等会儿" : "这会儿"}要${entry.activity}`);
+        break;
+      }
+    }
+  }
+
+  // 2) 她最近在推进的目标
+  const goal = pick((world.goals ?? []).filter((g) => g.goal));
+  if (goal?.goal) {
+    const progress = (goal.progress ?? "").trim();
+    signals.push(progress ? `最近在${goal.goal}（${progress}）` : `最近在${goal.goal}`);
+  }
+
+  // 3) 让她有点烦的事
+  const stress = pick((world.stressSources ?? []).filter((text) => text.trim().length > 0));
+  if (stress) signals.push(`有点烦的是${stress}`);
+
+  // 4) 最近和她有关的人
+  const friend = pick(
+    (world.socialCircle ?? []).filter((person) => person.name && (person.influence || person.relation)),
+  );
+  if (friend?.name) {
+    const detail = (friend.influence ?? friend.relation ?? "").trim();
+    signals.push(detail ? `最近和${friend.name}有关的事：${detail}` : `最近和${friend.name}聊过`);
+  }
+
+  // 5) 天气 / 情绪（补充，最多 4 条）
+  if (input.weather?.condition) {
+    const temp = Number(input.weather.temperature);
+    signals.push(
+      Number.isFinite(temp) ? `外面${input.weather.condition}，${Math.round(temp)}度` : `外面${input.weather.condition}`,
+    );
+  }
+  if (signals.length === 0 && input.emotionLabel) {
+    signals.push(`今天情绪是${input.emotionLabel}`);
+  }
+  return signals.slice(0, 4);
+}
+
+/**
  * 生成每日计划的 prompt（纯函数）。
- * 输入她今天的生活线索（日记忆/因果链/未完成话题），产出一个"想找他说什么"的草案。
+ * 输入她的生活线索（她自己的世界/日记忆/未完成话题），产出一个"想找他说什么"的草案。
  */
 export function buildDailyPlanPrompt(input: {
   herName: string;
@@ -73,6 +171,9 @@ export function buildDailyPlanPrompt(input: {
     "要求：",
     "- 2–3 条即可，不要更多；",
     "- topic 写一句具体的话头（≤20 字），像她心里冒出来的念头，不要写成问候语；",
+    "- **至少 1 条必须是她自己的生活**（kind=life_event：店里的事/朋友/她的小目标/她今天遇到的事），",
+    "  不能三条全都是在问他、关心他或追问他的事；",
+    "- topic 用陈述口吻（「今天店里…」「小雨又…」），不要每条都写成问句；",
     "- kind 只能取四类之一；urgency 0–1；",
     "- window_start/window_end 用 0–23 的整数（可跨天，如 22→2），要符合她的作息；",
     "- 只用给到的线索，不要编造没有的事。",
@@ -80,7 +181,9 @@ export function buildDailyPlanPrompt(input: {
 
   const user = [
     `她的名字：${input.herName}；对方：${input.userName}；日期：${input.day}；亲密度：${input.closeness.toFixed(1)}/10`,
-    input.lifeSignals?.length ? `她生活里的事：${input.lifeSignals.join("；")}` : "她生活里的事：（无特别的事）",
+    input.lifeSignals?.length
+      ? `她自己的生活（可用于"她主动想分享"的内容）：${input.lifeSignals.join("；")}`
+      : "她自己的生活：（无特别的事）",
     input.openThreads?.length ? `没聊完的话题：${input.openThreads.join("；")}` : "没聊完的话题：（无）",
     input.recentDigests?.length ? `最近几天：${input.recentDigests.join(" / ")}` : "",
   ]

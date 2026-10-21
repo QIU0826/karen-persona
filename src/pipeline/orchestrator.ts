@@ -28,6 +28,7 @@ import { refineAnchorsWithLLM } from "../schedule/anchor-llm.js";
 import { deserializePlan, generateDailyPlanWithLLM, serializePlan } from "../schedule/initiative-llm.js";
 import {
   buildDailyPlanPrompt,
+  buildLifeSignals,
   calibratedDailyCap,
   markInitiativeUsed,
   parseDailyPlan,
@@ -1125,11 +1126,22 @@ export async function ensureDailyInitiativePlan(state: ConversationState): Promi
     if (getInitiativePlan(db, state.storagePersona, state.owner, day)) return;
 
     const digests = listRecentDigests(db, state.storagePersona, state.owner, 3);
+    // v0.9.4：把她自己的生活线索喂给计划生成（原来只喂他的事 → 主动只会追问对方）
+    const now = new Date();
+    const weatherRaw = state.weatherPerception?.raw;
+    const lifeSignals = buildLifeSignals({
+      world: (state.persona as { world?: Parameters<typeof buildLifeSignals>[0]["world"] }).world ?? null,
+      hour: now.getHours(),
+      weekday: now.getDay() === 0 ? 7 : now.getDay(),
+      emotionLabel: describeEmotion(state.emotionState),
+      weather: weatherRaw ? { condition: weatherRaw.condition, temperature: weatherRaw.temp } : null,
+    });
     const prompt = buildDailyPlanPrompt({
       herName: state.persona.name,
       userName: state.config.your_name,
       day,
       closeness: state.relationshipState.closeness,
+      lifeSignals,
       recentDigests: digests.map((d) => `${d.day}：${d.summary}`),
       openThreads: digests
         .map((d) => {

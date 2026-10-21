@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDailyPlanPrompt,
+  buildLifeSignals,
   calibratedDailyCap,
   isInWindow,
   markInitiativeUsed,
@@ -189,5 +190,81 @@ describe("calibratedDailyCap：冷启动不死锁（v0.8.14 真机冒烟抓到�
   it("不传 hasSentHistory 时保持旧行为（老调用方不破坏）", () => {
     const result = calibratedDailyCap({ repliesToInitiative: 0, hisInitiatives: 0, closeness: 2 });
     expect(result.cap).toBe(0);
+  });
+});
+
+describe("buildLifeSignals：把「她自己的生活」变成主动由头线索（v0.9.4）", () => {
+  const world = {
+    socialCircle: [{ name: "小雨", relation: "大学闺蜜", influence: "最近在谈恋爱" }],
+    dailyRhythm: [
+      { activity: "咖啡店工作", day: "每天", time: "08:00-17:00" },
+      { activity: "瑜伽课", day: "周三", time: "18:00" },
+    ],
+    goals: [{ goal: "学会拉花", progress: "在练郁金香" }],
+    stressSources: ["店里生意不太好"],
+  };
+
+  it("工作时间能取到「这会儿在做什么」", () => {
+    const signals = buildLifeSignals({ world, hour: 10, weekday: 1, random: () => 0 });
+    expect(signals[0]).toBe("这会儿在咖啡店工作");
+  });
+
+  it("非工作时间不会误报「在上班」", () => {
+    const signals = buildLifeSignals({ world, hour: 22, weekday: 1, random: () => 0 });
+    expect(signals.some((text) => text.includes("咖啡店工作"))).toBe(false);
+  });
+
+  it("周三 17 点会提示「等会儿要瑜伽课」", () => {
+    const signals = buildLifeSignals({ world, hour: 17, weekday: 3, random: () => 0 });
+    expect(signals.some((text) => text.includes("瑜伽课"))).toBe(true);
+  });
+
+  it("包含目标/压力源/朋友（她的世界），且总条数 ≤4", () => {
+    const signals = buildLifeSignals({ world, hour: 10, weekday: 1, random: () => 0 });
+    expect(signals.some((text) => text.includes("拉花"))).toBe(true);
+    expect(signals.some((text) => text.includes("店里生意"))).toBe(true);
+    expect(signals.some((text) => text.includes("小雨"))).toBe(true);
+    expect(signals.length).toBeLessThanOrEqual(4);
+  });
+
+  it("天气/情绪作为补充；空世界也不崩", () => {
+    const withWeather = buildLifeSignals({
+      world: null,
+      hour: 9,
+      weekday: 5,
+      weather: { condition: "小雨", temperature: 18 },
+      random: () => 0,
+    });
+    expect(withWeather).toContain("外面小雨，18度");
+    expect(buildLifeSignals({ world: null, hour: 9, weekday: 5 })).toEqual([]);
+  });
+
+  it("随机源可复现（不同 index 选不同目标）", () => {
+    const many = {
+      ...world,
+      goals: [
+        { goal: "攒钱去日本", progress: "三分之一" },
+        { goal: "学会拉花", progress: "练郁金香" },
+      ],
+    };
+    const first = buildLifeSignals({ world: many, hour: 22, weekday: 1, random: () => 0 });
+    const second = buildLifeSignals({ world: many, hour: 22, weekday: 1, random: () => 0.99 });
+    expect(first.join("|")).not.toBe(second.join("|"));
+  });
+});
+
+describe("buildDailyPlanPrompt：必须要求她分享自己的生活（v0.9.4）", () => {
+  it("prompt 里明确要求至少一条她自己的事、不要全在问他", () => {
+    const prompt = buildDailyPlanPrompt({
+      herName: "小雅",
+      userName: "阿哲",
+      day: "2026-10-21",
+      closeness: 3,
+      lifeSignals: ["这会儿在咖啡店工作", "最近在学会拉花（在练郁金香）"],
+    });
+    expect(prompt.system).toContain("至少 1 条必须是她自己的生活");
+    expect(prompt.system).toContain("不能三条全都是在问他");
+    expect(prompt.user).toContain("她自己的生活");
+    expect(prompt.user).toContain("咖啡店工作");
   });
 });

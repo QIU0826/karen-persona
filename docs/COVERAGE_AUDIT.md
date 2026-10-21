@@ -1,6 +1,6 @@
 # 能力覆盖审计（Capability Coverage Audit）
 
-> 最后更新：2026-10-21（v0.9.3）
+> 最后更新：2026-10-21（v0.9.4）
 >
 > 目的：回答「文档里写着 ✅ 的能力，到底被验证到什么程度？」
 > 三层口径：**① 文档宣称 → ② 单测覆盖 → ③ 真实链路/端到端覆盖**。
@@ -51,7 +51,7 @@
 |---|---|---|---|---|
 | 亲密度成长 | ✅ | ✅ `relationship.test.ts` | 真机 58 轮 + 持久化重启验证 | 已验 |
 | 五维关系 | ✅ | ✅ `relations` 相关测试 | `/relations` 真机可见；`mock-longrun` 采集运行时状态 | 已验（可见性） |
-| 意图式主动性 | ✅ | ✅ `initiative-plan.test.ts` + `initiative-priority.test.ts` | `initiative:sim`（时序）+ `proactive:smoke`（真实模型）：说出「被老周叫去谈话」 | 已验 |
+| 意图式主动性 | ✅ | ✅ `initiative-plan.test.ts` + `initiative-priority.test.ts` | `initiative:sim`（时序）+ `proactive:smoke`（真实模型）；**由头内容 before/after 评测**：她自己的生活条目 0→8、纯追问 24→0、自然度 1→4（`proactive:content-eval`，8 组上下文） | 已验 |
 | 四条主动链路 + 护栏 | ✅/🚧 | ✅ `proactive` 相关测试 | `initiative:sim` 7 条红线全过；21 轮评审**主动性仍 3/5、未测出提升（如实记录）** | 已验（未提升） |
 | 反思循环 | ✅ | ✅ `reflection.test.ts` | 编排状态在 `mock-longrun` 可采集；**真实模型下"察觉→承认"完整弧线未专门冒烟** | **部分验** |
 
