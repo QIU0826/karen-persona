@@ -26,6 +26,10 @@ import {
   type MentionHistory,
 } from "../src/persona/mention-pacing.js";
 import {
+  buildQuestionHookNote,
+  shouldAddQuestionHook,
+} from "../src/persona/question-hook.js";
+import {
   aggregateBehaviorMetrics,
   computeBehaviorMetrics,
   formatRangeNumber,
@@ -61,12 +65,26 @@ interface Variant {
   label: string;
   /** 是否启用「自述提及预算」提示 */
   pacing: boolean;
+  /** 是否启用「反问钩子」（v0.9.9 实验） */
+  questionHook?: boolean;
 }
 
 const VARIANTS: Variant[] = [
-  { id: "baseline", label: "基线（无提及预算）", pacing: false },
-  { id: "mention-pacing", label: "自述提及预算（v0.9.7）", pacing: true },
+  { id: "baseline", label: "基线", pacing: false },
+  { id: "question-hook", label: "反问钩子（v0.9.9 实验）", pacing: false, questionHook: true },
 ];
+
+/** 简单可复现 PRNG（mulberry32），让概率触发在多次运行间可复现 */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 interface RunResult {
   variant: string;
@@ -147,8 +165,20 @@ async function main(): Promise<number> {
       const mentioned: boolean[] = [];
       const usage = { prompt: 0, completion: 0 };
 
+      const random = seededRandom(seed * 1000 + variant.id.length);
       for (const userText of USER_MESSAGES) {
-        const note = variant.pacing ? buildMentionPacingNote(mentionHistory) : "";
+        const notes: string[] = [];
+        if (variant.pacing) notes.push(buildMentionPacingNote(mentionHistory));
+        if (
+          variant.questionHook &&
+          shouldAddQuestionHook(
+            { recentReplies: replies, userText, closeness: 4 },
+            { random },
+          )
+        ) {
+          notes.push(buildQuestionHookNote());
+        }
+        const note = notes.join("");
         const response = await client.chat.completions.create({
           model,
           messages: [
@@ -191,16 +221,60 @@ async function main(): Promise<number> {
     );
   }
 
+  // 自然度评审（每个变体一次，LLM 打分 1-5）
+  const judgeSystem = [
+    "你是严格的聊天质量评审。给你同一个角色（24 岁咖啡店店员小雅）在同一串用户消息下的回复。",
+    "只输出 JSON：{\"naturalness\":1-5,\"askFeel\":\"偏少/合适/偏多\",\"comment\":\"一句话\"}",
+    "- naturalness：像不像真人微信聊天（不是客服、不是采访机器）；",
+    "- askFeel：她主动提问的频率给人的感觉；",
+    "只输出 JSON，不要解释。",
+  ].join("\n");
+  const judges: Record<string, { naturalness: number; askFeel: string; comment: string }> = {};
+  for (const variant of variants) {
+    const replies = results.filter((result) => result.variant === variant.id).flatMap((run) => run.replies);
+    const user = replies.map((reply, index) => `${index + 1}. ${reply || "（空）"}`).join("\n");
+    try {
+      const raw = await client.chat.completions
+        .create({
+          model,
+          messages: [
+            { role: "system", content: judgeSystem },
+            { role: "user", content: user },
+          ],
+          temperature: 0.2,
+          max_tokens: 200,
+          thinking: { type: "disabled" },
+        } as never)
+        .then((response) => response.choices[0]?.message?.content ?? "");
+      const start = raw.indexOf("{");
+      const end = raw.lastIndexOf("}");
+      const parsed = JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>;
+      judges[variant.id] = {
+        naturalness: Number(parsed.naturalness ?? 0),
+        askFeel: String(parsed.askFeel ?? ""),
+        comment: String(parsed.comment ?? ""),
+      };
+    } catch {
+      judges[variant.id] = { naturalness: 0, askFeel: "", comment: "评审解析失败" };
+    }
+  }
+  console.log("\n| 变体 | 自然度 | 提问频率感 | 评语 |");
+  console.log("|---|---|---|---|");
+  for (const variant of variants) {
+    const judge = judges[variant.id];
+    console.log(`| ${variant.label} | ${judge?.naturalness ?? 0}/5 | ${judge?.askFeel ?? "-"} | ${judge?.comment ?? "-"} |`);
+  }
+
   // 变体差异（相对基线；只报均值差，样本小不下结论）
   const baseline = summary.baseline;
-  const pacing = summary["mention-pacing"];
+  const pacing = summary["question-hook"] ?? summary["mention-pacing"];
   if (baseline && pacing) {
     const delta = (a: number, b: number): string => `${a >= b ? "+" : ""}${Math.round((a - b) * 100)}pp`;
-    console.log("\n— 与基线相比（均值差）—");
+    console.log("\n— 实验变体 vs 基线（均值差）—");
     console.log(`自述提及率：${delta(pacing.mentionRate.mean, baseline.mentionRate.mean)}`);
-    console.log(`平均字数：${delta(pacing.avgChars.mean / 20, baseline.avgChars.mean / 20)}（比例近似）`);
+    console.log(`平均字数：${pacing.avgChars.mean.toFixed(1)} vs ${baseline.avgChars.mean.toFixed(1)}`);
     console.log(`问句率：${delta(pacing.questionRate.mean, baseline.questionRate.mean)}`);
-    console.log(`完全重复对：${delta(pacing.duplicatePairs.mean / 10, baseline.duplicatePairs.mean / 10)}（比例近似）`);
+    console.log(`完全重复对：${pacing.duplicatePairs.mean.toFixed(1)} vs ${baseline.duplicatePairs.mean.toFixed(1)}`);
     console.log(
       "\n注意：这是离线提示级评测，不是真实 QQ 对话；结论应看范围是否重叠，" +
         "范围大幅重叠时不能宣称「有效」。",
