@@ -96,17 +96,38 @@ const SENTENCE_CHARS = "。！？!?";
 
 // ── 风格选择 ───────────────────────────────────
 
-/** 深夜/凌晨 → 困；情绪明显正 → 活泼；明显负 → 低落；否则自然。 */
+/**
+ * v0.9.30：从回复文字里读语气线索。
+ * 情绪状态常常是中性/滞后，但这一句本身可能明显在笑、在撒娇或在低落；
+ * 语音 TTS 直接按这一句选风格，比只看 state.emotion 更贴近当下。
+ */
+export function detectTextStyle(text: string): SpeechStyle | null {
+  const t = (text ?? "").trim();
+  if (!t) return null;
+  if (/(哈哈|嘿嘿|开心|高兴|太好|好呀|喜欢你|想你了|期待|真棒|不错哦|耶[！!]?|好耶)/.test(t)) {
+    return "lively";
+  }
+  if (/(唉|累了|难过|委屈|不开心|想哭|算了|烦|难受|失落|有点丧)/.test(t)) {
+    return "soft";
+  }
+  if (/(困|晚安|睡了|好累|没力气)/.test(t)) {
+    return "tired";
+  }
+  return null;
+}
+
+/** 深夜/凌晨 → 困；情绪明显 → 活泼/低落；其次看这一句的文字线索；否则自然。 */
 export function chooseStyle(input: {
   emotionVector?: number;
   hour?: number;
+  text?: string;
 }): SpeechStyle {
   const hour = input.hour;
   if (typeof hour === "number" && (hour >= 23 || hour < 7)) return "tired";
   const emo = input.emotionVector ?? 0;
   if (emo > 0.25) return "lively";
   if (emo < -0.15) return "soft";
-  return "natural";
+  return detectTextStyle(input.text ?? "") ?? "natural";
 }
 
 function clamp(num: number, min: number, max: number): number {
@@ -227,7 +248,11 @@ export function planSpeechStyle(input: StyleInput): StylePlan {
     1,
   );
 
-  const style = chooseStyle({ emotionVector: input.emotionVector, hour: input.hour });
+  const style = chooseStyle({
+    emotionVector: input.emotionVector,
+    hour: input.hour,
+    text: input.text,
+  });
 
   let rate = Math.round(baseRate * STYLE_RATE_FACTOR[style]);
   // 熟一点的人说话更随意、稍快（但保持可懂）

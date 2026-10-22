@@ -6,6 +6,7 @@ import {
   applyIntonation,
   buildSayText,
   chooseStyle,
+  detectTextStyle,
   insertPauses,
   maybeAddFiller,
   planSpeechStyle,
@@ -25,6 +26,17 @@ describe("chooseStyle：语气风格", () => {
     expect(chooseStyle({ hour: 14, emotionVector: 0.5 })).toBe("lively");
     expect(chooseStyle({ hour: 14, emotionVector: -0.4 })).toBe("soft");
     expect(chooseStyle({ hour: 14, emotionVector: 0.05 })).toBe("natural");
+  });
+
+  it("情绪状态中性时，按这一句的文字线索选风格（v0.9.30）", () => {
+    expect(detectTextStyle("哈哈，今天也太开心了吧")).toBe("lively");
+    expect(detectTextStyle("唉，有点累，算了吧")).toBe("soft");
+    expect(detectTextStyle("晚安，我先睡了")).toBe("tired");
+    expect(detectTextStyle("今天下午在店里")).toBeNull();
+    expect(chooseStyle({ hour: 14, text: "哈哈，太好了" })).toBe("lively");
+    expect(chooseStyle({ hour: 14, text: "唉，有点难过" })).toBe("soft");
+    // 明确情绪状态优先于文字线索
+    expect(chooseStyle({ hour: 14, emotionVector: -0.5, text: "哈哈" })).toBe("soft");
   });
 
   it("夜间优先于情绪（半夜不会因为开心就亢奋）", () => {

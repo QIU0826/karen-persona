@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.9.30 — 2026-10-22
+
+**语音按这一句的文字线索选情绪。**
+
+### Added
+
+- `tts-style.ts` 新增 `detectTextStyle(text)`：哈哈/开心/好呀/想你了等 → lively；
+  唉/累/难过/委屈/算了等 → soft；困/晚安/睡了等 → tired。
+- `chooseStyle` 在情绪状态中性时使用这一句的文字线索（明确 emotionVector 仍优先；
+  深夜仍优先 tired）；`planSpeechStyle` 把 text 传进去，最终影响 CosyVoice instruct
+  与 say/Kokoro 的语速/音高。
+- 修复：以前 `tts-style` 的 text 只用来加语气词，选风格只看 state.emotion；现在
+  「明明在笑却平铺直叙」的情况会少很多。
+
+### Verified
+
+- `npm test`：**127 文件 / 1482 用例**全部通过；`tsc`/lint 0；`eval:offline` 5/5；
+- 产品实测「哈哈，今天也太开心了吧」（状态情绪中性）自动选 lively，走
+  CosyVoice instruct，2.26s；
+- 试听样本不变：`data/voice-samples/xiaoya-emotion-{neutral,happy,soft}-20261022.wav`。
+
 ## v0.9.29 — 2026-10-22
 
 **语音情绪化：CosyVoice 接入 instruct2。**
