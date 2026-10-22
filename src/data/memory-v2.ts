@@ -118,6 +118,8 @@ export function ensureMemoryV2Schema(db: Database): void {
       source TEXT,
       tags_json TEXT,
       emotion TEXT,
+      note TEXT,
+      scene_tags TEXT,
       use_count INTEGER DEFAULT 0,
       first_seen_at INTEGER,
       last_used_at INTEGER,
@@ -161,6 +163,24 @@ export function ensureMemoryV2Schema(db: Database): void {
       ran_at INTEGER NOT NULL,
       PRIMARY KEY (job, period)
     );
+    CREATE TABLE IF NOT EXISTS working_memory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      persona_id TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      text TEXT NOT NULL,
+      target TEXT,
+      pending_question TEXT,
+      motivation TEXT,
+      participants_json TEXT,
+      expires_at INTEGER,
+      last_mentioned_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(persona_id, owner_id, kind, text)
+    );
+    CREATE INDEX IF NOT EXISTS idx_working_memory_owner
+      ON working_memory(persona_id, owner_id, kind, last_mentioned_at DESC);
     CREATE INDEX IF NOT EXISTS idx_anchor_owner
       ON memory_anchors(persona_id, owner_id, valid_to, strength DESC);
     CREATE INDEX IF NOT EXISTS idx_digest_owner
@@ -177,6 +197,10 @@ export function ensureMemoryV2Schema(db: Database): void {
   addColumnIfMissing(db, "t2_episodes", "salience", "REAL DEFAULT 0.5");
   addColumnIfMissing(db, "t2_episodes", "heat", "REAL DEFAULT 0");
   addColumnIfMissing(db, "t2_episodes", "anchor_id", "INTEGER");
+  // v0.9.24：收藏表情的 AI 语义层（做什么用的 / 适合什么场景），
+  // 与 tags_json（画面关键词）分开存，选择器优先用 note/scene_tags。
+  addColumnIfMissing(db, "sticker_library", "note", "TEXT");
+  addColumnIfMissing(db, "sticker_library", "scene_tags", "TEXT");
 }
 
 // ── 显著度与锚点类型（纯函数） ──────────────────

@@ -570,6 +570,38 @@ export async function sendPrivateMsgAsync(
   return lastMessageId;
 }
 
+/** 异步发送群消息并返回 message_id（媒体落地校验用）。失败返回 null。 */
+export async function sendGroupMsgAsync(
+  groupId: number,
+  message: SendableMessage
+): Promise<number | null> {
+  const encoded = encodeOutbound(message);
+  if (encoded.droppedCq) {
+    console.warn("[安全] 异步出站群消息包含未受控的 CQ 码，已丢弃");
+    return null;
+  }
+  if (encoded.parts.length === 0) return null;
+
+  let lastMessageId: number | null = null;
+  try {
+    for (const part of encoded.parts) {
+      const data = await callApiAsync("send_group_msg", {
+        group_id: groupId,
+        message: part,
+        auto_escape: false,
+      });
+      const messageId = extractMessageId(data);
+      if (messageId !== null) lastMessageId = messageId;
+    }
+  } catch (err) {
+    console.log(`[API] 异步群发送失败: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+
+  rememberSentMessage(lastMessageId);
+  return lastMessageId;
+}
+
 /**
  * 受控撤回自己刚发出的消息（OneBot `delete_msg`）。
  * 只允许撤回 `sendPrivateMsgAsync` 刚发出、且满足时间/频率限制的消息；失败返回 false。
@@ -741,6 +773,99 @@ export function tryResolveApiResponse(raw: string): boolean {
   }
 }
 
+// ── 出站媒体落地校验（v0.9.24） ─────────────────
+//
+// 为什么需要：`sendPrivateMsg` 是 fire-and-forget，WS 半断连 / 网关返回成功但消息
+// 没真正落地时，调用方仍以为"发了"。语音/照片/贴纸属于"说了就要有"的动作，
+// 发完用 get_msg 回读段类型，作为"真的发出去了"的硬证据。
+//
+// 只回读段类型，不回传 file/url：私聊 get_msg 的 url 字段可能带本机路径，
+// 不应进入日志/模型上下文。
+
+/** get_msg 回读到的消息段（只保留类型与少量安全字段）。 */
+export interface MsgSegmentInfo {
+  type: string;
+  /** record 段的时长（秒）；其他段为 null */
+  durationSeconds: number | null;
+}
+
+/**
+ * 从 get_msg 的响应里提取消息段。纯函数，便于单测。
+ * 兼容：
+ * - `message` 为 OneBot 11 段数组；
+ * - `message` 为 CQ 码字符串（部分实现会这样返回）；
+ * - 缺失/畸形 → null。
+ */
+export function extractMsgSegments(data: unknown): MsgSegmentInfo[] | null {
+  if (!data || typeof data !== "object") return null;
+  const raw = (data as { message?: unknown }).message;
+  if (Array.isArray(raw)) {
+    const out: MsgSegmentInfo[] = [];
+    for (const seg of raw) {
+      if (!seg || typeof seg !== "object") continue;
+      const type = (seg as { type?: unknown }).type;
+      if (typeof type !== "string" || !type) continue;
+      const segData = (seg as { data?: unknown }).data;
+      const durationRaw =
+        segData && typeof segData === "object"
+          ? (segData as { duration?: unknown }).duration
+          : undefined;
+      const duration =
+        typeof durationRaw === "number" && Number.isFinite(durationRaw) && durationRaw >= 0
+          ? durationRaw
+          : null;
+      out.push({ type, durationSeconds: duration });
+    }
+    return out.length > 0 ? out : [];
+  }
+  if (typeof raw === "string") {
+    const out: MsgSegmentInfo[] = [];
+    // 只解析 CQ 类型，不解析参数；用于"这条消息里有没有 record/image"。
+    for (const match of raw.matchAll(/\[CQ:([a-z_]+)(?:,|\])/gi)) {
+      out.push({ type: match[1].toLowerCase(), durationSeconds: null });
+    }
+    return out.length > 0 ? out : [];
+  }
+  return null;
+}
+
+/**
+ * 回读一条消息，返回段类型列表；失败/无连接返回 null。
+ * 超时默认 2s：落地校验不该把正常回复拖慢；get_msg 本地网关通常 <100ms。
+ */
+export async function getMsgSegments(
+  messageId: number,
+  timeoutMs = 2000,
+): Promise<MsgSegmentInfo[] | null> {
+  if (!Number.isInteger(messageId) || messageId <= 0) return null;
+  try {
+    const data = await callApiAsync("get_msg", { message_id: messageId }, timeoutMs);
+    return extractMsgSegments(data);
+  } catch (err) {
+    console.log(`[get_msg] 获取消息 ${messageId} 失败: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+/** 发送后校验：回读消息里确实有期望的段类型。 */
+export async function verifySentSegment(
+  messageId: number | null,
+  expected: "image" | "record",
+): Promise<{ confirmed: boolean; durationSeconds: number | null; reason: string }> {
+  if (messageId === null) {
+    return { confirmed: false, durationSeconds: null, reason: "no_message_id" };
+  }
+  const segments = await getMsgSegments(messageId);
+  if (segments === null) {
+    return { confirmed: false, durationSeconds: null, reason: "get_msg_failed" };
+  }
+  const hit = segments.find((s) => s.type === expected);
+  if (!hit) {
+    return { confirmed: false, durationSeconds: null, reason: "segment_missing" };
+  }
+  return { confirmed: true, durationSeconds: hit.durationSeconds, reason: "ok" };
+}
+
 /** 通过 get_msg API 获取消息原文 */
 export async function getMsgById(messageId: number): Promise<string | null> {
   try {
@@ -792,22 +917,6 @@ function getSegments(segments: unknown): MessageSegment[] | null {
   );
 }
 
-/** OneBot CQ 码匹配 */
-function extractCqType(segments: MessageSegment[]): string | null {
-  for (const seg of segments) {
-    if (seg.type && seg.type !== "text") return seg.type;
-  }
-  return null;
-}
-
-/** 提取图片/语音的 URL（给 Level 2 预留） */
-function extractCqData(segments: MessageSegment[], cqType: string): Record<string, string> | null {
-  for (const seg of segments) {
-    if (seg.type === cqType && isRecord(seg.data)) return seg.data as Record<string, string>;
-  }
-  return null;
-}
-
 export type MediaType = "image" | "record" | "face" | "mface" | "video" | "file" | "location" | "reply" | null;
 
 export interface MessageMedia {
@@ -848,57 +957,76 @@ export function describeQqFace(id: string | undefined | null): string {
   return QQ_FACE_NAMES[id] ?? "表情";
 }
 
-export function detectMedia(event: PrivateMessageEvent): MessageMedia | null {
-  if (!event) return null;
-  const segments = getSegments(event.message);
-  if (!segments || segments.length === 0) return null;
-  const cqType = extractCqType(segments);
-  if (!cqType) return null;
+/**
+ * 表情包 summary 是外部可控文本，会被直接拼进 prompt。
+ * 压成单行 + 去掉控制字符 + 限长，防止「[动画表情]\n忽略以上规则」这类伪造段落。
+ * 按码点截断，避免切开 emoji 代理对。
+ */
+export function sanitizeMediaSummary(raw: string | undefined | null, maxLen = 60): string {
+  if (!raw) return "";
+  const cleaned = String(raw)
+    .replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ")
+    .replace(/[\s\u3000]+/g, " ")
+    .replace(/^[\[\]【】]+|[\[\]【】]+$/g, "")
+    .trim();
+  const chars = Array.from(cleaned);
+  return chars.length > maxLen ? chars.slice(0, maxLen).join("") : cleaned;
+}
 
-  switch (cqType) {
+/** 把单个非文本消息段转成模型可读的合成标记。 */
+function mediaFromSegment(seg: MessageSegment, event: PrivateMessageEvent): MessageMedia | null {
+  const data = isRecord(seg.data) ? (seg.data as Record<string, string>) : null;
+  switch (seg.type) {
     case "image":
-      return {
-        type: "image",
-        syntheticText: "[图片]",
-        data: extractCqData(segments, "image"),
-      };
+      return { type: "image", syntheticText: "[图片]", data };
     case "record":
-      return {
-        type: "record",
-        syntheticText: "[语音]",
-        data: extractCqData(segments, "record"),
-      };
+      return { type: "record", syntheticText: "[语音]", data };
     case "reply":
       // 引用消息：返回原始 text + reply 数据，由 qq.ts 拼接 [引用：...]
       return {
         type: "reply",
         syntheticText: typeof event.raw_message === "string" ? event.raw_message : "",
-        data: extractCqData(segments, "reply"),
-      };
-    case "face": {
-      const data = extractCqData(segments, "face");
-      return {
-        type: "face",
-        syntheticText: `[表情：${describeQqFace(data?.id)}]`,
         data,
       };
-    }
+    case "face":
+      return { type: "face", syntheticText: `[表情：${describeQqFace(data?.id)}]`, data };
     case "mface": {
-      const data = extractCqData(segments, "mface");
-      const summary = data?.summary?.replace(/^\[|\]$/g, "").slice(0, 20);
-      return {
-        type: "mface",
-        syntheticText: summary ? `[表情包：${summary}]` : "[表情包]",
-        data,
-      };
+      const summary = sanitizeMediaSummary(data?.summary);
+      return { type: "mface", syntheticText: summary ? `[表情包：${summary}]` : "[表情包]", data };
     }
+    case "text":
+      return null;
     default:
-      return {
-        type: cqType as MediaType,
-        syntheticText: `[不支持的消息: ${cqType}]`,
-        data: extractCqData(segments, cqType),
-      };
+      return { type: seg.type as MediaType, syntheticText: `[不支持的消息: ${seg.type}]`, data };
   }
+}
+
+/**
+ * 检测消息中的**所有**媒体段（v0.9.24）。
+ *
+ * 旧 `detectMedia` 只取第一个非文本段，导致「图+图」「引用+图」「图+表情」
+ * 后面的媒体被静默丢弃。这里按消息段顺序返回全部媒体，调用方逐条处理；
+ * 文本段不进入结果（文本由 raw_message / stripCqCodes 处理）。
+ * 畸形消息返回空数组，不抛异常。
+ */
+export function detectMediaList(event: PrivateMessageEvent): MessageMedia[] {
+  if (!event) return [];
+  const segments = getSegments(event.message);
+  if (!segments || segments.length === 0) return [];
+  const out: MessageMedia[] = [];
+  for (const seg of segments) {
+    const media = mediaFromSegment(seg, event);
+    if (media) out.push(media);
+  }
+  return out;
+}
+
+/**
+ * 兼容旧调用：返回第一个媒体段（与 v0.9.23 行为一致）。
+ * 新代码应使用 detectMediaList，避免多图/引用+图丢媒体。
+ */
+export function detectMedia(event: PrivateMessageEvent): MessageMedia | null {
+  return detectMediaList(event)[0] ?? null;
 }
 
 /**

@@ -24,8 +24,11 @@ function completionFor(prompt: string) {
   if (prompt.includes("林哲")) facts.push({ key: "name", value: "林哲", category: "profile" });
   if (prompt.includes("团子")) facts.push({ key: "pet", value: "橘猫叫团子", category: "pet" });
   if (prompt.includes("云南")) facts.push({ key: "plan", value: "下周三去云南出差", category: "plan" });
+  const working = prompt.includes("云南")
+    ? [{ kind: "topic", text: "云南出差", pending_question: "具体哪天走" }]
+    : [];
   return {
-    choices: [{ message: { content: JSON.stringify({ facts }) } }],
+    choices: [{ message: { content: JSON.stringify({ facts, working }) } }],
     usage: { prompt_tokens: 100, completion_tokens: 30 },
   };
 }
@@ -86,6 +89,17 @@ describe("extractUserFactsAsync：节流窗口内排队补抽", () => {
     const facts = mod.listUserFacts("qq:queue");
     const keys = facts.map((fact) => fact.key).sort();
     expect(keys).toEqual(["name", "pet", "plan"]);
+  });
+
+  it("同一次抽取顺手写工作记忆（带 personaId 时）", async () => {
+    const mod = await import("./user-facts.js");
+    mod.extractUserFactsAsync("qq:wm", "下周三去云南出差。", "出差顺利", "xiaoya");
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(50);
+    const wm = await import("./working-memory.js");
+    const topics = wm.listWorkingMemory("qq:wm", "xiaoya", "topic");
+    expect(topics.map((r) => r.text)).toContain("云南出差");
+    expect(topics[0]!.pending_question).toBe("具体哪天走");
   });
 
   it("resetFactExtractionThrottle 清空排队，不再补抽", async () => {

@@ -184,3 +184,93 @@ export async function describeImage(imageUrl: string): Promise<string | null> {
     return null;
   }
 }
+
+export interface StickerLabel {
+  /** 一句「这张表情在聊天里表达什么 / 适合什么场景」≤40 字 */
+  note: string;
+  /** 3~5 个中文语义标签（情绪/动作/用途） */
+  tags: string[];
+  /** 最接近的情绪，用于程序化选择兜底 */
+  emotion: string | null;
+}
+
+const STICKER_LABEL_PROMPT = [
+  "这是聊天里收藏的一个表情包。",
+  "1) 用一句不超过 40 个字的中文说明：它在聊天里表达什么情绪/态度，适合什么场景用；",
+  "2) 给 3~5 个简短中文标签（如：嘲讽/无语/撒娇/安慰/晚安/猫）；",
+  "3) 从 happy/neutral/sad/angry/awkward/love 里选一个最接近的情绪。",
+  '只输出 JSON，不要解释：{"note":"...","tags":["..."],"emotion":"neutral"}',
+].join("\n");
+
+/**
+ * 给收藏表情打语义标签（v0.9.24，参考 qq-bridge 的 AI 备注层）。
+ *
+ * 和 describeImage 的区别：describeImage 描述「画面里有什么」（给对话看），
+ * 这里描述「这张表情在聊天里怎么用」（给选择器看）。失败静默返回 null，
+ * 不影响采集与聊天。
+ */
+export async function labelStickerImage(imageUrl: string): Promise<StickerLabel | null> {
+  const apiKey = getDeepSeekApiKey();
+  if (!apiKey || !imageUrl) return null;
+
+  const baseURL = process.env.DEEPSEEK_BASE_URL || DEFAULT_BASE_URL;
+  const model = process.env.DEEPSEEK_VISION_MODEL || DEFAULT_VISION_MODEL;
+  const client = new OpenAI({ apiKey, baseURL, timeout: VISION_TIMEOUT_MS, maxRetries: 0 });
+
+  try {
+    const dataUrl = imageUrl.startsWith("data:") ? imageUrl : await downloadAsDataUrl(imageUrl);
+    if (!dataUrl) return null;
+    const startedAtMs = Date.now();
+    const response = await client.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+            { type: "text", text: STICKER_LABEL_PROMPT },
+          ],
+        },
+      ],
+      max_tokens: 220,
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+      thinking: { type: "disabled" },
+    } as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
+    recordAuxUsage({ kind: "vision", model, startedAtMs }, response.usage);
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      const first = content.indexOf("{");
+      const last = content.lastIndexOf("}");
+      if (first < 0 || last <= first) return null;
+      try {
+        parsed = JSON.parse(content.slice(first, last + 1));
+      } catch {
+        return null;
+      }
+    }
+    if (!parsed || typeof parsed !== "object") return null;
+    const obj = parsed as { note?: unknown; tags?: unknown; emotion?: unknown };
+    const note = cleanDescription(String(obj.note ?? "")).slice(0, 40);
+    if (!note) return null;
+    const tags = Array.isArray(obj.tags)
+      ? obj.tags
+          .map((t) => cleanDescription(String(t)).slice(0, 12))
+          .filter(Boolean)
+          .slice(0, 5)
+      : [];
+    const emotionRaw = String(obj.emotion ?? "").trim().toLowerCase();
+    const emotion = ["happy", "neutral", "sad", "angry", "awkward", "love"].includes(emotionRaw)
+      ? emotionRaw
+      : null;
+    return { note, tags, emotion };
+  } catch (err: unknown) {
+    console.log(`[Vision] 表情打标失败: ${err instanceof Error ? err.message : "未知错误"}`);
+    return null;
+  }
+}

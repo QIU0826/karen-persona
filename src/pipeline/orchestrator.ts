@@ -158,6 +158,7 @@ import {
   markFactsChallenged,
 } from "../data/user-facts.js";
 import { getT1ArcContext } from "../data/t1-injection.js";
+import { getWorkingMemoryInjection, listWorkingMemory } from "../data/working-memory.js";
 import { previewText } from "../obs/safe-text.js";
 import { stripMemoryDeflection } from "../persona/reply-guard.js";
 import {
@@ -1080,6 +1081,22 @@ function buildMemoryInjection(state: ConversationState): string {
 }
 
 /**
+ * v0.9.24：工作记忆注入（参考 qq-bridge 的三槽位）。
+ * 只给「此刻还挂着的事」：进行中的话题 / 想说未说 / 对他的印象；
+ * 独立预算 420 字，不抢锚点/日记忆；DB 异常静默降级。
+ */
+function buildWorkingMemoryInjection(state: ConversationState): string {
+  if (process.env.KAREN_MEMORY_V2 === "off") return "";
+  try {
+    const text = getWorkingMemoryInjection(state.owner, state.storagePersona);
+    if (text) console.log(`  [工作记忆] 注入 ${Array.from(text).length} 字符`);
+    return text;
+  } catch {
+    return "";
+  }
+}
+
+/**
  * v0.8.18：上周汇总注入。
  *
  * 真实冒烟发现的缺口：`weekly_rollups` 从 v0.5 就在写，但**没有任何地方读它**，
@@ -1802,6 +1819,7 @@ export async function processMessage(
     crisisNote +
     t1ArcContext +
     factsContext +
+    buildWorkingMemoryInjection(state) +
     buildReflectionNote(state) +
     buildRelationshipDimsInjection(state) +
     buildFactConflictInjection(state) +
@@ -1992,7 +2010,7 @@ export async function processMessage(
   logs.push(...updateRelationshipAfterTurn(state, userInput, rawReply, complexity));
   persistRuntimeState(state);
   // 后台抽取「确定记得」的用户事实（fire-and-forget，不阻塞回复）
-  extractUserFactsAsync(state.owner, userInput, rawReply);
+  extractUserFactsAsync(state.owner, userInput, rawReply, state.storagePersona);
   return {
     reply,
     logs,
@@ -2304,6 +2322,7 @@ export async function* processMessageStream(
     (crisis ? crisisSafetyNote() : "") +
     t1ArcContext +
     factsContext +
+    buildWorkingMemoryInjection(state) +
     buildReflectionNote(state) +
     buildRelationshipDimsInjection(state) +
     buildFactConflictInjection(state) +
@@ -2541,7 +2560,7 @@ export async function* processMessageStream(
       }
 
       triggerMonologue(state, userInput, persisted);
-      extractUserFactsAsync(state.owner, userInput, persisted);
+      extractUserFactsAsync(state.owner, userInput, persisted, state.storagePersona);
       state.consecutiveSilences = 0;
       for (const line of updateRelationshipAfterTurn(state, userInput, persisted, complexity)) {
         console.log(line);
@@ -2843,6 +2862,34 @@ export async function processProactive(
     // 计划异常不影响主动消息
   }
 
+  // v0.9.24：工作记忆里的「想说未说 / 没聊完」也可以成为主动由头，
+  // 让主动消息有具体来由，而不是纯随机生活流。
+  try {
+    const thoughts = listWorkingMemory(state.owner, state.storagePersona, "thought");
+    if (thoughts[0]) {
+      candidates.push({
+        source: "未说出口的话",
+        description: `你之前有句话还没说出口：${thoughts[0].text}`,
+        intensity: 0.45,
+        priority: 6,
+      });
+      logs.push(`[工作记忆] 主动由头：未说出口的话`);
+    }
+    const topics = listWorkingMemory(state.owner, state.storagePersona, "topic");
+    const withQuestion = topics.find((t) => t.pending_question);
+    if (withQuestion) {
+      candidates.push({
+        source: "没聊完的话题",
+        description: `上次还有件事没聊完：${withQuestion.text}${withQuestion.pending_question ? `（想问：${withQuestion.pending_question}）` : ""}`,
+        intensity: 0.5,
+        priority: 7,
+      });
+      logs.push(`[工作记忆] 主动由头：没聊完的话题`);
+    }
+  } catch {
+    // 工作记忆异常不影响主动消息
+  }
+
   if (deferredCandidate) candidates.push(deferredCandidate);
 
   // ── 2. 四条链路决策（v0.4.0：补话 / 沉默保温 / 生活流 / 冷场开话题）───
@@ -3023,7 +3070,12 @@ export async function processProactive(
   // T1 快照 → 最近状态弧（主动消息也从最近的关系走势出发）
   const t1ArcContext = getT1ArcContext(state.storagePersona);
   if (t1ArcContext) logs.push("[T1] 注入最近状态弧");
-  const fullSystem = systemPrompt + proactiveInject + t1ArcContext + avoidRepeatNote;
+  const fullSystem =
+    systemPrompt +
+    proactiveInject +
+    buildWorkingMemoryInjection(state) +
+    t1ArcContext +
+    avoidRepeatNote;
   const messages = buildChatMessages(session, fullSystem);
 
   // LLM 调用

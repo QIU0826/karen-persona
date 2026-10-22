@@ -3,7 +3,7 @@
 > 目的：一眼看清**哪些是真做了、做到什么程度**。每一行都必须能在代码里找到对应，
 > 数字必须能复现（跑法写在「怎么复现」列）。不确定的地方写清楚弱项，不写成优点。
 >
-> 最后更新：2026-10-22（v0.9.23）。配套文档：[README](../README.md)（对外）、
+> 最后更新：2026-10-22（v0.9.24）。配套文档：[README](../README.md)（对外）、
 > [CLAUDE.md](../CLAUDE.md)（开发总控）、[PRODUCT_AUDIT.md](PRODUCT_AUDIT.md)（审计与路线图）。
 
 图例：✅ 可用 ｜ 🚧 有明确限制 ｜ ⛔ 受阻（代码就绪但依赖未到位）
@@ -23,6 +23,7 @@
 | 事实层 + 状态机 | `src/data/user-facts.ts` | ✅ | pending/confirmed/**disputed**；冲突时她顺口确认一句（2 天内只问一次）；`/fact` 可确认/否掉 | 用户不自述时事实层为空 → 靠下一行补 |
 | 认识初期主动提问 | `src/persona/get-to-know.ts` | ✅ | 亲密度 <5 时问工作/城市/宠物/名字/计划；间隔 ≥4 轮、问过不重复 | 只问 5 类主题，用户不答时不会追问 |
 | 记忆注入预算 | `src/pipeline/memory-context.ts` | ✅ | 锚点占 60% 预算、日记忆装不下就整块跳过（`budgetChars=380`） | 预算偏保守，长对话里可能挤掉日记忆 |
+| **工作记忆（v0.9.24）** | `src/data/working-memory.ts`、`src/data/user-facts.ts` | ✅ | 三槽位：进行中话题 / 想说未说 / 对对方印象；TTL（24h/2h/30d）、每类 10 条、注入 420 字；随事实抽取一次写入；三管线注入；主动消息可用 pendingThought/没聊完话题当由头；10 条单测 | 刚接入，真实长跑样本待补；抽取质量依赖模型返回 `working` 字段 |
 | 记忆金标（40 条） | `src/eval/memory-eval.ts`、`src/eval/memory-gold.json` | ✅ | 离线：facts **100%**、recall@1 47.5% / @3 80% / **@8 97.5%**、合并 **100%**、anti-forget PASS | 离线强制 ngram 路径，非完整管线 |
 | 真实模型记忆表现 | 同上（`--live`） | ✅ | 40 条：加"说出具体实体"规则前 85–92.5%，之后 **95–100%**（每版三次） | **单次波动可达 7+ 个点**，只报区间 |
 
@@ -67,6 +68,9 @@
 | 生成图治理 | `src/media/generated-store.ts` | ✅ | 按日期落盘、30 天自动清理、可 purge、可统计占用 | 依赖上一行启用才有内容 |
 | 照片分享 | `src/impulse/unsplash-trigger.ts` | ✅ | 时间关系（今天/昨天/以前）+ 场景匹配（晚霞/雨/猫…）+ 亲密度门槛 | 无 Unsplash Key 时 24 张本地图 |
 | 图片识别 | `src/ai/vision.ts` | ✅ | DeepSeek Flash 多模态，`detail=high`，截图逐字转述 ≤200 字 | 中文小字/模糊截图仍可能错 |
+| **入站媒体数组化（v0.9.24）** | `src/bridge/onebot.ts` | ✅ | `detectMediaList` 按消息段返回全部媒体：多图/引用+图不再丢；单条最多识别 5 张；mface summary 单行化限长，防伪造 prompt 段落；6 条单测 | 群聊仍走旧的单媒体路径（待接）；大图/像素上限未做 |
+| **发送落地校验（v0.9.24）** | `src/bridge/onebot.ts`、`src/bridge/qq.ts` | ✅ | 语音/照片/贴纸发完用 `get_msg` 回读 record/image 段，日志带 `verified`；只回段类型不回 file/url；超时 2s 不拖慢回复 | 网关不支持 get_msg 时只告警；目前不改用户可见文案 |
+| **收藏表情语义备注（v0.9.24）** | `src/data/sticker-library.ts`、`src/ai/vision.ts` | 🚧 | `note/scene_tags` 迁移；采集后后台 vision 打标；选择按 上下文匹配 ×25 + 情绪 ×10 - 使用次数 打分；保留概率/冷却/最近不复用；11 条单测 | **只做半套**：模型仍不知道她发了哪张表情（没有工具循环）；打标默认随采集开启，可 `KAREN_STICKER_LABEL=off` |
 
 ---
 
@@ -76,7 +80,7 @@
 |---|---|---|
 | TTS → SILK → QQ 语音条 | ✅ | 仅 macOS；噪声/语速已有语气润色（v0.4.1） |
 | 音色像真人 | 🚧 | **用户明确说"太 AI"**，已挂起。下一步是本地零样本克隆（IndexTTS），需要 10–20 秒参考音 |
-| 语音 ASR | ⛔ | 用户发来的语音只当 `[语音]` 占位 |
+| 语音 ASR | ✅ | v0.9.0 起 faster-whisper 本机识别（见第 2 节）；服务未启时回退 `[语音]` 占位 |
 
 ---
 
@@ -84,7 +88,7 @@
 
 | 项 | 状态 | 实测 |
 |---|---|---|
-| 单元/集成测试 | ✅ | **110 文件 / 1316 用例**（`npm test`）；验证方法论见 [VERIFICATION_PLAYBOOK.md](VERIFICATION_PLAYBOOK.md)；覆盖核对见 [COVERAGE_AUDIT.md](COVERAGE_AUDIT.md)；文档数字核对见 `doc-facts.test.ts` |
+| 单元/集成测试 | ✅ | **124 文件 / 1459 用例**（`npm test`）；验证方法论见 [VERIFICATION_PLAYBOOK.md](VERIFICATION_PLAYBOOK.md)；覆盖核对见 [COVERAGE_AUDIT.md](COVERAGE_AUDIT.md)；文档数字核对见 `doc-facts.test.ts` |
 | 类型检查 + lint | ✅ | `tsc --noEmit` 0 错误；`npm run lint`（未使用代码）0 违规 |
 | 覆盖率 | 🚧 | 行 59.21%（`npm run test:coverage`，CI 阈值守护） |
 | 离线评测守门 | ✅ | `npm run eval:offline`：facts≥95% / recall@8≥90% / 合并≥95% / anti-forget PASS / 锚点≥30 条；5 项全达标；CI 已接入 |

@@ -53,10 +53,13 @@ import {
   isPrivateMessage,
   isGroupMessage,
   detectMedia,
+  detectMediaList,
   getReplyContext,
   sendPrivateMsg,
   sendGroupMsg,
   sendPrivateMsgAsync,
+  sendGroupMsgAsync,
+  verifySentSegment,
   recallMessage,
   tryResolveApiResponse,
   getMsgById,
@@ -69,7 +72,7 @@ import {
   type GroupMessageEvent,
   type CqCode,
 } from "./onebot.js";
-import { describeImage } from "../ai/vision.js";
+import { describeImage, labelStickerImage } from "../ai/vision.js";
 import { handleControlCommand } from "../commands/control.js";
 import { exportUserData } from "../data/user-export.js";
 import { buildFirstContactDisclosure, shouldSendDisclosure } from "../persona/disclosure.js";
@@ -98,6 +101,7 @@ import { isAsrEnabled, transcribeVoice } from "../ai/asr.js";
 import {
   collectSticker,
   downloadStickerBytes,
+  labelSticker,
   markStickerUsed,
   pickCollectedSticker,
 } from "../data/sticker-library.js";
@@ -994,6 +998,75 @@ interface OutboundPhoto {
 }
 
 /**
+ * 发送媒体并回读校验（v0.9.24）：语音/照片/贴纸发完用 get_msg 确认段类型。
+ * 只记录类型/结果，不记录 CQ 内容或本机路径。
+ */
+interface MediaSendResult {
+  sent: boolean;
+  verified: boolean;
+}
+
+async function sendPrivateMediaAndVerify(
+  userId: number,
+  cq: string,
+  expected: "image" | "record",
+  label: string,
+): Promise<MediaSendResult> {
+  const messageId = await sendPrivateMsgAsync(userId, asCqCode(cq));
+  if (messageId === null) {
+    log.warn("media.send_failed", { user_id: userId, kind: label });
+    return { sent: false, verified: false };
+  }
+  const check = await verifySentSegment(messageId, expected);
+  if (check.confirmed) {
+    log.info("media.verified", {
+      user_id: userId,
+      kind: label,
+      message_id: messageId,
+      duration_s: check.durationSeconds,
+    });
+  } else {
+    log.warn("media.verify_failed", {
+      user_id: userId,
+      kind: label,
+      message_id: messageId,
+      reason: check.reason,
+    });
+  }
+  return { sent: true, verified: check.confirmed };
+}
+
+async function sendGroupMediaAndVerify(
+  groupId: number,
+  cq: string,
+  expected: "image" | "record",
+  label: string,
+): Promise<MediaSendResult> {
+  const messageId = await sendGroupMsgAsync(groupId, asCqCode(cq));
+  if (messageId === null) {
+    log.warn("media.send_failed", { group_id: groupId, kind: label });
+    return { sent: false, verified: false };
+  }
+  const check = await verifySentSegment(messageId, expected);
+  if (check.confirmed) {
+    log.info("media.verified", {
+      group_id: groupId,
+      kind: label,
+      message_id: messageId,
+      duration_s: check.durationSeconds,
+    });
+  } else {
+    log.warn("media.verify_failed", {
+      group_id: groupId,
+      kind: label,
+      message_id: messageId,
+      reason: check.reason,
+    });
+  }
+  return { sent: true, verified: check.confirmed };
+}
+
+/**
  * 发送主动分享的图片：先发配文、再发图片（本地文件读 base64 / URL 下载后 base64）。
  * 失败静默降级，不影响文字回复；日志不落正文。
  */
@@ -1043,12 +1116,19 @@ async function sendPhotoToUser(
       sendPrivateMsg(userId, photo.caption!);
       await sleep(700);
     }
-    sendPrivateMsg(userId, asCqCode(`[CQ:image,file=base64://${resolved.base64}]`));
+    const sent = await sendPrivateMediaAndVerify(
+      userId,
+      `[CQ:image,file=base64://${resolved.base64}]`,
+      "image",
+      "photo",
+    );
+    if (!sent.sent) return;
     log.info("photo.sent", {
       user_id: userId,
       source: resolved.source,
       bytes: Math.round((resolved.base64.length * 3) / 4),
       target: "private",
+      verified: sent.verified,
     });
   } catch (err: unknown) {
     log.warn("photo.send_error", { user_id: userId, error: errMessage(err) });
@@ -1071,12 +1151,19 @@ async function sendPhotoToGroup(
       sendGroupMsg(groupId, photo.caption!);
       await sleep(700);
     }
-    sendGroupMsg(groupId, asCqCode(`[CQ:image,file=base64://${resolved.base64}]`));
+    const sent = await sendGroupMediaAndVerify(
+      groupId,
+      `[CQ:image,file=base64://${resolved.base64}]`,
+      "image",
+      "photo",
+    );
+    if (!sent.sent) return;
     log.info("photo.sent", {
       group_id: groupId,
       source: resolved.source,
       bytes: Math.round((resolved.base64.length * 3) / 4),
       target: "group",
+      verified: sent.verified,
     });
   } catch (err: unknown) {
     log.warn("photo.send_error", { group_id: groupId, error: errMessage(err) });
@@ -1163,6 +1250,29 @@ async function describeVoiceMessage(url: string | undefined): Promise<string | n
 // ── 表情包持续收集（v0.6）─────────────────────
 
 /**
+ * 采集后给表情补一条 AI 语义备注（v0.9.24）：这张表情在聊天里表达什么、
+ * 适合什么场景。失败静默（没有备注时选择器退回情绪/画面标签）。
+ * 默认开启；`KAREN_STICKER_LABEL=off` 可关。
+ */
+function labelCollectedStickerAsync(id: number, url: string): void {
+  if (process.env.KAREN_STICKER_LABEL === "off") return;
+  void (async () => {
+    try {
+      const label = await labelStickerImage(url);
+      if (!label) return;
+      const ok = labelSticker(id, {
+        note: label.note,
+        tags: label.tags,
+        emotion: label.emotion,
+      });
+      if (ok) log.info("sticker.labeled", { id, tags: label.tags.length });
+    } catch {
+      // 打标失败不影响聊天
+    }
+  })();
+}
+
+/**
  * 入站图片/表情包 → 本地库（fire-and-forget）。
  *
  * 只存**用户主动发来的**图片，且只在本机使用；默认关闭，需要 `KAREN_STICKER_COLLECT=on`
@@ -1183,6 +1293,7 @@ function maybeCollectSticker(url: string | undefined, owner: string, description
       const result = collectSticker({ ownerId: owner, bytes, source: "inbound", tags });
       if (result.reason === "saved") {
         log.info("sticker.collected", { owner, bytes: bytes.length, id: result.id });
+        if (result.id && url) labelCollectedStickerAsync(result.id, url);
       }
     } catch {
       // 采集失败完全不影响聊天
@@ -1429,12 +1540,12 @@ function userIdForSticker(target: StickerTarget): number {
   return target.userId;
 }
 
-function maybeSendSticker(
+async function maybeSendSticker(
   target: StickerTarget,
   state: ConversationState,
   inboundSticker: boolean,
-  opts: { requested?: boolean } = {},
-): boolean {
+  opts: { requested?: boolean; contextText?: string } = {},
+): Promise<boolean> {
   if (process.env.STICKER_ENABLED === "0") return false;
 
   const now = Date.now();
@@ -1461,6 +1572,7 @@ function maybeSendSticker(
     const collected = pickCollectedSticker({
       ownerId: owner,
       emotion: emotionTag,
+      contextText: opts.contextText,
       excludeIds: opts.requested
         ? []
         : (userRecentCollectedStickers.get(userIdForSticker(target)) ?? []),
@@ -1477,19 +1589,26 @@ function maybeSendSticker(
       try {
         const base64 = fs.readFileSync(collected.file).toString("base64");
         const cqCollected = `[CQ:image,file=base64://${base64}]`;
+        const sent =
+          target.kind === "private"
+            ? await sendPrivateMediaAndVerify(target.userId, cqCollected, "image", "sticker")
+            : await sendGroupMediaAndVerify(target.groupId, cqCollected, "image", "sticker");
+        if (!sent.sent) return false;
         if (target.kind === "private") {
           userLastStickerAt.set(target.userId, now);
           userRecentCollectedStickers.set(
             target.userId,
             [...(userRecentCollectedStickers.get(target.userId) ?? []), collected.id].slice(-5),
           );
-          sendPrivateMsg(target.userId, asCqCode(cqCollected));
         } else {
           groupLastStickerAt.set(groupKey, now);
-          sendGroupMsg(target.groupId, asCqCode(cqCollected));
         }
         markStickerUsed(collected.id, now);
-        log.info("sticker.collected_sent", { id: collected.id, kind: target.kind });
+        log.info("sticker.collected_sent", {
+          id: collected.id,
+          kind: target.kind,
+          verified: sent.verified,
+        });
         return true;
       } catch {
         // 读文件失败 → 回退内置贴纸
@@ -1511,30 +1630,36 @@ function maybeSendSticker(
   const cq = toStickerCqCode(sticker);
   if (!cq) return false;
 
+  const sent =
+    target.kind === "private"
+      ? await sendPrivateMediaAndVerify(target.userId, cq, "image", "sticker")
+      : await sendGroupMediaAndVerify(target.groupId, cq, "image", "sticker");
+  if (!sent.sent) return false;
+
   if (target.kind === "private") {
     userLastStickerAt.set(target.userId, now);
     userRecentStickers.set(
       target.userId,
       [...(userRecentStickers.get(target.userId) ?? []), sticker.id].slice(-3),
     );
-    sendPrivateMsg(target.userId, asCqCode(cq));
     log.info("sticker.sent", {
       user_id: target.userId,
       sticker: sticker.id,
       reply_to_sticker: inboundSticker,
       target: "private",
+      verified: sent.verified,
     });
     return true;
   }
 
   groupLastStickerAt.set(groupKey, now);
-  sendGroupMsg(target.groupId, asCqCode(cq));
   log.info("sticker.sent", {
     group_id: target.groupId,
     user_id: target.userId,
     sticker: sticker.id,
     reply_to_sticker: inboundSticker,
     target: "group",
+    verified: sent.verified,
   });
   return true;
 }
@@ -1654,12 +1779,19 @@ async function maybeSendVoice(
     VOICE_MAX_SEND_DELAY_MS,
   );
   await sleep(recordDelay);
-  sendPrivateMsg(userId, asCqCode(`[CQ:record,file=base64://${speech.silkBase64}]`));
+  const sent = await sendPrivateMediaAndVerify(
+    userId,
+    `[CQ:record,file=base64://${speech.silkBase64}]`,
+    "record",
+    "voice",
+  );
+  if (!sent.sent) return;
   userLastVoiceAt.set(userId, Date.now());
   log.info("voice.sent", {
     user_id: userId,
     duration_ms: speech.durationMs,
     bytes: speech.byteLength,
+    verified: sent.verified,
   });
 }
 
@@ -1677,42 +1809,56 @@ async function handlePrivateBatch(
   const texts: string[] = [];
   let inboundSticker = false;
   for (const event of events) {
-    const media = detectMedia(event);
+    // v0.9.24：处理消息里的**所有**媒体段。旧逻辑只看第一个非文本段，
+    // 图+图、引用+图、图+表情时会静默丢掉后面的图。
+    const mediaList = detectMediaList(event);
+    const replyMedia = mediaList.find((m) => m.type === "reply") ?? null;
+    const visualMedia = mediaList.filter((m) => m.type !== "reply");
+    const fragments: string[] = [];
+    let imageCount = 0;
 
-    // 表情/表情包不再丢弃：转成 [表情：xxx] 合成文本，让她能做出反应
-    if (media && (media.type === "face" || media.type === "mface")) {
-      inboundSticker = true;
-      log.info("sticker.received", { user_id: userId, type: media.type });
-    }
-
-    // P2-e: 图片识别
-    let syntheticText = media?.syntheticText || null;
-    if (media?.type === "image" && media.data?.url) {
-      const desc = await describeImage(media.data.url);
-      if (desc) {
-        syntheticText = `[图片：${desc}]`;
-        log.info("vision.described", { chars: charCount(desc), source: "private" });
+    for (const media of visualMedia) {
+      // 表情/表情包不再丢弃：转成 [表情：xxx] 合成文本，让她能做出反应
+      if (media.type === "face" || media.type === "mface") {
+        inboundSticker = true;
+        log.info("sticker.received", { user_id: userId, type: media.type });
       }
-      maybeCollectSticker(media.data.url, ownerForQq(userId), desc);
-    }
 
-    // v0.23：语音识别（QQ 语音条 SILK → 本地 whisper → 文本）
-    if (media?.type === "record") {
-      const transcribed = await describeVoiceMessage(media.data?.url);
-      if (transcribed) syntheticText = transcribed;
+      let syntheticText = media.syntheticText;
+      // P2-e: 图片识别（单条消息最多识别 5 张，防止一条消息打 10 次视觉）
+      if (media.type === "image") {
+        imageCount++;
+        if (imageCount > 5) {
+          syntheticText = "[图片]（超过单条 5 张，已跳过识别）";
+        } else if (media.data?.url) {
+          const desc = await describeImage(media.data.url);
+          if (desc) {
+            syntheticText = `[图片：${desc}]`;
+            log.info("vision.described", { chars: charCount(desc), source: "private" });
+          }
+          maybeCollectSticker(media.data.url, ownerForQq(userId), desc);
+        }
+      }
+
+      // v0.23：语音识别（QQ 语音条 SILK → 本地 whisper → 文本）
+      if (media.type === "record") {
+        const transcribed = await describeVoiceMessage(media.data?.url);
+        if (transcribed) syntheticText = transcribed;
+      }
+
+      if (syntheticText) fragments.push(syntheticText);
     }
 
     // 图片/表情附带文字时保留文字（raw_message 去掉 CQ 码后的残余）
-    let rawText = syntheticText || event.raw_message || "";
-    if (syntheticText && (media?.type === "image" || media?.type === "face" || media?.type === "mface")) {
-      const residual = stripCqCodes(event.raw_message ?? "");
-      if (residual) rawText = `${syntheticText} ${residual}`;
-    }
-    if (media?.type === "reply") {
-      let quoted = getReplyContext(media.data);
+    let rawText = fragments.join(" ");
+    const residual = stripCqCodes(event.raw_message ?? "");
+    if (residual) rawText = rawText ? `${rawText} ${residual}` : residual;
+
+    if (replyMedia) {
+      let quoted = getReplyContext(replyMedia.data);
       // 回退：NapCatQQ 未附带原文时，用 message_id 调 get_msg API 回查
-      if (!quoted && media.data?.id) {
-        const msgId = parseInt(media.data.id, 10);
+      if (!quoted && replyMedia.data?.id) {
+        const msgId = parseInt(replyMedia.data.id, 10);
         if (!isNaN(msgId)) {
           log.info("quote.refetch_start");
           quoted = await getMsgById(msgId);
@@ -1886,11 +2032,11 @@ async function handlePrivateBatch(
     } else if (outcome.sentCount > 0) {
       // 用户点名要表情包/语音时，别装没听见：提高对应动作的概率
       const mediaRequest = detectMediaRequest(text);
-      const stickerSent = maybeSendSticker(
+      const stickerSent = await maybeSendSticker(
         { kind: "private", userId },
         state,
         inboundSticker,
-        { requested: mediaRequest.sticker && !mediaRequest.voice },
+        { requested: mediaRequest.sticker && !mediaRequest.voice, contextText: text },
       );
       void maybeSendVoice(userId, sharedBase.config, state, outcome, {
         requested: mediaRequest.voice,
@@ -2038,7 +2184,11 @@ async function handleGroupMessage(
       photoEnabled: state.config.group_photo_enabled === true,
     });
     if (sent > 0) {
-      maybeSendSticker({ kind: "group", groupId, userId }, state, inboundSticker);
+      void maybeSendSticker({ kind: "group", groupId, userId }, state, inboundSticker, {
+        contextText: finalText,
+      }).catch(
+        (err: unknown) => log.warn("sticker.error", { group_id: groupId, error: errMessage(err) }),
+      );
     }
   } catch (err: unknown) {
     log.error("group.failed", { group_id: groupId, user_id: userId, error: errMessage(err) });

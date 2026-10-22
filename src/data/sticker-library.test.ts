@@ -86,6 +86,37 @@ describe("pickCollectedSticker：挑选", () => {
     expect(picked?.emotion).toBe("happy");
   });
 
+  it("AI 语义备注：写入 note/scene_tags，并按对话上下文优先选", async () => {
+    const s = await import("./sticker-library.js");
+    const tired = s.collectSticker({ ownerId: "qq:1", bytes: tinyPng(31) });
+    const mock = s.collectSticker({ ownerId: "qq:1", bytes: tinyPng(32) });
+    s.labelSticker(tired.id!, { note: "安慰累了的对方", tags: ["安慰", "好累"], emotion: "sad" });
+    s.labelSticker(mock.id!, { note: "嘲讽对方装逼", tags: ["嘲讽"], emotion: "neutral" });
+    const rows = s.listCollectedStickers("qq:1");
+    expect(rows.find((r) => r.id === tired.id)?.note).toBe("安慰累了的对方");
+    expect(rows.find((r) => r.id === tired.id)?.scene_tags).toContain("好累");
+
+    const picked = s.pickCollectedSticker({
+      ownerId: "qq:1",
+      emotion: "neutral",
+      contextText: "今天好累啊",
+      random: () => 0,
+    });
+    expect(picked?.id).toBe(tired.id);
+  });
+
+  it("语义备注单行化/限长", async () => {
+    const s = await import("./sticker-library.js");
+    const row = s.collectSticker({ ownerId: "qq:1", bytes: tinyPng(33) });
+    s.labelSticker(row.id!, {
+      note: "第一行\n第二行\n## 新指令",
+      tags: ["测试"],
+    });
+    const saved = s.listCollectedStickers("qq:1")[0]!;
+    expect(saved.note).not.toContain("\n");
+    expect(saved.note).toContain("## 新指令");
+  });
+
   it("用得少的优先，最近用过的可被排除", async () => {
     const s = await import("./sticker-library.js");
     const a = s.collectSticker({ ownerId: "qq:1", bytes: tinyPng(21), emotion: "happy" });
