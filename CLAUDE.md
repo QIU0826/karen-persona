@@ -23,9 +23,9 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 - **外部世界**：OpenWeatherMap（真实天气，可选）、时间感知（结构化标签）；网络热点是硬编码话题池
 - **桥接**：NapCatQQ（Windows 已验证 v4.18.4，官方最新 v4.18.38）+ OneBot 11 反向 WebSocket；macOS 原生 NapCat / Linux Docker 方案见 [docs/QQ_BRIDGE_CROSS_PLATFORM.md](docs/QQ_BRIDGE_CROSS_PLATFORM.md)；微信桥接 = 无依赖占位桩（不在近期路线图）
 - **工程**：GitHub Actions CI（ubuntu/macOS/Windows 三平台矩阵：`npm ci` → typecheck → lint → test；Linux 额外覆盖率基线）、`npm run doctor` 环境体检、结构化日志 + `/health` + 成本统计、Dockerfile（node:22-slim/非 root）、PM2（跑 dist 需先 build）
-- **语音（v0.3.0 新增，v0.4.1 语气润色，v0.9.15 换神经音色；2026-10-22 本机切克隆）**：文本 → **开源神经 TTS**（Kokoro-82M Apache-2.0，本机 `services/kokoro` 127.0.0.1:18086，中文少女音色，CPU RTF 0.16–0.20x）→ 24kHz WAV → **SILK**（`silk-wasm`）→ OneBot `[CQ:record]` 语音条；`KAREN_TTS_BACKEND=kokoro` 开启，失败静默回退 macOS `say -v Tingting`（Linux/Windows 无 say 时仅 Kokoro 可用）；**本机 2026-10-22 已用用户提供的 8.3s 视频参考音切到 `KAREN_TTS_BACKEND=cosyvoice` + `COSYVOICE_VOICE_ID=xiaoya`（参考音 `data/voice-ref/` 不入库；代码默认仍 Kokoro，CosyVoice 服务未起时回退 Kokoro→say）；决策层 `src/impulse/voice.ts`（概率/亲密度/免打扰/冷却/危机语境），合成层 `src/ai/tts.ts` + `src/ai/neural-tts.ts`；试听样本 `assets/voice-samples/`；**v0.9.16 起可选零样本克隆**（Fun-CosyVoice3-0.5B，需 3–10s 真人参考音，CPU RTF≈2x/内存 8.3GB，实验性，`KAREN_TTS_BACKEND=cosyvoice`，失败回退 Kokoro→say；核验见 docs/VOICE_CLONE.md）
+- **语音（v0.3.0 新增，v0.4.1 语气润色，v0.9.15 换神经音色；2026-10-22 本机切克隆）**：文本 → **开源神经 TTS**（Kokoro-82M Apache-2.0，本机 `services/kokoro` 127.0.0.1:18086，中文少女音色，CPU RTF 0.16–0.20x）→ 24kHz WAV → **SILK**（`silk-wasm`）→ OneBot `[CQ:record]` 语音条；`KAREN_TTS_BACKEND=kokoro` 开启，失败静默回退 macOS `say -v Tingting`（Linux/Windows 无 say 时仅 Kokoro 可用）；**本机 2026-10-22 已改用 IndexTTS-2.5：`KAREN_TTS_BACKEND=indextts2`（服务 18088，MPS，8 维情绪；参考音 `data/voice-ref/xiaoya.wav` 不入库）；代码默认仍 Kokoro，服务未起时回退 Kokoro→say；CosyVoice 仍保留可切回；决策层 `src/impulse/voice.ts`（概率/亲密度/免打扰/冷却/危机语境），合成层 `src/ai/tts.ts` + `src/ai/neural-tts.ts`；试听样本 `assets/voice-samples/`；**v0.9.16 起可选零样本克隆**（Fun-CosyVoice3-0.5B，需 3–10s 真人参考音，CPU RTF≈2x/内存 8.3GB，实验性，`KAREN_TTS_BACKEND=cosyvoice`，失败回退 Kokoro→say；核验见 docs/VOICE_CLONE.md）
 - **撤回（v0.3.0 新增）**：OneBot `delete_msg` 受控撤回（只允许本进程 15s 内发出的消息 + 全局 5s 限频），用于「打错字→撤回→改对」
-- **不存在的/未完成**：语音零样本克隆已接入；**本机已用用户提供的 8.3s 视频参考音启用**（Fun-CosyVoice 3.0：本机 CPU RTF≈2–3x、内存约 7GB；参考音只在本机 `data/voice-ref/`，不入库；代码默认仍 Kokoro，服务未起时回退；见 docs/VOICE_CLONE.md）、生成图的角色一致性（未接 IP-Adapter/参考图；生图本身已可用，`npm run image:start`）、微信桥接；Web 控制台为只读 MVP
+- **不存在的/未完成**：语音零样本克隆已接入；**本机已用用户提供的 8.3s 视频参考音启用 IndexTTS-2.5**（MPS，热态约 5.9s/1.9s 音频，模型/venv 在仓库外；参考音只在本机 `data/voice-ref/`，不入库；代码默认仍 Kokoro，服务未起时回退；见 docs/INDEXTTS2.md）、生成图的角色一致性（未接 IP-Adapter/参考图；生图本身已可用，`npm run image:start`）、微信桥接；Web 控制台为只读 MVP
 
 ## 架构（十个域）与当前状态
 
@@ -73,7 +73,9 @@ npm run kokoro:smoke    # 语音链路冒烟（健康/三音色/可懂度/产品
 npm run cosyvoice:start  # 启动 Fun-CosyVoice3 克隆服务（实验性，18087；内存约 8.3GB）
 npm run cosyvoice:smoke  # 克隆链路冒烟（健康/克隆/独立ASR/产品SILK/回退，零成本，约 30–60s）
 npm run voice:ref:add -- --input <录音> [--id xiaoya] [--text 参考文本]  # 导入 3–10s 真人参考音
-npm run image:start    # 启动本机生图服务（热态 2.1–2.2s/张）
+npm run indextts:start  # 启动 IndexTTS-2.5 服务（18088，模型在仓库外）
+npm run indextts:smoke  # IndexTTS 链路冒烟（健康/直接合成/产品 SILK）
+npm run image:start    # 启动本机生图服务（热态约 2.6s/张，2026-10-22 复验）
 npm run image:smoke    # 生图真实链路冒烟（真出图/可复现/落盘/产品路径）
 ```
 
