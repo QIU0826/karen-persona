@@ -23,6 +23,7 @@ beforeEach(() => {
   delete process.env.KAREN_COMFY_URL;
   delete process.env.KAREN_IMAGE_BACKEND;
   delete process.env.KAREN_IMAGE_URL;
+  delete process.env.KAREN_IMAGE_GUARD;
   vi.resetModules();
 });
 
@@ -31,6 +32,7 @@ afterEach(() => {
   delete process.env.KAREN_DATA_DIR;
   delete process.env.KAREN_IMAGE_GEN;
   delete process.env.KAREN_COMFY_URL;
+  delete process.env.KAREN_IMAGE_GUARD;
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -168,6 +170,101 @@ describe("generateImage：失败一律返回 ok:false（调用方回退图库）
     const result = await generateImage({ prompt: "x", seed: 1 }, { timeoutMs: 5_000 });
     expect(result.ok).toBe(true);
     expect(result.bytes?.length).toBe(bytes.length);
+  });
+
+  it("KAREN_IMAGE_GUARD=on：质检通过才返回", async () => {
+    process.env.KAREN_IMAGE_GEN = "on";
+    process.env.KAREN_IMAGE_GUARD = "on";
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, arrayBuffer: async () => png }) as unknown as Response),
+    );
+    const auditFn = vi.fn(async () => ({
+      pass: true,
+      scene_match: true,
+      character_match: true,
+      anatomy_ok: true,
+      hands_ok: true,
+      artifacts: [],
+      issues: [],
+      reason: "ok",
+    }));
+    const result = await generateImage(
+      { prompt: "x", context: "她在咖啡馆窗边" },
+      { timeoutMs: 5_000, auditFn },
+    );
+    expect(result.ok).toBe(true);
+    expect(auditFn).toHaveBeenCalledWith(png, {
+      context: "她在咖啡馆窗边",
+      prompt: "x",
+      requireNoHands: false,
+    });
+  });
+
+  it("质检不合格返回 guard_rejected，调用方回退图库", async () => {
+    process.env.KAREN_IMAGE_GEN = "on";
+    process.env.KAREN_IMAGE_GUARD = "on";
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, arrayBuffer: async () => png }) as unknown as Response),
+    );
+    const auditFn = vi.fn(async () => ({
+      pass: false,
+      scene_match: false,
+      character_match: true,
+      anatomy_ok: true,
+      hands_ok: true,
+      artifacts: [],
+      issues: ["场景不符"],
+      reason: "场景不符",
+    }));
+    const result = await generateImage({ prompt: "x" }, { timeoutMs: 5_000, auditFn });
+    expect(result).toMatchObject({ ok: false, reason: "guard_rejected" });
+  });
+
+  it("质检不可用 fail-closed", async () => {
+    process.env.KAREN_IMAGE_GEN = "on";
+    process.env.KAREN_IMAGE_GUARD = "on";
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, arrayBuffer: async () => png }) as unknown as Response),
+    );
+    const result = await generateImage(
+      { prompt: "x" },
+      { timeoutMs: 5_000, auditFn: vi.fn(async () => null) },
+    );
+    expect(result).toMatchObject({ ok: false, reason: "guard_unavailable" });
+  });
+
+  it("qwen 后端强制质检，并要求不出现手", async () => {
+    process.env.KAREN_IMAGE_GEN = "on";
+    process.env.KAREN_IMAGE_BACKEND = "qwen-image-edit";
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d]);
+    const qwenGenerateFn = vi.fn(async () => ({ png, elapsedMs: 1 }));
+    const auditFn = vi.fn(async () => ({
+      pass: true,
+      scene_match: true,
+      character_match: true,
+      anatomy_ok: true,
+      hands_ok: true,
+      artifacts: [],
+      issues: [],
+      reason: "ok",
+    }));
+    const result = await generateImage(
+      { prompt: "x", context: "聊天上下文" },
+      { auditFn, qwenGenerateFn },
+    );
+    expect(result.ok).toBe(true);
+    expect(qwenGenerateFn).toHaveBeenCalled();
+    expect(auditFn).toHaveBeenCalledWith(png, {
+      context: "聊天上下文",
+      prompt: "x",
+      requireNoHands: true,
+    });
   });
 
   it("超大图被拒（避免把 4MB+ 塞进 QQ）", async () => {

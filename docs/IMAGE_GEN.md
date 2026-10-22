@@ -168,6 +168,8 @@ sips -s format jpeg -s formatOptions 82 /tmp/out.png --out assets/photos/xxx.jpg
 ## 9. GPU Qwen-Image-Edit 精修 + 强制质检（2026-10-22）
 
 **新增链路**：Qwen-Image-Edit-2511（GPU2，Mac 隧道 `19110 -> 18110`）→ 独立视觉模型质检 → 不合格自动简化重试。
+
+**主路径闸门**：`KAREN_IMAGE_GUARD=on` 时，`generateImage()` 对 `service`/`comfyui`/`qwen-image-edit` 三种后端都先质检；不合格/质检不可用一律返回 `ok:false`，调用方回退图库（fail-closed）。Qwen 后端强制开启，不依赖该环境变量。
 产品默认仍走本机 SDXL；这条链路用于"同一个人"的精修图，当前不切换 `KAREN_IMAGE_BACKEND`。
 
 **命令**：
@@ -203,3 +205,9 @@ npm run image:audit -- --image data/image-samples/foo.png \
 - 质检依赖 DeepSeek Flash 视觉，可能漏检细微手部问题；`simple=true` 通过"不露手"从构图层面规避，这是目前最稳的策略。
 - 20 步、896 长边的单张约 **95s**；不是聊天实时速度，后续可用 Lightning LoRA / 更低步数优化。
 - 需要手部动作时用 `simple=false`，但仍需人工/局部重绘；不能把"质检通过"当成绝对保证。
+
+### 主路径实测（2026-10-22）
+
+- `KAREN_IMAGE_GUARD=on` + 本机 SDXL：生成图被视觉模型判 `guard_rejected`，产品自动回退图库，没有把不合格图发出去；
+- Qwen 精修链路：首次金发错角色被拦截、第二次蓝发无手通过；旧手部图 + `--require-no-hands` 被拒。
+- 结论：**“每次出图都检查”已经是代码路径，不是脚本约定**；质检失败宁可退回图库。

@@ -13,6 +13,9 @@
  * - 工作流极简（SDXL-Turbo 单步），参数可通过 env 覆盖，便于换模型。
  */
 
+import { auditImage } from "../ai/image-guard.js";
+import { generateQwenImageEdit } from "../ai/qwen-image-edit.js";
+
 export const GENERATED_DIR_NAME = "generated";
 /** 生成图保留天数 */
 export const GENERATED_RETENTION_DAYS = 30;
@@ -35,10 +38,11 @@ export function comfyBaseUrl(): string {
  * 为什么默认 service：ComfyUI 要从 GitHub 克隆源码，本机实测只有 ~17KB/s，不可行；
  * 而 PyPI（2MB/s）与 diffusers 都很快，所以自己起一个极简 HTTP 服务更实际。
  */
-export function imageBackend(): "service" | "comfyui" {
-  return (process.env.KAREN_IMAGE_BACKEND ?? "service").toLowerCase() === "comfyui"
-    ? "comfyui"
-    : "service";
+export function imageBackend(): "service" | "comfyui" | "qwen-image-edit" {
+  const backend = (process.env.KAREN_IMAGE_BACKEND ?? "service").toLowerCase();
+  if (backend === "comfyui") return "comfyui";
+  if (backend === "qwen-image-edit" || backend === "qwen") return "qwen-image-edit";
+  return "service";
 }
 
 /** diffusers 生图服务地址（services/image，默认 127.0.0.1:18084） */
@@ -152,6 +156,8 @@ export const NEGATIVE_PROMPT =
 
 export interface ComfyWorkflowOptions {
   prompt: string;
+  /** 聊天上下文/期望画面；生成后质检用；缺省时用 prompt */
+  context?: string;
   negativePrompt?: string;
   seed?: number;
   width?: number;
@@ -225,19 +231,79 @@ interface HistoryEntry {
   status?: { completed?: boolean; status_str?: string };
 }
 
+export interface GenerateDeps {
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  /** 测试注入：图片质检 */
+  auditFn?: typeof auditImage;
+  /** 测试注入：Qwen-Image-Edit 生成 */
+  qwenGenerateFn?: typeof generateQwenImageEdit;
+}
+
 /**
- * 真正调用 ComfyUI 生成一张图。
- * 失败（服务没起/超时/返回异常）一律返回 ok:false，调用方回退本地图库。
+ * 统一图片质检闸门：
+ * - qwen-image-edit 后端强制检查（requireNoHands）；
+ * - 其他后端在 KAREN_IMAGE_GUARD=on 时检查；
+ * - 检查不可用或不合格一律 ok:false，调用方回退图库。
+ */
+async function guardGenerated(
+  result: GenerateResult,
+  options: ComfyWorkflowOptions,
+  deps: GenerateDeps,
+  requireNoHands: boolean,
+): Promise<GenerateResult> {
+  if (!result.ok || !result.bytes) return result;
+  const forced = imageBackend() === "qwen-image-edit";
+  if (!forced && (process.env.KAREN_IMAGE_GUARD ?? "off").toLowerCase() !== "on") return result;
+  const audit = await (deps.auditFn ?? auditImage)(result.bytes, {
+    context: options.context ?? options.prompt,
+    prompt: options.prompt,
+    requireNoHands,
+  });
+  if (!audit) return { ok: false, reason: "guard_unavailable", elapsedMs: result.elapsedMs };
+  if (!audit.pass) return { ok: false, reason: "guard_rejected", elapsedMs: result.elapsedMs };
+  return result;
+}
+
+async function generateViaQwen(
+  options: ComfyWorkflowOptions,
+  deps: GenerateDeps,
+): Promise<GenerateResult> {
+  const startedAt = Date.now();
+  const generated = await (deps.qwenGenerateFn ?? generateQwenImageEdit)(options.prompt, {
+    simple: true,
+    steps: Math.max(8, Math.min(60, options.steps && options.steps > 1 ? options.steps : 20)),
+    seed: options.seed ?? Math.floor(Math.random() * 1_000_000),
+    timeoutMs: 300_000,
+  });
+  if (!generated) return { ok: false, reason: "qwen_failed" };
+  if (generated.png.length > MAX_GENERATED_BYTES) {
+    return { ok: false, reason: "too_large", elapsedMs: Date.now() - startedAt };
+  }
+  return guardGenerated(
+    { ok: true, bytes: generated.png, elapsedMs: Date.now() - startedAt },
+    options,
+    deps,
+    true,
+  );
+}
+
+/**
+ * 真正调用生图后端生成一张图。
+ * 失败（服务没起/超时/返回异常/质检不通过）一律返回 ok:false，调用方回退本地图库。
  */
 export async function generateImage(
   options: ComfyWorkflowOptions,
-  deps: { fetchImpl?: typeof fetch; timeoutMs?: number } = {},
+  deps: GenerateDeps = {},
 ): Promise<GenerateResult> {
   if (!isImageGenEnabled()) return { ok: false, reason: "disabled" };
   const fetchImpl = deps.fetchImpl ?? fetch;
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  if (imageBackend() === "qwen-image-edit") {
+    return generateViaQwen(options, deps);
+  }
   if (imageBackend() === "service") {
-    return generateViaService(options, fetchImpl, timeoutMs);
+    return guardGenerated(await generateViaService(options, fetchImpl, timeoutMs), options, deps, false);
   }
   const startedAt = Date.now();
   const base = comfyBaseUrl();
@@ -281,7 +347,12 @@ export async function generateImage(
     const bytes = Buffer.from(await view.arrayBuffer());
     if (bytes.length === 0) return { ok: false, reason: "empty" };
     if (bytes.length > MAX_GENERATED_BYTES) return { ok: false, reason: "too_large" };
-    return { ok: true, bytes, elapsedMs: Date.now() - startedAt };
+    return guardGenerated(
+      { ok: true, bytes, elapsedMs: Date.now() - startedAt },
+      options,
+      deps,
+      false,
+    );
   } catch (err) {
     const name = err instanceof Error ? err.name : "unknown";
     return { ok: false, reason: `error_${name}` };

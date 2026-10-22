@@ -166,7 +166,13 @@ async function tryGeneratedPhoto(
       : {}),
   });
 
-  const result = await generateImage({ prompt });
+  // v0.9.32：生成图必须带聊天上下文，供 image guard 检查"是否符合这一轮的场景/情绪"
+  const contextParts = [
+    options.lastReply?.trim(),
+    ...(options.preferredTags ?? []),
+  ].filter((part): part is string => Boolean(part && part.trim()));
+  const context = contextParts.join(" / ") || prompt;
+  const result = await generateImage({ prompt, context });
   if (!result.ok || !result.bytes) {
     log.warn("photo.gen_failed", { reason: result.reason ?? "unknown" });
     return null;
