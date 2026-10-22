@@ -103,6 +103,11 @@ import { startWebServer, type WebServerHandle } from "../web/server.js";
 import { isSpeechAvailable, synthesizeSpeech } from "../ai/tts.js";
 import { decideVoice, shouldThrottleVoice, type VoiceSettings } from "../impulse/voice.js";
 import { detectMediaRequest } from "../impulse/media-request.js";
+import {
+  buildStickerContextHint,
+  rememberStickerMemory,
+  type StickerMemory,
+} from "../impulse/sticker-context.js";
 import { isAsrEnabled, transcribeVoice } from "../ai/asr.js";
 import {
   collectSticker,
@@ -138,6 +143,33 @@ const MAX_LOG_VALUE_LENGTH = 120;
 const STICKER_PROBABILITY = 0.22;
 const STICKER_REPLY_TO_STICKER_PROBABILITY = 0.55;
 const STICKER_COOLDOWN_MS = 5 * 60 * 1000;
+
+/** 进程内表情包 note 记忆：她刚发/刚收到的收藏表情，最多 5 条/owner。 */
+const stickerMemoryByOwner = new Map<string, StickerMemory[]>();
+
+function rememberStickerNote(owner: string, memory: StickerMemory): void {
+  const prev = stickerMemoryByOwner.get(owner) ?? [];
+  stickerMemoryByOwner.set(owner, rememberStickerMemory(prev, memory));
+}
+
+function stickerHintFor(owner: string, text: string): string | undefined {
+  return (
+    buildStickerContextHint({
+      userText: text,
+      memories: stickerMemoryByOwner.get(owner) ?? [],
+    }) ?? undefined
+  );
+}
+
+/** 收藏表 scene_tags 是 JSON 字符串；解析失败返回空数组。 */
+function parseSceneTags(raw: string | null | undefined): string[] {
+  try {
+    const parsed = JSON.parse(raw ?? "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean).slice(0, 8) : [];
+  } catch {
+    return [];
+  }
+}
 
 /** 单轮最多几条文字气泡（超出合并到最后一条；验证里出现过多达 6-9 条） */
 const MAX_TEXT_BUBBLES = 4;
@@ -293,6 +325,8 @@ interface DeferredPrivateContext {
   sharedBase: SharedBase;
   /** v0.9.26：本轮图片 data URL；进程内补发时保留，重启后靠文字描述兜底 */
   images?: string[];
+  /** v0.9.32：表情包 note 上下文（仅本轮内部提示） */
+  stickerHint?: string;
   /** 持久化队列中的记录 id（恢复/重试时必需） */
   pendingId?: number;
 }
@@ -305,6 +339,7 @@ interface DeferredGroupContext {
   state: ConversationState;
   sharedBase: SharedBase;
   images?: string[];
+  stickerHint?: string;
 }
 
 function scheduleDeferredPrivateReply(ctx: DeferredPrivateContext, delayMs: number): void {
@@ -358,6 +393,7 @@ async function deliverDeferredPrivateReply(ctx: DeferredPrivateContext): Promise
       userName: ctx.userName,
       options: { bypassGate: true, skipUserPersist: true },
       images: ctx.images,
+      stickerHint: ctx.stickerHint,
       logPrefix: "延迟补发",
     });
     if (outcome.deferredDelayMs !== undefined) {
@@ -481,6 +517,7 @@ async function deliverDeferredGroupReply(ctx: DeferredGroupContext): Promise<voi
       skipUserPersist: true,
       skipPhoto: !ctx.state.config.group_photo_enabled,
       images: ctx.images,
+      stickerHint: ctx.stickerHint,
     });
     for (const line of result.logs) console.log(`  ${line}`);
     if (result.deferred) {
@@ -1303,7 +1340,7 @@ async function applyImageDescriptions(
  * 适合什么场景。失败静默（没有备注时选择器退回情绪/画面标签）。
  * 默认开启；`KAREN_STICKER_LABEL=off` 可关。
  */
-function labelCollectedStickerAsync(id: number, url: string): void {
+function labelCollectedStickerAsync(id: number, url: string, owner: string): void {
   if (process.env.KAREN_STICKER_LABEL === "off") return;
   void (async () => {
     try {
@@ -1314,7 +1351,15 @@ function labelCollectedStickerAsync(id: number, url: string): void {
         tags: label.tags,
         emotion: label.emotion,
       });
-      if (ok) log.info("sticker.labeled", { id, tags: label.tags.length });
+      if (ok) {
+        rememberStickerNote(owner, {
+          note: label.note,
+          tags: label.tags,
+          direction: "received",
+          at: Date.now(),
+        });
+        log.info("sticker.labeled", { id, tags: label.tags.length });
+      }
     } catch {
       // 打标失败不影响聊天
     }
@@ -1342,7 +1387,7 @@ function maybeCollectSticker(url: string | undefined, owner: string, description
       const result = collectSticker({ ownerId: owner, bytes, source: "inbound", tags });
       if (result.reason === "saved") {
         log.info("sticker.collected", { owner, bytes: bytes.length, id: result.id });
-        if (result.id && url) labelCollectedStickerAsync(result.id, url);
+        if (result.id && url) labelCollectedStickerAsync(result.id, url, owner);
       }
     } catch {
       // 采集失败完全不影响聊天
@@ -1443,10 +1488,12 @@ async function streamPrivateReply(params: {
   options?: { bypassGate?: boolean; skipUserPersist?: boolean };
   /** v0.9.26：本轮图片 data URL（最多 2 张），附到当前 user message */
   images?: string[];
+  /** v0.9.32：表情包 note 内部提示 */
+  stickerHint?: string;
   /** 日志前缀，用于区分正常回复与延迟补发 */
   logPrefix?: string;
 }): Promise<PrivateStreamOutcome> {
-  const { state, text, userId, options, images } = params;
+  const { state, text, userId, options, images, stickerHint } = params;
   const logPrefix = params.logPrefix ?? "回复";
   const pendingSnapshot = userPending.get(userId) ?? 0;
   let sentCount = 0;
@@ -1464,7 +1511,7 @@ async function streamPrivateReply(params: {
   const pacing = buildPacing(state);
   let pacedFirstTextSent = false;
 
-  const stream = processMessageStream(state, text, { ...options, images });
+  const stream = processMessageStream(state, text, { ...options, images, stickerHint });
   for await (const frag of stream) {
     // 中断检测：用户发来新消息 → 丢弃剩余 burst
     if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
@@ -1655,6 +1702,14 @@ async function maybeSendSticker(
           groupLastStickerAt.set(groupKey, now);
         }
         markStickerUsed(collected.id, now);
+        if (collected.note) {
+          rememberStickerNote(owner, {
+            note: collected.note,
+            tags: parseSceneTags(collected.scene_tags),
+            direction: "sent",
+            at: now,
+          });
+        }
         log.info("sticker.collected_sent", {
           id: collected.id,
           kind: target.kind,
@@ -2073,19 +2128,21 @@ async function handlePrivateBatch(
   }
 
   try {
+    const stickerHint = stickerHintFor(ownerForQq(userId), text);
     const outcome = await streamPrivateReply({
       state,
       text,
       userId,
       userName,
       images: attachedImages,
+      ...(stickerHint ? { stickerHint } : {}),
     });
     void applyImageDescriptions(state, text, pendingImageDescriptions);
 
     // 消息门判定晚点回：调度定时补发（用户消息此时已落库）
     if (outcome.deferredDelayMs !== undefined) {
       scheduleDeferredPrivateReply(
-        { userId, userName, text, state, sharedBase, images: attachedImages },
+        { userId, userName, text, state, sharedBase, images: attachedImages, ...(stickerHint ? { stickerHint } : {}) },
         outcome.deferredDelayMs,
       );
     } else if (outcome.sentCount > 0) {
@@ -2228,9 +2285,11 @@ async function handleGroupMessage(
   try {
     // P0 修复：await + catch，畸形事件/LLM 失败不再产生 unhandled rejection
     // 群聊默认 skipPhoto：多人群里不发她的生活照（config.group_photo_enabled 才开）
+    const stickerHint = stickerHintFor(ownerForQq(userId), finalText);
     const result = await processMessage(state, finalText, {
       skipPhoto: !state.config.group_photo_enabled,
       images: attachedImages,
+      ...(stickerHint ? { stickerHint } : {}),
     });
     void applyImageDescriptions(state, finalText, pendingImageDescriptions);
     for (const line of result.logs) console.log(`  ${line}`);
@@ -2238,7 +2297,7 @@ async function handleGroupMessage(
     // 消息门判定晚点回
     if (result.deferred) {
       scheduleDeferredGroupReply(
-        { groupId, userId, userName, text: finalText, state, sharedBase, images: attachedImages },
+        { groupId, userId, userName, text: finalText, state, sharedBase, images: attachedImages, ...(stickerHint ? { stickerHint } : {}) },
         result.deferred.delayMs,
       );
       return;

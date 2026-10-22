@@ -2,6 +2,7 @@
 import { chat, chatStream } from "../ai/chat.js";
 import { classifyComplexity } from "../ai/router.js";
 import { addMessage, buildChatMessages, loadSession, type ConversationSession } from "../data/history.js";
+import { buildMediaContextNote, hasRecentUserImage } from "./media-context.js";
 import { decideGate, getBusyLevel, type GateAction, type GateContext } from "../impulse/message-gate.js";
 import {
   insertT1Snapshot,
@@ -377,6 +378,22 @@ export interface ProcessOptions {
   skipPhoto?: boolean;
   /** v0.9.26：当前轮用户图片（data URL），直接作为 image content part 给多模态模型 */
   images?: string[];
+  /** v0.9.32：表情包 note 上下文（仅内部提示，不写 session） */
+  stickerHint?: string;
+}
+
+/** 本轮图片/文字协调 + 图片归属 + 表情包 note 的内部提示。 */
+function buildTurnMediaContext(
+  state: ConversationState,
+  userInput: string,
+  opts: ProcessOptions,
+): string {
+  return buildMediaContextNote({
+    userInput,
+    hasImages: Boolean(opts.images?.length),
+    previousUserImage: hasRecentUserImage(state.session, userInput),
+    stickerHint: opts.stickerHint,
+  });
 }
 
 // ── 初始化 ────────────────────────────────────
@@ -1830,6 +1847,7 @@ export async function processMessage(
     buildWeeklyInjection(state) +
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
+    buildTurnMediaContext(state, userInput, opts) +
     buildTalkMoveInjection(state, userInput, crisis) +
     buildMentionPacingInjection(state) +
     buildInitiativeReplyNote(state, userInput, Boolean(crisis)) +
@@ -2333,6 +2351,7 @@ export async function* processMessageStream(
     buildWeeklyInjection(state) +
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
+    buildTurnMediaContext(state, userInput, opts) +
     buildTalkMoveInjection(state, userInput, crisis) +
     buildMentionPacingInjection(state) +
     buildInitiativeReplyNote(state, userInput, Boolean(crisis)) +

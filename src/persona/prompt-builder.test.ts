@@ -493,3 +493,22 @@ describe("重复提问规则（v0.8.10 回归驱动）", () => {
     expect(prompt).toContain("不要复述你上次的答案");
   });
 });
+
+describe("图片归属规则", () => {
+  it("prompt 明确：用户发来的图片不是她拍的", async () => {
+    const persona = await loadPersona("xiaoya");
+    const prompt = buildPrompt({
+      persona,
+      config: { location: "上海" } as unknown as AppConfig,
+      rules: persona.chainRules ?? [],
+      scripts: persona.behavioralScripts ?? [],
+      state: { exposure: 0.3, guilt: 0, emotion: 0, hour: 14, mode: "neutral", closeness: 3 },
+      impulseIntensity: 0.2,
+      corrections: [],
+      tags: [],
+      userText: "这个不是你拍的照片？",
+    });
+    expect(prompt).toContain("不是你的作品");
+    expect(prompt).toContain("不要说是你拍的");
+  });
+});
