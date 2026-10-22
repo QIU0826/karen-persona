@@ -3,6 +3,13 @@
 > 目标：把她的语音从「开源通用音色」升级为**可指定参考音的零样本克隆**（3–10s 参考音频），
 > 采用阿里 FunAudioLLM 的 **Fun-CosyVoice3-0.5B-2512**。
 > 本文只记录**可核验的事实**；厂商宣称、第三方博客、我的实测分开写，不混在一起。
+>
+> **2026-10-22 本机更新（用户提供参考音）**：用户提供视频 `ScreenRecording_10-22-2026 11-23-31_1.MP4`（22.9s，同一句说了三次），
+> 剪 `0.35–8.65s`（8.3s）作为参考音，文本按 ASR + 人耳校正为「又讨厌我了，那怎么办？我想办法让你再喜欢我。」；
+> 已写入 `data/voice-ref/xiaoya.wav` + `xiaoya.json`（**只在本机，data/ 已 gitignore，不提交**）。
+> 本机 `.env` 已切 `KAREN_TTS_BACKEND=cosyvoice` + `COSYVOICE_VOICE_ID=xiaoya`；`cosyvoice:smoke` 的
+> 健康 / 克隆 / ASR 复核 / 产品 SILK 全过。**代码默认仍是 Kokoro**（别人 clone 仓库不会自动用这段声音），
+> 且 CosyVoice 服务没起/失败时会回退 Kokoro → say。参考音来源为用户提供素材，仅本机使用。
 
 ## 1. 采用的版本（官方来源）
 
@@ -92,7 +99,7 @@
 失败/超时/内存不足 → 回退 Kokoro（v0.9.15） → 再回退 macOS say
 ```
 
-- 开关：`KAREN_TTS_BACKEND=cosyvoice`（**默认仍 kokoro**；实验性，等真人参考音 + 稳定性再考虑默认）
+- 开关：`KAREN_TTS_BACKEND=cosyvoice`（**代码默认仍 kokoro**；本机 2026-10-22 已用用户提供的 8.3s 参考音切到 cosyvoice）
 - 服务：`services/cosyvoice/server.py`（18087），`/health` + `/voices` + `/synthesize`
 - 参考音管理：`data/voice-ref/<id>.wav` + `<id>.json`（ref_text/来源/授权/时长/sha256），不入库
 - **导入工具**：`npm run voice:ref:add -- --input <录音> [--id xiaoya] [--text 逐字稿]`
@@ -116,8 +123,9 @@
 | 生产就绪度 | **C（实验性）** | 需真人参考音、需防复读守卫、内存占用高、无 MPS |
 
 **给产品的结论**：
-1. 保留 Kokoro 作为默认（快 10–20 倍、稳定、内存 1GB）；
-2. CosyVoice 作为**可选克隆后端**（`KAREN_TTS_BACKEND=cosyvoice`），用户提供 3–10s 真人参考音后启用；
+1. 保留 Kokoro 作为**代码默认**（快 10–20 倍、稳定、内存 1GB）；
+2. CosyVoice 作为**可选克隆后端**（`KAREN_TTS_BACKEND=cosyvoice`）；本机已用用户提供的 8.3s 视频参考音启用，
+   参考音只在本机 `data/voice-ref/`，没有进仓库；
 3. 在有 CUDA 的机器上它才是"产品级"（150ms 流式、RTF<1），本机只能算"可用但慢"。
 
 **对"3–10 秒参考音"的核验**：3.48s 官方参考可用；但**合成参考音 4.85s 会不稳/复读**、

@@ -23,9 +23,9 @@ QQ 里的 AI 虚拟人。定位是「通讯录里住进一个有自己生活、�
 - **外部世界**：OpenWeatherMap（真实天气，可选）、时间感知（结构化标签）；网络热点是硬编码话题池
 - **桥接**：NapCatQQ（Windows 已验证 v4.18.4，官方最新 v4.18.38）+ OneBot 11 反向 WebSocket；macOS 原生 NapCat / Linux Docker 方案见 [docs/QQ_BRIDGE_CROSS_PLATFORM.md](docs/QQ_BRIDGE_CROSS_PLATFORM.md)；微信桥接 = 无依赖占位桩（不在近期路线图）
 - **工程**：GitHub Actions CI（ubuntu/macOS/Windows 三平台矩阵：`npm ci` → typecheck → lint → test；Linux 额外覆盖率基线）、`npm run doctor` 环境体检、结构化日志 + `/health` + 成本统计、Dockerfile（node:22-slim/非 root）、PM2（跑 dist 需先 build）
-- **语音（v0.3.0 新增，v0.4.1 语气润色，v0.9.15 换神经音色）**：文本 → **开源神经 TTS**（Kokoro-82M Apache-2.0，本机 `services/kokoro` 127.0.0.1:18086，中文少女音色，CPU RTF 0.16–0.20x）→ 24kHz WAV → **SILK**（`silk-wasm`）→ OneBot `[CQ:record]` 语音条；`KAREN_TTS_BACKEND=kokoro` 开启，失败静默回退 macOS `say -v Tingting`（Linux/Windows 无 say 时仅 Kokoro 可用）；决策层 `src/impulse/voice.ts`（概率/亲密度/免打扰/冷却/危机语境），合成层 `src/ai/tts.ts` + `src/ai/neural-tts.ts`；试听样本 `assets/voice-samples/`；**v0.9.16 起可选零样本克隆**（Fun-CosyVoice3-0.5B，需 3–10s 真人参考音，CPU RTF≈2x/内存 8.3GB，实验性，`KAREN_TTS_BACKEND=cosyvoice`，失败回退 Kokoro→say；核验见 docs/VOICE_CLONE.md）
+- **语音（v0.3.0 新增，v0.4.1 语气润色，v0.9.15 换神经音色；2026-10-22 本机切克隆）**：文本 → **开源神经 TTS**（Kokoro-82M Apache-2.0，本机 `services/kokoro` 127.0.0.1:18086，中文少女音色，CPU RTF 0.16–0.20x）→ 24kHz WAV → **SILK**（`silk-wasm`）→ OneBot `[CQ:record]` 语音条；`KAREN_TTS_BACKEND=kokoro` 开启，失败静默回退 macOS `say -v Tingting`（Linux/Windows 无 say 时仅 Kokoro 可用）；**本机 2026-10-22 已用用户提供的 8.3s 视频参考音切到 `KAREN_TTS_BACKEND=cosyvoice` + `COSYVOICE_VOICE_ID=xiaoya`（参考音 `data/voice-ref/` 不入库；代码默认仍 Kokoro，CosyVoice 服务未起时回退 Kokoro→say）；决策层 `src/impulse/voice.ts`（概率/亲密度/免打扰/冷却/危机语境），合成层 `src/ai/tts.ts` + `src/ai/neural-tts.ts`；试听样本 `assets/voice-samples/`；**v0.9.16 起可选零样本克隆**（Fun-CosyVoice3-0.5B，需 3–10s 真人参考音，CPU RTF≈2x/内存 8.3GB，实验性，`KAREN_TTS_BACKEND=cosyvoice`，失败回退 Kokoro→say；核验见 docs/VOICE_CLONE.md）
 - **撤回（v0.3.0 新增）**：OneBot `delete_msg` 受控撤回（只允许本进程 15s 内发出的消息 + 全局 5s 限频），用于「打错字→撤回→改对」
-- **不存在的/未完成**：语音零样本克隆已接入但为**实验性**（Fun-CosyVoice 3.0：本机 CPU RTF≈2x、内存 8.3GB、合成参考音会复读，生产需真人 8–10s 参考音；默认仍 Kokoro；见 docs/VOICE_CLONE.md）、生成图的角色一致性（未接 IP-Adapter/参考图；生图本身已可用，`npm run image:start`）、微信桥接；Web 控制台为只读 MVP
+- **不存在的/未完成**：语音零样本克隆已接入；**本机已用用户提供的 8.3s 视频参考音启用**（Fun-CosyVoice 3.0：本机 CPU RTF≈2–3x、内存约 7GB；参考音只在本机 `data/voice-ref/`，不入库；代码默认仍 Kokoro，服务未起时回退；见 docs/VOICE_CLONE.md）、生成图的角色一致性（未接 IP-Adapter/参考图；生图本身已可用，`npm run image:start`）、微信桥接；Web 控制台为只读 MVP
 
 ## 架构（十个域）与当前状态
 
@@ -180,7 +180,7 @@ npm run image:smoke    # 生图真实链路冒烟（真出图/可复现/落盘/�
 - 贴纸 11 个内置 Twemoji（私聊+群聊）；出站 mface/收藏表情未做
 - 发图 24 张本地兜底 + 约 150 条配文（Unsplash Key 未配置）；仍有「同类场景」重复感；群聊发图需 `group_photo_enabled: true`（默认关）；夜间发图由免打扰门控
 - Web 控制台只读、仅本机；默认只展示主用户，`web_all_owners: true` 可只读切换其他 owner（会话/时间线/记忆按 owner 隔离）；单 owner JSON 导出已可用（`/api/export`），删除/暂停等写操作仍无；token 在 URL query 可见（后续可改 fragment）；多人设搜索仍受 getCurrentPersona 单例约束
-- 语音：TTS（v0.9.15 起可选开源神经音色 Kokoro，CPU RTF 0.16–0.20x、ASR CER ≤5%，默认关；**零样本克隆（Fun-CosyVoice 3.0）已接入但实验性**：本机 CPU RTF 1.9–3.5x、内存 8.3GB、无 MPS/流式，合成参考音会复读（需真人 8–10s），默认仍是 Kokoro；情感细控仅语速）+ **ASR 已可用**（本机 faster-whisper，只支持中文；`small` 模型对口音/噪声会错字；鲁棒性压测（TTS 口音/语速/合成噪声）CER 3.0–10.7%、small 够用（`npm run asr:robustness`），但**真实人声/真实环境噪声样本仍缺**；日志不打印识别正文）；Kokoro 服务不可用时回退 macOS `say`（Linux/Windows 无 say 则降级为文字）；群聊语音未接线（`voice_group_enabled` 目前只影响决策层，私聊才真正发送）；QQ 真实语音条（SILK）只在真实 QQ 上验证过一次手工链路，mock OneBot 已覆盖协议形态
+- 语音：TTS（v0.9.15 起可选开源神经音色 Kokoro，CPU RTF 0.16–0.20x、ASR CER ≤5%，默认关；**零样本克隆（Fun-CosyVoice 3.0）本机已启用**（用户提供 8.3s 视频参考音，仅本机；CPU RTF≈2–3x、内存约 7GB，无 MPS/流式，服务未起时回退 Kokoro→say；代码默认仍是 Kokoro）；情感细控仅语速）+ **ASR 已可用**（本机 faster-whisper，只支持中文；`small` 模型对口音/噪声会错字；鲁棒性压测（TTS 口音/语速/合成噪声）CER 3.0–10.7%、small 够用（`npm run asr:robustness`），但**真实人声/真实环境噪声样本仍缺**；日志不打印识别正文）；Kokoro 服务不可用时回退 macOS `say`（Linux/Windows 无 say 则降级为文字）；群聊语音未接线（`voice_group_enabled` 目前只影响决策层，私聊才真正发送）；QQ 真实语音条（SILK）只在真实 QQ 上验证过一次手工链路，mock OneBot 已覆盖协议形态
 - 打错字撤回：依赖 NapCat 对 `send_private_msg` 的 echo（拿 message_id）；echo 丢失/旧版本可能降级为「错字+更正」并存；群聊未接线
 - 多实例商用托管待做
 - 测试覆盖率有基线但仍偏低（行 59.21%，`npm run test:coverage` 阈值守护）；lint 是 tsc 未使用代码检查（零依赖），不是完整 ESLint 规则集
