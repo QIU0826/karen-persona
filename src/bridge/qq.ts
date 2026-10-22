@@ -111,6 +111,11 @@ import {
 import { isAsrEnabled, isSilkBuffer, isWavBuffer, silkToWav, transcribeVoice } from "../ai/asr.js";
 import { formatVoiceUnderstanding, isSenseVoiceEnabled, understandVoice } from "../ai/sensevoice.js";
 import {
+  formatQwenOmniVoice,
+  isQwenOmniEnabled,
+  understandVoiceWithQwenOmni,
+} from "../ai/qwen-omni.js";
+import {
   collectSticker,
   downloadStickerBytes,
   labelSticker,
@@ -1298,24 +1303,37 @@ async function describeVoiceMessage(url: string | undefined): Promise<string | n
     return null;
   }
 
-  // v0.9.32：SenseVoice 优先，带情绪/音频事件；失败回退 faster-whisper 纯文字。
-  if (isSenseVoiceEnabled()) {
-    const wav = isWavBuffer(bytes)
-      ? bytes
-      : isSilkBuffer(bytes)
-        ? await silkToWav(bytes)
-        : null;
-    if (wav) {
-      const understood = await understandVoice(wav);
-      const formatted = understood ? formatVoiceUnderstanding(understood) : null;
-      if (formatted) {
-        log.info("asr.sensevoice_ok", {
-          chars: understood?.text.length ?? 0,
-          emotion: understood?.emotion ?? null,
-          events: understood?.events.length ?? 0,
-        });
-        return formatted;
-      }
+  // v0.9.32：音频大模型优先，其次 SenseVoice，最后 faster-whisper 纯文字。
+  const wav = isWavBuffer(bytes)
+    ? bytes
+    : isSilkBuffer(bytes)
+      ? await silkToWav(bytes)
+      : null;
+
+  if (wav && isQwenOmniEnabled()) {
+    const omni = await understandVoiceWithQwenOmni(wav);
+    const formatted = omni ? formatQwenOmniVoice(omni) : null;
+    if (formatted) {
+      log.info("asr.qwen_omni_ok", {
+        chars: omni?.transcript.length ?? 0,
+        singing: omni?.singing ?? null,
+        sarcasm: omni?.sarcasm ?? null,
+        elapsed_ms: omni?.elapsedMs ?? null,
+      });
+      return formatted;
+    }
+  }
+
+  if (wav && isSenseVoiceEnabled()) {
+    const understood = await understandVoice(wav);
+    const formatted = understood ? formatVoiceUnderstanding(understood) : null;
+    if (formatted) {
+      log.info("asr.sensevoice_ok", {
+        chars: understood?.text.length ?? 0,
+        emotion: understood?.emotion ?? null,
+        events: understood?.events.length ?? 0,
+      });
+      return formatted;
     }
   }
 

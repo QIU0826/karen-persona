@@ -121,3 +121,12 @@ HF 直连不通、hf_hub 默认走 Xet CDN 也不可达；`hf-mirror.com` 可用
 - 失败自动回退 faster-whisper 纯文字。
 - **限制**：情绪标签实测会误判（angry/neutral 有时判 sad）；唱歌、阴阳怪气没有可靠验证，
   不能承诺准确识别；要真正音频语义仍需音频大模型（Qwen-Omni 等）。
+
+## Qwen2.5-Omni-7B（部署中，2026-10-22）
+
+- 服务脚本：`deploy/gpu-server/qwen-omni`
+- 客户端：`src/ai/qwen-omni.ts`，失败回退 SenseVoice → faster-whisper
+- 配置：`KAREN_ASR_BACKEND=qwen-omni`、`QWEN_OMNI_URL=http://127.0.0.1:19113`
+- 目标：transcript + tone/emotion/singing/sarcasm/background；不确定返回 uncertain
+- 当前状态：镜像已构建；模型还在下载；SSH/隧道一度中断，尚未启动/激活
+
