@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.9.27 — 2026-10-22
+
+**群聊图片也直进多模态。**
+
+### Changed
+
+- 群聊里 @ 她并带图时，`handleGroupMessage` 用 `detectMediaList` 遍历全部图片：
+  每张先下载一次 data URL（复用像素/大小护栏）用于视觉描述，前 2 张同时附到
+  当前 user message 的 `image_url` content part；`processMessage` 的 `images` 选项
+  一路传到 `chat()`。
+- 群聊延迟补发在进程内保留 `images`；桥接重启后仍靠文字描述兜底。
+- 群聊多图不再只看第一张（旧 `detectMedia` 单媒体路径已移除）。
+
+### Verified
+
+- `npm test` **127 文件 / 1479 用例**通过（含 bridge E2E）；`tsc`/lint 0；`eval:offline` 5/5；
+- 真实 DeepSeek 多模态抽检（v0.9.26）已证明 `image_url` content part 路径正常；
+- 群聊带图轮未单独加 E2E 场景，真实 QQ 群聊带图待抽检。
+
 ## v0.9.26 — 2026-10-22
 
 **当前轮图片直进多模态（qq-bridge 深读 P1 第三批）。**

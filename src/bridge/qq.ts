@@ -58,7 +58,6 @@ import {
   parseApiResponse,
   isPrivateMessage,
   isGroupMessage,
-  detectMedia,
   detectMediaList,
   getReplyContext,
   sendPrivateMsg,
@@ -304,6 +303,7 @@ interface DeferredGroupContext {
   text: string;
   state: ConversationState;
   sharedBase: SharedBase;
+  images?: string[];
 }
 
 function scheduleDeferredPrivateReply(ctx: DeferredPrivateContext, delayMs: number): void {
@@ -479,6 +479,7 @@ async function deliverDeferredGroupReply(ctx: DeferredGroupContext): Promise<voi
       bypassGate: true,
       skipUserPersist: true,
       skipPhoto: !ctx.state.config.group_photo_enabled,
+      images: ctx.images,
     });
     for (const line of result.logs) console.log(`  ${line}`);
     if (result.deferred) {
@@ -2167,15 +2168,22 @@ async function handleGroupMessage(
   log.info("group.mentioned", { group_id: groupId, user_id: userId });
 
   // 图片/表情识别（群聊里收到表情时也会更愿意回贴纸）
-  const media = detectMedia(event as unknown as PrivateMessageEvent);
-  const inboundSticker = media?.type === "face" || media?.type === "mface";
+  const mediaList = detectMediaList(event as unknown as PrivateMessageEvent);
+  const inboundSticker = mediaList.some((m) => m.type === "face" || m.type === "mface");
   let finalText = text;
-  if (media?.type === "image" && media.data?.url) {
-    const desc = await describeImage(media.data.url);
+  const attachedImages: string[] = [];
+  for (const media of mediaList) {
+    if (media.type !== "image" || !media.data?.url) continue;
+    // 群聊同样把原图附给当前轮（最多 2 张），并保留视觉描述给后续上下文。
+    const dataUrl = await fetchImageAsDataUrl(media.data.url);
+    const desc = dataUrl ? await describeImage(dataUrl) : await describeImage(media.data.url);
     if (desc) {
-      finalText = `[图片：${desc}] ${text}`;
+      finalText = `[图片：${desc}] ${finalText}`;
       log.info("vision.described", { chars: charCount(desc), source: "group" });
+    } else {
+      finalText = `[图片] ${finalText}`;
     }
+    if (dataUrl && attachedImages.length < 2) attachedImages.push(dataUrl);
   }
 
   const state = userStates.get(userId)!;
@@ -2194,13 +2202,14 @@ async function handleGroupMessage(
     // 群聊默认 skipPhoto：多人群里不发她的生活照（config.group_photo_enabled 才开）
     const result = await processMessage(state, finalText, {
       skipPhoto: !state.config.group_photo_enabled,
+      images: attachedImages,
     });
     for (const line of result.logs) console.log(`  ${line}`);
 
     // 消息门判定晚点回
     if (result.deferred) {
       scheduleDeferredGroupReply(
-        { groupId, userId, userName, text: finalText, state, sharedBase },
+        { groupId, userId, userName, text: finalText, state, sharedBase, images: attachedImages },
         result.deferred.delayMs,
       );
       return;
