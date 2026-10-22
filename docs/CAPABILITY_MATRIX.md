@@ -3,7 +3,7 @@
 > 目的：一眼看清**哪些是真做了、做到什么程度**。每一行都必须能在代码里找到对应，
 > 数字必须能复现（跑法写在「怎么复现」列）。不确定的地方写清楚弱项，不写成优点。
 >
-> 最后更新：2026-10-22（v0.9.24）。配套文档：[README](../README.md)（对外）、
+> 最后更新：2026-10-22（v0.9.25）。配套文档：[README](../README.md)（对外）、
 > [CLAUDE.md](../CLAUDE.md)（开发总控）、[PRODUCT_AUDIT.md](PRODUCT_AUDIT.md)（审计与路线图）。
 
 图例：✅ 可用 ｜ 🚧 有明确限制 ｜ ⛔ 受阻（代码就绪但依赖未到位）
@@ -42,6 +42,7 @@
 | 语音消息（TTS） | `src/ai/tts.ts`、`src/impulse/voice.ts` | ✅/🚧 | macOS `say`→WAV→SILK→QQ 语音条；实测 2.4s 语音 ≈9.3KB | **音色仍偏 AI**（用户明确反馈）；非 macOS 降级文字；群聊未接 |
 | 语音识别（ASR） | `src/ai/asr.ts`、`services/asr/server.py`、`scripts/asr-smoke.ts` | ✅ | **v0.9.0 新增**：faster-whisper CPU int8（small 484MB）；SILK→ASR 1414ms、WAV 962ms；OpenCC t2s 保证简体；`asr:robustness` 语速/台腔/粤语口音/5–10dB 噪声 CER 3.0–10.7%；失败回退 `[语音]` 占位；桥接 E2E 用**真实 SILK 入站**（断言 ASR 收到的是解码后的 WAV）且转写进 prompt；`voice` 长跑 4 轮：入站语音 2/ASR 2，语音事实被记住并答对（[报告](VOICE_ASR_E2E.md)） | 只支持中文；口音/噪声会错字；群聊语音不支持；服务需 `npm run asr:start` |
 | 相识不编造 | `src/persona/meeting-guard.ts` | ✅ | 无依据时确定性删掉编造场景（吧台/下雨/借伞），整条都在编就换含糊回应 | 有依据时仍可能细节漂移 |
+| **未说完先等（v0.9.25）** | `src/bridge/pacing.ts`、`src/bridge/qq.ts` | ✅ | 句尾「我跟你讲/但是/然后/等我/对了/话说…」命中时，私聊合并窗口 400ms→1500ms；无补充最多多等 1.1s；3 条单测 | 只做确定性尾部词检测，不猜语义；群聊未接 |
 | **多媒体相关性** | `src/impulse/media-relevance.ts`、`src/impulse/photo-library.ts` | ✅ | 只在点名/场景命中/她刚分享生活时发图；场景配文池；21 轮评审 **2/5→4/5**（两轮复现）；**v0.9.12 配文只在照片真有该场景时才用**（旧逻辑不一致率 22%→0%，`photo:scene-eval`） | 抽象话题下宁可少发，图库 20 张；「海边」场景图库没有 |
 | 被点名要媒体会真给 | `src/impulse/media-request.ts` | ✅ | 要照片跳概率判定（亲密度/冷却仍生效）、按场景挑图；要语音/表情提高概率并跳冷却 | 图库 24 张（v0.9.11/0.9.13 本机生成补 9 张），仍会撞图 |
 
@@ -70,6 +71,7 @@
 | 图片识别 | `src/ai/vision.ts` | ✅ | DeepSeek Flash 多模态，`detail=high`，截图逐字转述 ≤200 字 | 中文小字/模糊截图仍可能错 |
 | **入站媒体数组化（v0.9.24）** | `src/bridge/onebot.ts` | ✅ | `detectMediaList` 按消息段返回全部媒体：多图/引用+图不再丢；单条最多识别 5 张；mface summary 单行化限长，防伪造 prompt 段落；6 条单测 | 群聊仍走旧的单媒体路径（待接）；大图/像素上限未做 |
 | **发送落地校验（v0.9.24）** | `src/bridge/onebot.ts`、`src/bridge/qq.ts` | ✅ | 语音/照片/贴纸发完用 `get_msg` 回读 record/image 段，日志带 `verified`；只回段类型不回 file/url；超时 2s 不拖慢回复 | 网关不支持 get_msg 时只告警；目前不改用户可见文案 |
+| **图像像素/媒体 URL 护栏（v0.9.25）** | `src/ai/image-meta.ts`、`src/ai/media-url.ts` | ✅ | 文件头解析 PNG/GIF/JPEG/WebP 宽高；>64MP 在 base64 前拒绝；URL 只允许 http(s)、拒绝 credentials/控制字符/超长；可选 `KAREN_MEDIA_ALLOWED_HOSTS`；12 条单测 | 完整 SSRF 私网判定未做（NapCat 本机 URL 不能一刀切禁私网）；WebP 只覆盖常见容器 |
 | **收藏表情语义备注（v0.9.24）** | `src/data/sticker-library.ts`、`src/ai/vision.ts` | 🚧 | `note/scene_tags` 迁移；采集后后台 vision 打标；选择按 上下文匹配 ×25 + 情绪 ×10 - 使用次数 打分；保留概率/冷却/最近不复用；11 条单测 | **只做半套**：模型仍不知道她发了哪张表情（没有工具循环）；打标默认随采集开启，可 `KAREN_STICKER_LABEL=off` |
 
 ---
@@ -88,7 +90,7 @@
 
 | 项 | 状态 | 实测 |
 |---|---|---|
-| 单元/集成测试 | ✅ | **124 文件 / 1459 用例**（`npm test`）；验证方法论见 [VERIFICATION_PLAYBOOK.md](VERIFICATION_PLAYBOOK.md)；覆盖核对见 [COVERAGE_AUDIT.md](COVERAGE_AUDIT.md)；文档数字核对见 `doc-facts.test.ts` |
+| 单元/集成测试 | ✅ | **126 文件 / 1474 用例**（`npm test`）；验证方法论见 [VERIFICATION_PLAYBOOK.md](VERIFICATION_PLAYBOOK.md)；覆盖核对见 [COVERAGE_AUDIT.md](COVERAGE_AUDIT.md)；文档数字核对见 `doc-facts.test.ts` |
 | 类型检查 + lint | ✅ | `tsc --noEmit` 0 错误；`npm run lint`（未使用代码）0 违规 |
 | 覆盖率 | 🚧 | 行 59.21%（`npm run test:coverage`，CI 阈值守护） |
 | 离线评测守门 | ✅ | `npm run eval:offline`：facts≥95% / recall@8≥90% / 合并≥95% / anti-forget PASS / 锚点≥30 条；5 项全达标；CI 已接入 |

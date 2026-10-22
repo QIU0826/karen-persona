@@ -3,6 +3,8 @@ import {
   DEFAULT_NIGHT_SLOWDOWN,
   DEFAULT_TYPING_WPM,
   isNightHour,
+  looksUnfinishedMessage,
+  messageMergeWindowMs,
   planPacing,
   typingTimeFor,
 } from "./pacing.js";
@@ -105,5 +107,26 @@ describe("typingTimeFor", () => {
   it("空文本返回 0", () => {
     const plan = planPacing({ hour: 14 }, fixed(0.5));
     expect(typingTimeFor("", plan)).toBe(0);
+  });
+});
+
+describe("looksUnfinishedMessage / 合并窗口（v0.9.25）", () => {
+  it("常见未说完尾部词命中，句末标点视为说完", () => {
+    for (const text of ["我跟你讲", "但是", "然后", "等一下", "对了", "就是", "还有", "话说"]) {
+      expect(looksUnfinishedMessage(text)).toBe(true);
+    }
+    for (const text of ["我跟你讲。", "但是！", "然后呢？", "今天好累", "", "   "]) {
+      expect(looksUnfinishedMessage(text)).toBe(false);
+    }
+  });
+
+  it("超长文本不做尾部猜测（避免误伤长段落）", () => {
+    expect(looksUnfinishedMessage("啊".repeat(200) + "但是")).toBe(false);
+  });
+
+  it("合并窗口：普通 400ms，未说完 1500ms", () => {
+    expect(messageMergeWindowMs("今天好累")).toBe(400);
+    expect(messageMergeWindowMs("我跟你讲")).toBe(1500);
+    expect(messageMergeWindowMs("我跟你讲", 300, 1200)).toBe(1200);
   });
 });

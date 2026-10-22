@@ -1,6 +1,6 @@
 # 能力覆盖审计（Capability Coverage Audit）
 
-> 最后更新：2026-10-22（v0.9.24）
+> 最后更新：2026-10-22（v0.9.25）
 >
 > 目的：回答「文档里写着 ✅ 的能力，到底被验证到什么程度？」
 > 三层口径：**① 文档宣称 → ② 单测覆盖 → ③ 真实链路/端到端覆盖**。
@@ -40,6 +40,8 @@
 | 消息意图族（打错字/撤回/重发） | ✅ | ✅ `typo-recall.test.ts` + fake WS 链路 | 未在真实 QQ 上触发过（概率 4%） | **未验（真实触发）** |
 | 表情包持续收集 | 🚧 | ✅ `sticker-library.test.ts` | `bridge-e2e`：入站图片→入库（真实 bridge 子进程） | 已验（采集） |
 | 收藏表情语义备注 + 上下文选择（v0.9.24） | 🚧 | ✅ `sticker-library.test.ts`（note/scene_tags/单行化/context 打分 11 条） | 真实模型抽检：一张猫笑脸 → note「表达开心、调皮或友善的附和…」+ tags 开心/猫/调皮/友善 + emotion=happy；未在真实 QQ 收藏库上批量跑 | 单测 + 打标冒烟已验；批量/长期选择效果待补 |
+| 未说完先等（合并窗口延长，v0.9.25） | ✅ | ✅ `pacing.test.ts`（3 条：尾部词/长文本/窗口 400→1500） | 未在真实 QQ 上统计「补充消息并批率」 | 单测已验；真机统计待补 |
+| 图像像素炸弹 / 媒体 URL 校验（v0.9.25） | ✅ | ✅ `image-meta.test.ts`（7 条：PNG/GIF/JPEG/WebP/未知/64MP）、`media-url.test.ts`（5 条：scheme/credentials/控制字符/allowlist） | 未用真实超大图/NapCat 本机 URL 抽检 | 单测已验；真实网关待补 |
 | 出站媒体落地校验 / 入站媒体数组化（v0.9.24） | ✅ | ✅ `onebot-media-verify.test.ts`（7 条）、`onebot-media-list.test.ts`（7 条） | `bridge-e2e` 跑通（fake get_msg 返回空只告警）；真实 NapCat get_msg 回读未单独抽检 | 单测 + E2E；真实网关待抽检 |
 | 内置贴纸 | ✅ | ✅ `stickers.test.ts` | `bridge-e2e`：出站 CQ image 发送 | 已验 |
 | 语音消息（TTS→SILK） | ✅/🚧 | ✅ `voice.test.ts`（35 条）+ darwin-only 真实 say→silk | 真实 QQ 语音条只人工验过 1 次；mock OneBot 覆盖协议形态 | 部分验 |

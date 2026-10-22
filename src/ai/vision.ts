@@ -16,6 +16,8 @@
  */
 import OpenAI from "openai";
 import { recordAuxUsage } from "./aux-usage.js";
+import { MAX_IMAGE_PIXELS, inspectImageInfo } from "./image-meta.js";
+import { checkMediaUrl } from "./media-url.js";
 
 /** 官方推荐模型名（2026-10）；旧名 deepseek-v4-flash-vision-exp 已下线，服务端会映射到该模型。 */
 const DEFAULT_VISION_MODEL = "deepseek-flash";
@@ -113,6 +115,12 @@ async function downloadAsDataUrl(imageUrl: string): Promise<string | null> {
 
     const buffer = Buffer.from(await response.arrayBuffer());
     if (buffer.byteLength === 0 || buffer.byteLength > MAX_IMAGE_BYTES) return null;
+    // 像素炸弹：20000×20000 的 PNG 解码后约 1.6GB，必须在 base64/解码前拒绝。
+    const info = inspectImageInfo(buffer);
+    if (info && info.pixels > MAX_IMAGE_PIXELS) {
+      console.log(`[Vision] 拒绝超大图片: ${info.width}x${info.height}`);
+      return null;
+    }
 
     const mime = detectImageMime(buffer, response.headers.get("content-type"));
     return `data:${mime};base64,${buffer.toString("base64")}`;
@@ -130,6 +138,12 @@ async function downloadAsDataUrl(imageUrl: string): Promise<string | null> {
 export async function describeImage(imageUrl: string): Promise<string | null> {
   const apiKey = getDeepSeekApiKey();
   if (!apiKey) return null;
+  const checked = checkMediaUrl(imageUrl, { allowDataUrl: true });
+  if (!checked.ok || !checked.url) {
+    console.log(`[Vision] 拒绝媒体 URL: ${checked.reason}`);
+    return null;
+  }
+  imageUrl = checked.url;
 
   const baseURL = process.env.DEEPSEEK_BASE_URL || DEFAULT_BASE_URL;
   const model = process.env.DEEPSEEK_VISION_MODEL || DEFAULT_VISION_MODEL;
@@ -212,6 +226,9 @@ const STICKER_LABEL_PROMPT = [
 export async function labelStickerImage(imageUrl: string): Promise<StickerLabel | null> {
   const apiKey = getDeepSeekApiKey();
   if (!apiKey || !imageUrl) return null;
+  const checked = checkMediaUrl(imageUrl, { allowDataUrl: true });
+  if (!checked.ok || !checked.url) return null;
+  imageUrl = checked.url;
 
   const baseURL = process.env.DEEPSEEK_BASE_URL || DEFAULT_BASE_URL;
   const model = process.env.DEEPSEEK_VISION_MODEL || DEFAULT_VISION_MODEL;

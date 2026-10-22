@@ -17,6 +17,8 @@ import type { Database } from "better-sqlite3";
 import { ensureMemoryV2Schema } from "./memory-v2.js";
 import { getVectorDb } from "./vector.js";
 import { dataFile, ensureDataDir } from "./paths.js";
+import { MAX_IMAGE_PIXELS, inspectImageInfo } from "../ai/image-meta.js";
+import { checkMediaUrl } from "../ai/media-url.js";
 
 /** 库容上限：超出后淘汰最久没用过的 */
 export const MAX_COLLECTED_STICKERS = 500;
@@ -62,13 +64,17 @@ function ensureStickerTable(db: Database): void {
  * 失败返回 null；调用方（bridge）应 fire-and-forget，不影响聊天。
  */
 export async function downloadStickerBytes(url: string, timeoutMs = 8_000): Promise<Buffer | null> {
+  const checked = checkMediaUrl(url);
+  if (!checked.ok || !checked.url) return null;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetch(checked.url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return null;
     const len = Number(res.headers.get("content-length"));
     if (Number.isFinite(len) && len > MAX_STICKER_BYTES) return null;
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length === 0 || buf.length > MAX_STICKER_BYTES) return null;
+    const info = inspectImageInfo(buf);
+    if (info && info.pixels > MAX_IMAGE_PIXELS) return null;
     return buf;
   } catch {
     return null;
@@ -109,6 +115,8 @@ export function collectSticker(input: {
 }): CollectResult {
   if (!input.bytes || input.bytes.length === 0) return { ok: false, reason: "empty" };
   if (input.bytes.length > MAX_STICKER_BYTES) return { ok: false, reason: "too_large" };
+  const imageInfo = inspectImageInfo(input.bytes);
+  if (imageInfo && imageInfo.pixels > MAX_IMAGE_PIXELS) return { ok: false, reason: "too_large" };
 
   const hash = crypto.createHash("sha256").update(input.bytes).digest("hex");
   const mime = sniffMime(input.bytes);

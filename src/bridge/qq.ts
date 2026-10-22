@@ -17,7 +17,13 @@
  * - 日志只打印长度/摘要，不打印消息全文、token 或不必要的外部内容。
  */
 import "dotenv/config";
-import { planPacing, typingTimeFor, type PacingPersona, type PacingResult } from "./pacing.js";
+import {
+  messageMergeWindowMs,
+  planPacing,
+  typingTimeFor,
+  type PacingPersona,
+  type PacingResult,
+} from "./pacing.js";
 import { WebSocketServer, type WebSocket } from "ws";
 import { loadPersona } from "../persona/loader.js";
 import type { Persona } from "../persona/loader.js";
@@ -73,6 +79,7 @@ import {
   type CqCode,
 } from "./onebot.js";
 import { describeImage, labelStickerImage } from "../ai/vision.js";
+import { checkMediaUrl } from "../ai/media-url.js";
 import { handleControlCommand } from "../commands/control.js";
 import { exportUserData } from "../data/user-export.js";
 import { buildFirstContactDisclosure, shouldSendDisclosure } from "../persona/disclosure.js";
@@ -553,11 +560,14 @@ async function drainUserBuffer(
     // 收尾时再检查一次，有积压就重新排一个消费窗口。
     if (buf.events.length > 0 && userBuffers.get(userId) === buf) {
       if (buf.timer) clearTimeout(buf.timer);
+      const latestText = buf.events.length
+        ? stripCqCodes(String(buf.events[buf.events.length - 1]?.raw_message ?? ""))
+        : "";
       buf.timer = setTimeout(() => {
         if (userBuffers.get(userId) !== buf) return;
         buf.timer = null;
         void drainUserBuffer(userId, buf, sharedBase);
-      }, MERGE_WINDOW_MS);
+      }, messageMergeWindowMs(latestText, MERGE_WINDOW_MS));
     }
   }
 }
@@ -580,13 +590,16 @@ function enqueueMessage(event: PrivateMessageEvent, sharedBase: SharedBase): voi
   // 正在处理中 → 新消息已入缓冲，drainUserBuffer 会在当前批次后继续消费
   if (buf.processing) return;
 
-  // 重置合并窗口（400ms 内的连续消息合并处理）
+  // 重置合并窗口（400ms 内的连续消息合并处理）；对方没说完时延长到 1500ms，
+  // 让「我跟你讲」后面的补充消息并进同一批，而不是让她回半句话。
   if (buf.timer) clearTimeout(buf.timer);
+  const latestText =
+    typeof event.raw_message === "string" ? stripCqCodes(event.raw_message) : "";
   buf.timer = setTimeout(() => {
     if (!buf) return;
     buf.timer = null;
     void drainUserBuffer(userId, buf, sharedBase);
-  }, MERGE_WINDOW_MS);
+  }, messageMergeWindowMs(latestText, MERGE_WINDOW_MS));
 }
 
 // ── 启动主流程 ──────────────────────────────────
@@ -1214,9 +1227,11 @@ function buildPacing(state: ConversationState): PacingResult {
 
 /** 下载入站语音条的原始字节（QQ 语音是 SILK）；失败返回 null。 */
 async function downloadAudioBytes(url: string | undefined): Promise<Buffer | null> {
-  if (!url || !/^https?:\/\//i.test(url)) return null;
+  if (!url) return null;
+  const checked = checkMediaUrl(url);
+  if (!checked.ok || !checked.url) return null;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+    const res = await fetch(checked.url, { signal: AbortSignal.timeout(20_000) });
     if (!res.ok) return null;
     const len = Number(res.headers.get("content-length"));
     if (Number.isFinite(len) && len > 8 * 1024 * 1024) return null;

@@ -125,3 +125,38 @@ export function typingTimeFor(text: string, plan: PacingResult): number {
   const raw = chars * plan.perCharMs;
   return Math.round(Math.min(raw, plan.capMs));
 }
+
+// ── 消息合并窗口：对方没说完时多等一会儿（v0.9.25） ─────────
+//
+// 参考 qq-bridge 的「对方明显没说完先等」：对方发「我跟你讲」后 0.4s 内
+// 第二条补充常常还没到；如果立即处理，她只能回半句话。这里不猜语义，
+// 只做确定性尾部词检测：命中就把私聊合并窗口从 400ms 拉长到 1500ms，
+// 让补充消息并进同一批。没有补充时最多多等 1.1s，可接受。
+
+/** 常见的「话没说完」尾部词（不含句末标点）。 */
+const UNFINISHED_TAIL_RE =
+  /(?:我跟你讲|我跟你说|跟你说|我告诉你|你听我说|你知道|你猜|等一下|等等|但是|不过|然后|所以说|所以|那个|就是|对了|还有|等我|话说|其实|主要是|而且|因为|怎么说呢)$/;
+
+/** 纯函数：这条消息看起来是否还没说完。 */
+export function looksUnfinishedMessage(text: string, maxLen = 140): boolean {
+  const t = String(text ?? "").trim();
+  if (!t || t.length > maxLen) return false;
+  // 有明确句末标点 = 说完了
+  if (/[。！？!?…~～]$/.test(t)) return false;
+  return UNFINISHED_TAIL_RE.test(t);
+}
+
+export const MERGE_WINDOW_MS = 400;
+export const UNFINISHED_MERGE_WINDOW_MS = 1_500;
+
+/**
+ * 私聊消息合并窗口：普通 400ms；看起来没说完 1500ms。
+ * 纯函数便于单测与后续按人设调整。
+ */
+export function messageMergeWindowMs(
+  text: string,
+  baseMs = MERGE_WINDOW_MS,
+  extendedMs = UNFINISHED_MERGE_WINDOW_MS,
+): number {
+  return looksUnfinishedMessage(text) ? extendedMs : baseMs;
+}

@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.9.25 — 2026-10-22
+
+**媒体安全护栏 + 未说完先等（qq-bridge 深读第二批）。**
+
+### Added
+
+- **图像像素炸弹护栏**（`src/ai/image-meta.ts`）：从 PNG / GIF / JPEG / WebP 文件头解析真实宽高，
+  超过 64MP 在 base64/解码前拒绝；vision 与收藏表情采集都接入。未知格式放行（保持旧行为），
+  避免误伤。
+- **媒体 URL 最低校验**（`src/ai/media-url.ts`）：只允许 http(s)，拒绝 `file:` / `data:` /
+  相对路径 / URL 账号密码 / 控制字符 / 超长；vision、表情下载、ASR 音频下载三处接入。
+  可用 `KAREN_MEDIA_ALLOWED_HOSTS`（逗号分隔，支持 `*.qq.com`）把来源收敛到 QQ CDN / NapCat。
+- **未说完先等**（`src/bridge/pacing.ts`、`src/bridge/qq.ts`）：对方句尾是
+  「我跟你讲 / 但是 / 然后 / 等我 / 对了 / 话说」等时，私聊合并窗口 400ms→1500ms，
+  让补充消息并进同一批；没有补充时最多多等 1.1s。只做确定性尾部词检测，不猜语义。
+
+### Verified
+
+- `npm test`：**126 文件 / 1474 用例**全部通过；`tsc --noEmit` + lint 0；
+- `npm run eval:offline` 5/5；
+- 新增测试：图像元信息 7 条、媒体 URL 5 条、未说完窗口 3 条；
+- 完整 SSRF 私网判定仍未做（NapCat 本机 URL 不能一刀切禁私网，需要按部署配置 allowlist）；
+- 真实超大图 / NapCat 本机 URL / 补充消息并批率仍待真机抽检（文档如实标注）。
+
 ## v0.9.24 — 2026-10-22
 
 **按 qq-bridge 深读落地：工作记忆 + 媒体落地校验 + 入站媒体数组化 + 表情语义备注。**
