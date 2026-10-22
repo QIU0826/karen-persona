@@ -111,3 +111,13 @@ HF 直连不通、hf_hub 默认走 Xet CDN 也不可达；`hf-mirror.com` 可用
 - 语音条需要 NapCat 提供可下载 URL；没有 URL 时回退占位；
 - CPU 推理，和生图（MPS）不抢同一算力，但同时高负载时会变慢；
 - **不做说话人识别**（群里谁的语音分不出来，群聊语音仍不支持）。
+
+## SenseVoice 语音理解（2026-10-22）
+
+- 服务：GPU3 `127.0.0.1:18112`；Mac 隧道 `19112`
+- 模型：`iic/SenseVoiceSmall`（ASR + 情绪 + 音频事件）
+- 产品开关：`KAREN_ASR_BACKEND=sensevoice`、`SENSEVOICE_URL=http://127.0.0.1:19112`
+- 输出示例：`[语音：今天好累啊｜语气：低落｜背景：音乐]`
+- 失败自动回退 faster-whisper 纯文字。
+- **限制**：情绪标签实测会误判（angry/neutral 有时判 sad）；唱歌、阴阳怪气没有可靠验证，
+  不能承诺准确识别；要真正音频语义仍需音频大模型（Qwen-Omni 等）。

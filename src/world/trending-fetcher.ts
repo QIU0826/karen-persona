@@ -69,6 +69,38 @@ const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 小时轮换一批话题
 
 // ── 公开 API ────────────────────────────────────
 
+import { fetchBaiduHotTitles, titlesToTrendingTopics } from "./trending-source.js";
+
+const REALTIME_TTL_MS = 30 * 60 * 1000;
+let realtimeCache: { topics: TrendingTopic[]; fetchedAt: number } | null = null;
+
+/**
+ * 真实热榜优先（百度热搜，30 分钟缓存）；失败回退本地话题池。
+ * 只由 orchestrator 的 1–2 小时热点刷新门调用，不阻塞每轮。
+ */
+export async function getTrendingTopicsAsync(
+  fetchFn: typeof fetch = fetch,
+): Promise<TrendingTopic[]> {
+  // 单测/离线环境不访问外网；生产由真实热榜优先。
+  if (process.env.NODE_ENV === "test") return getTrendingTopics();
+  const now = Date.now();
+  if (realtimeCache && now - realtimeCache.fetchedAt < REALTIME_TTL_MS) {
+    return realtimeCache.topics;
+  }
+  const titles = await fetchBaiduHotTitles(fetchFn);
+  const topics = titlesToTrendingTopics(titles);
+  if (topics.length > 0) {
+    realtimeCache = { topics, fetchedAt: now };
+    return topics;
+  }
+  return getTrendingTopics();
+}
+
+/** 清除真实热榜缓存（测试/手动刷新）。 */
+export function resetRealtimeTrendingCache(): void {
+  realtimeCache = null;
+}
+
 /** 获取当前"刷到"的热点话题列表。每 2 小时轮换一次。 */
 export function getTrendingTopics(): TrendingTopic[] {
   const now = Date.now();

@@ -2,6 +2,7 @@
 
 ## 现状
 
+- **热榜（2026-10-22 已接入）**：`src/world/trending-source.ts` 抓百度热搜 top board，30 分钟缓存；失败回退本地话题池。链接 ingest/Qzone 仍未做。
 - **表情包**：内置 11 张只有 `happy/cute/tired` 等标签；收藏表情有 AI `note + scene_tags + emotion`，
   但这些 note **没有进入聊天 prompt**。所以她“会挑”，不一定“懂”。
 - **图片**：入站图会下载成 data URL，当前轮最多 2 张直接附给多模态模型；后台再生成文字描述写回历史。

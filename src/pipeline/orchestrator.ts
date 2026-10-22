@@ -119,7 +119,7 @@ import {
   findExactRepeatInHistory,
 } from "../persona/anti-repetition.js";
 import { mockWeather, fetchWeather, perceiveWeather, clearWeatherCache, type WeatherPerception } from "../world/weather.js";
-import { getTrendingTopics, matchTrendingTopics, buildTrendingContext } from "../world/trending-fetcher.js";
+import { getTrendingTopicsAsync, matchTrendingTopics, buildTrendingContext } from "../world/trending-fetcher.js";
 import { deriveStance } from "../world/stance.js";
 import { perceiveTime, buildMomentTag } from "../world/time-awareness.js";
 import { renderExpression } from "../impulse/renderer.js";
@@ -1807,7 +1807,7 @@ export async function processMessage(
   let trendingContext = "";
   const nowTs = Date.now();
   if (nowTs - state.lastTrendingInject > 60 * 60 * 1000 + Math.random() * 60 * 60 * 1000) {
-    const topics = getTrendingTopics();
+    const topics = await getTrendingTopicsAsync();
     const careerKw = persona.identity.lifeStory.career?.split(/[,，、\s]+/) ?? [];
     const matched = matchTrendingTopics(topics, careerKw, []);
     trendingContext = buildTrendingContext(matched);
@@ -2303,7 +2303,7 @@ export async function* processMessageStream(
   let trendingContext = "";
   const streamNowTs = Date.now();
   if (streamNowTs - state.lastTrendingInject > 60 * 60 * 1000 + Math.random() * 60 * 60 * 1000) {
-    const topics = getTrendingTopics();
+    const topics = await getTrendingTopicsAsync();
     const careerKw = persona.identity.lifeStory.career?.split(/[,，、\s]+/) ?? [];
     const matched = matchTrendingTopics(topics, careerKw, []);
     trendingContext = buildTrendingContext(matched);

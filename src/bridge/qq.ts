@@ -108,7 +108,8 @@ import {
   rememberStickerMemory,
   type StickerMemory,
 } from "../impulse/sticker-context.js";
-import { isAsrEnabled, transcribeVoice } from "../ai/asr.js";
+import { isAsrEnabled, isSilkBuffer, isWavBuffer, silkToWav, transcribeVoice } from "../ai/asr.js";
+import { formatVoiceUnderstanding, isSenseVoiceEnabled, understandVoice } from "../ai/sensevoice.js";
 import {
   collectSticker,
   downloadStickerBytes,
@@ -1290,12 +1291,34 @@ async function downloadAudioBytes(url: string | undefined): Promise<Buffer | nul
  * 隐私：日志只记长度与耗时，不打印识别正文。
  */
 async function describeVoiceMessage(url: string | undefined): Promise<string | null> {
-  if (!isAsrEnabled()) return null;
+  if (!isAsrEnabled() && !isSenseVoiceEnabled()) return null;
   const bytes = await downloadAudioBytes(url);
   if (!bytes) {
     log.info("asr.skipped", { reason: "download_failed" });
     return null;
   }
+
+  // v0.9.32：SenseVoice 优先，带情绪/音频事件；失败回退 faster-whisper 纯文字。
+  if (isSenseVoiceEnabled()) {
+    const wav = isWavBuffer(bytes)
+      ? bytes
+      : isSilkBuffer(bytes)
+        ? await silkToWav(bytes)
+        : null;
+    if (wav) {
+      const understood = await understandVoice(wav);
+      const formatted = understood ? formatVoiceUnderstanding(understood) : null;
+      if (formatted) {
+        log.info("asr.sensevoice_ok", {
+          chars: understood?.text.length ?? 0,
+          emotion: understood?.emotion ?? null,
+          events: understood?.events.length ?? 0,
+        });
+        return formatted;
+      }
+    }
+  }
+
   const result = await transcribeVoice(bytes);
   if (!result.ok || !result.text) {
     log.info("asr.skipped", { reason: result.reason ?? "unknown" });
