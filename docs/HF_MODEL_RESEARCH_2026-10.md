@@ -242,6 +242,7 @@
 - F5-TTS：https://huggingface.co/SWivid/F5-TTS
 - MegaTTS3：https://huggingface.co/ByteDance/MegaTTS3
 - GPT-SoVITS：https://huggingface.co/lj1995/GPT-SoVITS
+- FireRedTTS3：https://huggingface.co/FireRedTeam/FireRedTTS3
 - CosyVoice 3：https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B-2512
 - Kokoro：https://huggingface.co/hexgrad/Kokoro-82M
 
@@ -250,6 +251,7 @@
 - Z-Image-Turbo：https://huggingface.co/Tongyi-MAI/Z-Image-Turbo
 - Qwen-Image-2.1：https://huggingface.co/Qwen/Qwen-Image-2.1
 - Qwen-Image-Edit-2509：https://huggingface.co/Qwen/Qwen-Image-Edit-2509
+- Qwen-Image-Edit-2511：https://huggingface.co/Qwen/Qwen-Image-Edit-2511
 - MOSS-Image-SFT：https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT
 - FLUX.2-dev：https://huggingface.co/black-forest-labs/FLUX.2-dev
 - InfiniteYou：https://huggingface.co/ByteDance/InfiniteYou
@@ -275,6 +277,8 @@
 
 > 前提：8×RTX 6000D（中国特供版单卡常见 84GB，国际版 96GB；以 `nvidia-smi` 为准）。
 > 结论：服务器让「原先因 Mac 内存/算力排除了的模型」重新进入候选，**但不需要把 8 张卡全用上**。
+>
+> **最终定稿**见 [BEST_STACK_2026-10-22.md](BEST_STACK_2026-10-22.md)。本节保留调研过程；其中 2509 已被 2511 取代，语音主次也已在定稿中调整。
 
 ### 7.1 语音：服务器上更值得先测的模型
 
@@ -292,18 +296,19 @@
 
 **推荐组合**：
 
-1. **Qwen3-TTS-1.7B-Base 微调 Karen 音色**（Apache、轻、自然）——主力；
-2. **Qwen3-TTS-CustomVoice / VoiceDesign** 负责「强烈情绪、撒娇、发火」等指令化台词；
-3. **GPT-SoVITS 微调**做盲测对照；如果它明显更「像她」，就保留为音色主模型；
-4. **FireRedTTS3** 作为中文方言/强克隆对照；**Higgs TTS 3** 只在个人非商用场景试听。
+1. **GPT-SoVITS v2Pro 微调**做 Karen 音色主力（MIT；情绪靠 6 类参考音）；
+2. **Qwen3-TTS-1.7B-Base 微调**做自然度/长句 A/B（Apache；官方支持单说话人 SFT）；
+3. **FireRedTTS3** 做零样本/方言/声音设计（Apache；零样本 SIM 78.8 很强，但克隆用途声明限学术研究）；
+4. **Qwen3-TTS-CustomVoice / VoiceDesign** 负责非 Karen 音色、强情绪指令、声音设计；
+5. **IndexTTS-2.5** 保留回退；**Higgs TTS 3** 只在个人非商用场景试听。
 
-> 这比「只上 GPT-SoVITS」更合理：GPT-SoVITS 音色像，但情感控制仍靠参考音；Qwen3-TTS 原生支持自然语言情绪指令，且 Apache。
+> 这比「只上 GPT-SoVITS」更合理：GPT-SoVITS 音色像，但情感控制仍靠参考音；Qwen3-TTS-CustomVoice 原生支持自然语言情绪指令，且 Apache。
 
 ### 7.2 图像：服务器上重新进入候选的模型
 
 | 模型 | 权重 | 许可 | 说明 |
 |---|---|---|---|
-| **Qwen-Image-Edit-2509** | 57.7GB（20B） | **Apache-2.0** | 最强「同一个人 + 场景编辑」开源选项之一；单卡 84GB 可跑 |
+| **Qwen-Image-Edit-2511** | 57.7GB（20.4B） | **Apache-2.0** | 2509 的增强版：更好角色一致性、缓解 image drift、内置部分 LoRA；单卡 84GB 可跑 |
 | **Z-Image-Turbo** | 32.9GB（6B） | Apache-2.0 | 照片/中文文字质量强；8 步；无参考编辑（Z-Image-Edit 未发布） |
 | **FLUX.2-klein-4B** | 23.7GB | Apache-2.0 | 4B、多参考编辑、轻；服务器/本机都友好 |
 | **FLUX.2-dev** | 32B（仓库 177GB） | 非商用 | 审美/质量上限高；8 卡可跑，但仅供个人/研究 |
@@ -314,7 +319,7 @@
 
 **推荐组合**：
 
-- **角色一致性**：Qwen-Image-Edit-2509 + Karen 的 10–20 张参考图 → 训练 LoRA（最稳）；
+- **角色一致性**：Qwen-Image-Edit-2511 + Karen 的 15–30 张参考图 → 训练 LoRA（最稳）；
 - **场景/氛围图**：Z-Image-Turbo 或 FLUX.2-klein-4B；
 - **只追求审美上限且个人使用**：FLUX.2-dev（非商用）或 HunyuanImage-3.0（需接受许可/显存）；
 - 不建议一上来就上 Qwen-Image-2.1 + FLUX.2-dev + Hunyuan 三套，先一套跑通。
@@ -335,11 +340,13 @@
 
 | GPU | 用途 |
 |---|---|
-| 0 | Qwen3-TTS-1.7B（克隆/情绪） |
-| 1 | Qwen-Image-Edit-2509（角色一致性） |
-| 2 | Z-Image-Turbo 或 FLUX.2-klein-4B（场景） |
-| 3 | Qwen3-ASR-1.7B + Qwen3-VL-8B + embedding/rerank |
-| 4–7 | 训练/备胎；GPT-SoVITS 微调、LoRA、A/B 时临时用 |
+| 0 | GPT-SoVITS + Qwen3-TTS Base/CustomVoice（语音） |
+| 1 | FireRedTTS3 + Qwen3-ASR + 语音情绪 |
+| 2 | Qwen-Image-Edit-2511（角色一致性） |
+| 3 | Z-Image-Turbo（场景/文字） |
+| 4 | Qwen3-VL-30B-A3B（视觉） |
+| 5 | Qwen3-Embedding-8B + Reranker-4B |
+| 6–7 | Qwen3-Next-80B-A3B（可选，TP=2）/ 微调 / LoRA / A/B |
 
 不需要 8 卡分布式推理；单卡 84GB 对上述模型都足够。
 
@@ -347,12 +354,12 @@
 
 **全放服务器后，模型选择确实更多，但推荐不是“越多越好”：**
 
-- 语音：**Qwen3-TTS-1.7B-Base 微调（主力）+ Qwen3-TTS CustomVoice（情绪）**；GPT-SoVITS 做对照；FireRed/Higgs 做候选。
-- 图像：**Qwen-Image-Edit-2509 + LoRA（角色）**；Z-Image-Turbo / FLUX.2-klein 做场景；FLUX.2-dev 仅个人审美上限。
+- 语音：**GPT-SoVITS v2Pro 微调（音色主力）+ Qwen3-TTS Base 微调（自然度 A/B）**；FireRedTTS3 做零样本/方言；Qwen3-TTS CustomVoice 做情绪指令。
+- 图像：**Qwen-Image-Edit-2511 + LoRA（角色）**；Z-Image-Turbo 做场景；FLUX.2-dev 仅个人审美上限。
 - 其他：Qwen3-ASR、Qwen3-VL、Qwen3-Embedding/Reranker 可以真正跑起来。
 - Mac 只保留 QQ 桥接/编排；大模型全部服务器；通过 SSH 隧道接入，别公网暴露。
 
-**下一步**：先给服务器访问方式，我审计 `nvidia-smi`/Docker/磁盘；然后按「Qwen3-TTS + Qwen-Image-Edit」各占一张卡做 PoC，A/B 通过再替换生产。
+**下一步**：先给服务器访问方式，我审计 `nvidia-smi`/Docker/磁盘；然后按 [BEST_STACK_2026-10-22.md](BEST_STACK_2026-10-22.md) 的 Phase 1 部署。
 
 **追加来源**：
 - Qwen3-TTS：https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base

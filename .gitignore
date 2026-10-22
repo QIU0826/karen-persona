@@ -36,3 +36,6 @@ services/cosyvoice/assets/
 # Python 缓存
 __pycache__/
 *.pyc
+# GPU server local secrets (never commit)
+deploy/gpu-server/*.pem
+deploy/gpu-server/*.key
