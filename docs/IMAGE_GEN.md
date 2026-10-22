@@ -164,3 +164,42 @@ sips -s format jpeg -s formatOptions 82 /tmp/out.png --out assets/photos/xxx.jpg
 **缺口现状（v0.9.13）**：「海边/早餐/夜宵/奶茶」四个原本没有图的场景已补齐，
 `photo:scene-eval` 的场景词覆盖从 13/14 提升到 **100%**（17/17 条话术都能匹配到图），
 平均配文不一致率保持 **0%**。
+
+## 9. GPU Qwen-Image-Edit 精修 + 强制质检（2026-10-22）
+
+**新增链路**：Qwen-Image-Edit-2511（GPU2，Mac 隧道 `19110 -> 18110`）→ 独立视觉模型质检 → 不合格自动简化重试。
+产品默认仍走本机 SDXL；这条链路用于"同一个人"的精修图，当前不切换 `KAREN_IMAGE_BACKEND`。
+
+**命令**：
+
+```bash
+# 生成 + 检查（每张图都检查；失败自动简化重试；仍失败退出码 2）
+npm run image:refine -- \
+  --context "她坐在白天的咖啡馆窗边，穿米色毛衣，安静微笑" \
+  --prompt "坐在白天的咖啡馆窗边，穿米色毛衣，安静微笑" \
+  --out data/image-samples/refine-cafe.png --steps 20 --retries 1
+
+# 只检查已有图
+npm run image:audit -- --image data/image-samples/foo.png \
+  --context "她站在雨夜街道" [--require-no-hands]
+```
+
+**质检项**：场景/动作/道具是否符合上下文、角色是否一致、手部/手指/四肢/脸、文字水印/穿模/背景扭曲。
+`simple=true` 时额外硬性要求**不出现手和手臂**；命中任何一项即 `pass=false`。
+服务端还会把 simple 图裁到上方 **72%**（`QWEN_IMAGE_SIMPLE_CROP=0.72`），从构图层面切掉下摆/手部。
+
+**实测证据（2026-10-22）**：
+
+| 用例 | 结果 |
+|---|---|
+| 咖啡馆窗边（第 1 次） | 金发双麻花辫 → `character_match=false`，拦截 |
+| 咖啡馆窗边（简化重试） | 蓝发短发、米色毛衣、无手 → `pass=true`，落盘 |
+| 咖啡馆窗边（72% 裁切 + 严格无手） | 832×921、无手/手臂 → `pass=true` |
+| 旧雨夜图 + `--require-no-hands` | 检出"手臂/手部，手指融合" → `pass=false` |
+| 咖啡馆图配"雨夜街道"上下文 | `scene_match=false` → `pass=false` |
+
+**局限**：
+
+- 质检依赖 DeepSeek Flash 视觉，可能漏检细微手部问题；`simple=true` 通过"不露手"从构图层面规避，这是目前最稳的策略。
+- 20 步、896 长边的单张约 **95s**；不是聊天实时速度，后续可用 Lightning LoRA / 更低步数优化。
+- 需要手部动作时用 `simple=false`，但仍需人工/局部重绘；不能把"质检通过"当成绝对保证。
