@@ -29,6 +29,11 @@ import {
   isIndexTtsEnabled,
   synthesizeWithIndexTts,
 } from "./indextts-tts.js";
+import {
+  buildVoxCpm2Style,
+  isVoxCpm2Enabled,
+  synthesizeWithVoxCpm2,
+} from "./voxcpm2-tts.js";
 import { buildSayText, planSpeechStyle, stripSpeechCommands, type SpeechStyle } from "./tts-style.js";
 
 const log = createLogger("tts");
@@ -282,7 +287,13 @@ export async function synthesizeSpeech(
   deps: SpeechDeps = {}
 ): Promise<SpeechResult | null> {
   const platform = deps.platform ?? process.platform;
-  if (platform !== "darwin" && !isNeuralTtsEnabled() && !isCosyVoiceEnabled()) {
+  if (
+    platform !== "darwin" &&
+    !isNeuralTtsEnabled() &&
+    !isCosyVoiceEnabled() &&
+    !isVoxCpm2Enabled() &&
+    !isIndexTtsEnabled()
+  ) {
     log.debug("tts.skipped", { reason: "platform_unsupported", platform });
     return null;
   }
@@ -330,7 +341,29 @@ export async function synthesizeSpeech(
   let tempDir: string | null = null;
   try {
     let wav: Buffer | null = null;
-    let wavSource: "say" | "kokoro" | "cosyvoice" | "indextts2" = "say";
+    let wavSource: "say" | "kokoro" | "cosyvoice" | "indextts2" | "voxcpm2" = "say";
+
+    // v0.9.32：VoxCPM2（GPU2，48kHz，用户 A/B 选定的主音色）
+    if (isVoxCpm2Enabled()) {
+      const voxText = plan ? stripSpeechCommands(plan.spokenText) : spoken;
+      const style = plan
+        ? buildVoxCpm2Style(plan.style, opts.style?.emotionVector)
+        : undefined;
+      const synth = await synthesizeWithVoxCpm2(voxText, {
+        timeoutMs: 60_000,
+        ...(style ? { style } : {}),
+      });
+      if (synth) {
+        wav = synth.wav;
+        wavSource = "voxcpm2";
+        log.info("tts.voxcpm2", {
+          style: plan?.style ?? "none",
+          duration_ms: synth.durationMs,
+          elapsed_ms: synth.elapsedMs,
+          sample_rate: synth.sampleRate,
+        });
+      }
+    }
 
     // v0.9.31：IndexTTS2（MPS，情绪 8 维向量；同一参考音）
     // 文本先经过语气润色（语气词/停顿），natural 不传情绪向量，保留参考音本来语调。

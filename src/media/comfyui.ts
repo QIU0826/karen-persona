@@ -102,7 +102,7 @@ export interface ScenePromptInput {
 
 /** 场景标签 → 具体画面（中文标签映射到英文提示词片段） */
 const TAG_SCENES: Record<string, string> = {
-  sunset: "warm sunset sky over city rooftops, phone photo",
+  sunset: "warm sunset sky over city rooftops",
   snow: "light snow falling on a quiet street, winter",
   cafe: "cozy coffee shop interior, latte on wooden table",
   coffee: "latte art in a ceramic cup on a cafe table",
@@ -169,7 +169,7 @@ export function buildScenePrompt(input: ScenePromptInput): string {
   if (input.characterPrompt) parts.push(input.characterPrompt);
 
   // 手机随手拍质感 + 负面约束（避免 AI 味）
-  parts.push("smartphone photo, slightly imperfect framing, natural colors, shallow depth of field");
+  parts.push("candid snapshot, first-person view, slightly imperfect framing, natural colors, shallow depth of field");
   return parts.join(", ");
 }
 

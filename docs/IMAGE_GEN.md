@@ -282,3 +282,9 @@ npm run image:selfie -- \
 - 脚本强制传 cafe 自拍作为唯一参考图 + `SELFIE_STYLE_PROMPT`，再走 `image:audit`（角色/手/服装/场景）；
 - 通过后转 jpg、加 `selfie` 标签 PhotoDef，才进聊天缓存；
 - **不要用 `image:refine` 直接生成自拍缓存**，那条是通用精修，不锁画风。
+
+### 场景 prompt 去手机（2026-10-22）
+
+Z-Image 会把 "phone photo / smartphone photo" 理解成画面里要有手机和手，曾生成手机屏幕乱码被质检拦截。
+现在场景 prompt 改为 `candid snapshot, first-person view`，不再出现 phone/屏幕字样；产品路径实测"拍张晚霞"
+生成 832×1216 城市晚霞、无手机无手、质检通过。

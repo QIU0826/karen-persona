@@ -84,3 +84,16 @@ curl -s -X POST http://127.0.0.1:18102/synthesize \
 - ASR 回读：开心/生气/难过基本一致；中性句 ASR 把「一下午」听成「一下我的」，与 Qwen3-TTS 相同，属 ASR 小模型误差。
 - `style` 直接拼在文本前括号中，英文风格描述可用；中文风格描述待进一步验证。
 - 与 Qwen3-TTS 同卡运行，未使用 GPU3。
+
+## 产品接入（2026-10-22）
+
+`.env`：
+
+```env
+KAREN_TTS_BACKEND=voxcpm2
+VOXCPM2_TTS_URL=http://127.0.0.1:19102
+VOXCPM2_TIMEOUT_MS=60000
+```
+
+代码：`src/ai/voxcpm2-tts.ts`；`synthesizeSpeech()` 优先 Vox，失败回退 IndexTTS（若启用）→ Kokoro → `say`。
+本机全链路实测：5.28s 音频 / 3.24s 端到端 / 22,437 bytes SILK。

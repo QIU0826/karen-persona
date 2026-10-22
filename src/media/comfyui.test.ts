@@ -70,9 +70,10 @@ describe("buildScenePrompt", () => {
     expect(buildScenePrompt({ hour: 14, emotionVector: -0.6 })).toContain("muted");
   });
 
-  it("始终带手机随手拍的质感提示，且不含 AI 味词", () => {
+  it("始终带随手拍的质感提示，且不含手机/UI 诱导词", () => {
     const prompt = buildScenePrompt({ hour: 14, tags: ["city"] });
-    expect(prompt).toContain("smartphone photo");
+    expect(prompt).toContain("candid snapshot");
+    expect(prompt).not.toContain("phone");
     expect(prompt).not.toContain("masterpiece");
     expect(prompt).not.toContain("best quality");
   });
