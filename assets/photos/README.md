@@ -26,3 +26,9 @@
 `karen-selfie-cafe.jpg` 由 GPU2 的 Qwen-Image-Edit-2511 生成，参考图为项目内 `character-1/2`，
 已通过 `image:audit`（角色一致、无手部、场景/服装无明显异常）。它不是 Unsplash 图；
 用于用户明确说“发张你的自拍/看看你”时兜底，避免 Z-Image 场景模型生成一个不是 Karen 的人。
+
+## 自拍统一画风
+
+从 2026-10-22 起，所有新自拍统一以 `karen-selfie-cafe.jpg` 为画风/角色参考：
+日系动漫插画、干净线稿、柔和赛璐璐 + 轻厚涂、通透皮肤、浅景深暖光、近景、不露手。
+生成命令：`npm run image:selfie -- --name <id> --context "<聊天上下文>" --prompt "<场景>"`。

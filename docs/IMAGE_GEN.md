@@ -262,3 +262,23 @@ KAREN_IMAGE_GUARD=on
 - 从本地 `assets/photos` 选 `selfie` 标签的 Karen 缓存图；
 - 当前缓存：`karen-selfie-cafe.jpg`（Qwen 精修、image-guard 通过）；
 - 需要新自拍场景时用 `image:refine` 离线补图，不阻塞聊天。
+
+## 11. 自拍统一画风（2026-10-22，用户指定）
+
+用户指定：**后续所有 Karen 自拍都按 `assets/photos/karen-selfie-cafe.jpg` 的画风**。
+
+- 画风锚点：日系动漫插画、干净线稿、柔和赛璐璐 + 轻厚涂、通透皮肤、浅景深暖光、近景胸上、不露手；
+- 参考图：服务器 `/workspace/data/karen-ref-selfie/karen-selfie-cafe.jpg`；
+- 固定命令：
+
+```bash
+npm run image:selfie -- \
+  --name spring-park \
+  --context "她在春天的公园长椅上自拍，穿浅色开衫，阳光很好" \
+  --prompt "春天公园长椅自拍，浅色开衫，阳光很好" \
+  --seed 91
+```
+
+- 脚本强制传 cafe 自拍作为唯一参考图 + `SELFIE_STYLE_PROMPT`，再走 `image:audit`（角色/手/服装/场景）；
+- 通过后转 jpg、加 `selfie` 标签 PhotoDef，才进聊天缓存；
+- **不要用 `image:refine` 直接生成自拍缓存**，那条是通用精修，不锁画风。

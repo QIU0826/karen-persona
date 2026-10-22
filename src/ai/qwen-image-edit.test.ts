@@ -44,6 +44,20 @@ describe("qwen-image-edit", () => {
     });
   });
 
+  it("可覆盖参考图（自拍统一画风）", async () => {
+    const fetchFn = vi.fn(async () =>
+      new Response(PNG, { status: 200 }),
+    ) as unknown as typeof fetch;
+    await generateQwenImageEdit("自拍", {
+      fetchFn,
+      imagePaths: ["/workspace/data/karen-ref-selfie/karen-selfie-cafe.jpg"],
+    });
+    const init = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      image_paths: ["/workspace/data/karen-ref-selfie/karen-selfie-cafe.jpg"],
+    });
+  });
+
   it("非 PNG 返回 null", async () => {
     const fetchFn = vi.fn(async () => new Response("not png", { status: 200 })) as unknown as typeof fetch;
     await expect(generateQwenImageEdit("x", { fetchFn })).resolves.toBeNull();

@@ -89,3 +89,12 @@ curl -s -X POST http://127.0.0.1:18110/edit \
 - negative prompt 默认包含 bad hands / extra fingers / deformed hands；
 - 896 长边、20 步，实测 **97s**；输出裁到上方 72%（832×921），严格质检确认无手/手臂。
 - 需要手部姿势时传 `"simple": false`，但要接受 Qwen-Image-Edit 的手部风险，后续可用局部重绘修。
+
+## 自拍统一画风参考图
+
+```bash
+# Mac -> 服务器
+scp assets/photos/karen-selfie-cafe.jpg karen-gpu:/mnt/data0/lwh/karen-stack/data/karen-ref-selfie/karen-selfie-cafe.jpg
+```
+
+`npm run image:selfie` 会以它为唯一参考图，锁定用户指定的 cafe 画风；不入库、不公开。

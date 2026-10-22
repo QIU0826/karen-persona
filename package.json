@@ -37,6 +37,7 @@
     "image:start": "tsx scripts/image-start.ts",
     "image:smoke": "tsx scripts/image-smoke.ts",
     "image:refine": "tsx scripts/image-refine.ts",
+    "image:selfie": "tsx scripts/image-selfie.ts",
     "image:audit": "tsx scripts/image-audit.ts",
     "media:status": "tsx scripts/media-setup.ts status",
     "media:install": "tsx scripts/media-setup.ts install",

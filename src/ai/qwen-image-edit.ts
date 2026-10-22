@@ -15,6 +15,8 @@ const MAX_TIMEOUT_MS = 600_000;
 export interface QwenImageEditOptions {
   baseUrl?: string;
   simple?: boolean;
+  /** 覆盖默认参考图（服务器绝对路径）；自拍统一画风时传 cafe 自拍 */
+  imagePaths?: string[];
   steps?: number;
   seed?: number;
   timeoutMs?: number;
@@ -75,6 +77,7 @@ export async function generateQwenImageEdit(
       body: JSON.stringify({
         prompt: text,
         simple: opts.simple ?? true,
+        ...(opts.imagePaths && opts.imagePaths.length > 0 ? { image_paths: opts.imagePaths } : {}),
         num_inference_steps: Math.max(8, Math.min(60, opts.steps ?? 20)),
         seed: opts.seed ?? 0,
       }),
