@@ -1,6 +1,8 @@
 # 同类项目调研：GitHub 上可借鉴的 AI 伴侣 / QQ Bot 项目（2026-10-20）
 
 > 目的：围绕「真人感、主动、记忆、语音」，横向看 GitHub 上同类项目，记录**可借鉴的具体设计**（不是照抄功能）。
+> 补充（2026-10-22）：**Hugging Face 模型/技术栈调研**见 [HF_MODEL_RESEARCH_2026-10.md](HF_MODEL_RESEARCH_2026-10.md)（TTS/生图/记忆/ASR）。
+>
 > 抓取方式：GitHub Search API（`sort=stars`）于 2026-10-20 检索；星标为抓取时数值；标注「实读」的项目读过 README。
 
 ## 1. 直接可借鉴（同类最强）
