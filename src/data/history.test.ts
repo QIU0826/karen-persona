@@ -44,6 +44,21 @@ describe("history 会话持久化", () => {
     expect(files).toContain("小雅-session.json");
   });
 
+  it("updateUserMessageContent 能异步补写历史里的图片描述并持久化", async () => {
+    const h = await import("./history.js");
+    const session = h.loadSession("小雅");
+    h.addMessage(session, "user", "[图片] 看这个");
+    h.addMessage(session, "assistant", "看到了");
+    h.addMessage(session, "user", "另一条");
+    expect(h.updateUserMessageContent(session, "[图片] 看这个", "[图片：一只猫] 看这个")).toBe(true);
+
+    const reloaded = h.loadSession("小雅");
+    expect(reloaded.messages[0]!.content).toBe("[图片：一只猫] 看这个");
+    expect(reloaded.messages[2]!.content).toBe("另一条");
+    // 找不到匹配内容时返回 false，不乱改
+    expect(h.updateUserMessageContent(session, "不存在", "x")).toBe(false);
+  });
+
   it("损坏的会话文件会备份并重建，而不是崩溃", async () => {
     fs.writeFileSync(path.join(dir, "小雅-session.json"), "{ this is not json", "utf-8");
 

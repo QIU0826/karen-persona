@@ -152,6 +152,24 @@ export function addMessage(
   saveSessionSync(session);
 }
 
+/** v0.9.28：更新最近一条内容匹配的 user message（异步补图片描述用）。 */
+export function updateUserMessageContent(
+  session: ConversationSession,
+  oldContent: string,
+  newContent: string,
+): boolean {
+  if (!session || oldContent === newContent) return false;
+  for (let i = session.messages.length - 1; i >= 0; i -= 1) {
+    const msg = session.messages[i]!;
+    if (msg.role === "user" && msg.content === oldContent) {
+      msg.content = newContent;
+      saveSessionSync(session);
+      return true;
+    }
+  }
+  return false;
+}
+
 /** 归档旧消息（尽力而为，失败不影响主流程） */
 function archiveMessages(personaId: string, messages: ChatMessage[], storageKey = ""): void {
   const date = new Date().toISOString().split("T")[0];

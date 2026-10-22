@@ -113,6 +113,7 @@ import {
 } from "../data/sticker-library.js";
 import { isWithinTurnDuplicate } from "../persona/anti-repetition.js";
 import { stripOutboundMediaMarkers } from "../persona/outbound-markers.js";
+import { updateUserMessageContent } from "../data/history.js";
 import { shouldSendPhotoCaption } from "../impulse/photo-caption.js";
 import {
   DEFAULT_TYPO_RECALL_SETTINGS,
@@ -1266,6 +1267,35 @@ async function describeVoiceMessage(url: string | undefined): Promise<string | n
   return `[语音：${result.text}]`;
 }
 
+/**
+ * v0.9.28：图片描述异步补写历史。
+ * 当前轮先让模型直接看原图，描述在后台生成；回复结束后把占位 [图片] 替换成
+ * [图片：描述]，下一轮追问仍能看到细节。不阻塞回复。
+ */
+async function applyImageDescriptions(
+  state: ConversationState,
+  originalText: string,
+  pending: Array<Promise<string | null>>,
+): Promise<void> {
+  if (pending.length === 0) return;
+  try {
+    const descs = await Promise.all(pending);
+    let updated = originalText;
+    for (const desc of descs) {
+      if (desc) updated = updated.replace("[图片]", `[图片：${desc}]`);
+    }
+    if (updated !== originalText) {
+      const ok = updateUserMessageContent(state.session, originalText, updated);
+      log.info("image.described_async", {
+        chars: updated.length - originalText.length,
+        persisted: ok,
+      });
+    }
+  } catch {
+    // 描述失败不影响聊天
+  }
+}
+
 // ── 表情包持续收集（v0.6）─────────────────────
 
 /**
@@ -1829,6 +1859,7 @@ async function handlePrivateBatch(
   // 处理每个事件的媒体，合并文本
   const texts: string[] = [];
   const attachedImages: string[] = [];
+  const pendingImageDescriptions: Array<Promise<string | null>> = [];
   let inboundSticker = false;
   for (const event of events) {
     // v0.9.24：处理消息里的**所有**媒体段。旧逻辑只看第一个非文本段，
@@ -1853,18 +1884,16 @@ async function handlePrivateBatch(
         if (imageCount > 5) {
           syntheticText = "[图片]（超过单条 5 张，已跳过识别）";
         } else if (media.data?.url) {
-          // v0.9.26：先下载一次 data URL。既用于历史描述，也把原图附给当前轮模型
-          //（最多 2 张），避免模型只看到 220 字描述、看不到截图细节。
+          // v0.9.26：下载一次 data URL，原图直接附给当前轮模型；
+          // v0.9.28：描述改为后台生成，回复不再等 vision（历史在回复后补写）。
           const dataUrl = await fetchImageAsDataUrl(media.data.url);
-          const desc = dataUrl
-            ? await describeImage(dataUrl)
-            : await describeImage(media.data.url);
-          if (desc) {
-            syntheticText = `[图片：${desc}]`;
-            log.info("vision.described", { chars: charCount(desc), source: "private" });
-          }
+          const descPromise = (dataUrl
+            ? describeImage(dataUrl)
+            : describeImage(media.data.url)
+          ).catch(() => null);
+          pendingImageDescriptions.push(descPromise);
           if (dataUrl && attachedImages.length < 2) attachedImages.push(dataUrl);
-          maybeCollectSticker(media.data.url, ownerForQq(userId), desc);
+          maybeCollectSticker(media.data.url, ownerForQq(userId));
         }
       }
 
@@ -2051,6 +2080,7 @@ async function handlePrivateBatch(
       userName,
       images: attachedImages,
     });
+    void applyImageDescriptions(state, text, pendingImageDescriptions);
 
     // 消息门判定晚点回：调度定时补发（用户消息此时已落库）
     if (outcome.deferredDelayMs !== undefined) {
@@ -2172,17 +2202,15 @@ async function handleGroupMessage(
   const inboundSticker = mediaList.some((m) => m.type === "face" || m.type === "mface");
   let finalText = text;
   const attachedImages: string[] = [];
+  const pendingImageDescriptions: Array<Promise<string | null>> = [];
   for (const media of mediaList) {
     if (media.type !== "image" || !media.data?.url) continue;
-    // 群聊同样把原图附给当前轮（最多 2 张），并保留视觉描述给后续上下文。
+    // 群聊同样把原图附给当前轮（最多 2 张）；描述后台生成，回复不再等 vision。
     const dataUrl = await fetchImageAsDataUrl(media.data.url);
-    const desc = dataUrl ? await describeImage(dataUrl) : await describeImage(media.data.url);
-    if (desc) {
-      finalText = `[图片：${desc}] ${finalText}`;
-      log.info("vision.described", { chars: charCount(desc), source: "group" });
-    } else {
-      finalText = `[图片] ${finalText}`;
-    }
+    pendingImageDescriptions.push(
+      (dataUrl ? describeImage(dataUrl) : describeImage(media.data.url)).catch(() => null),
+    );
+    finalText = `[图片] ${finalText}`;
     if (dataUrl && attachedImages.length < 2) attachedImages.push(dataUrl);
   }
 
@@ -2204,6 +2232,7 @@ async function handleGroupMessage(
       skipPhoto: !state.config.group_photo_enabled,
       images: attachedImages,
     });
+    void applyImageDescriptions(state, finalText, pendingImageDescriptions);
     for (const line of result.logs) console.log(`  ${line}`);
 
     // 消息门判定晚点回

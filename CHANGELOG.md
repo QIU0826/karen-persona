@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.9.28 — 2026-10-22
+
+**图片描述改为后台生成，回复不再等 vision。**
+
+### Changed
+
+- 私聊 / 群聊图片轮不再 `await describeImage`：原图 data URL 先作为 `image_url`
+  content part 开始回复；vision 描述在后台并行跑，回复结束后用
+  `updateUserMessageContent` 把会话里的 `[图片]` 补写成 `[图片：描述]`。
+- 下一轮追问仍能看到图片细节；如果描述晚于下一轮开始，下一轮会暂时只看到占位，
+  这是有意的折中。
+- 群聊/私聊延迟补发继续在进程内保留图片；`maybeCollectSticker` 不再依赖同步描述，
+  表情标签由采集后的后台 vision 打标补。
+- 新增 `history.updateUserMessageContent`（只改最近匹配的 user message 并原子落盘）。
+
+### Verified
+
+- `npm test`：**127 文件 / 1480 用例**全部通过；`tsc`/lint 0；`eval:offline` 5/5；
+- 新增 `history.test.ts` 用例：异步补写后重新加载仍是新内容，找不到匹配不乱改；
+- 桥接 E2E 仍通过；真实 QQ 图片轮的「回复耗时 vs vision 耗时」待抽检对比。
+
 ## v0.9.27 — 2026-10-22
 
 **群聊图片也直进多模态。**
