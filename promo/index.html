@@ -364,11 +364,10 @@ button{font:inherit;color:inherit;background:none;border:none}
   z-index:-1;overflow:hidden;pointer-events:none;
 }
 .ambient-video{
-  width:100%;height:100%;object-fit:cover;object-position:50% 24%;
-  opacity:.24;filter:saturate(.72) contrast(1.03) blur(1.8px);
-  transform:scale(1.06);
-  -webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 14%,#000 80%,transparent 100%);
-  mask-image:linear-gradient(180deg,transparent 0%,#000 14%,#000 80%,transparent 100%);
+  width:100%;height:100%;object-fit:contain;object-position:72% 50%;
+  opacity:.22;filter:saturate(.72) contrast(1.03) blur(1.8px);
+  -webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 12%,#000 82%,transparent 100%);
+  mask-image:linear-gradient(180deg,transparent 0%,#000 12%,#000 82%,transparent 100%);
 }
 .ambient-shade{
   position:absolute;inset:0;
@@ -377,10 +376,10 @@ button{font:inherit;color:inherit;background:none;border:none}
     linear-gradient(180deg,var(--bg) 0%,rgba(8,9,11,.9) 12%,rgba(8,9,11,.68) 50%,rgba(8,9,11,.9) 88%,var(--bg) 100%);
 }
 @media (max-width:899px){
-  .ambient-video{opacity:.2;filter:saturate(.7) contrast(1.02) blur(2.2px);object-position:50% 30%}
+  .ambient-video{opacity:.2;filter:saturate(.7) contrast(1.02) blur(2px);object-position:50% 50%}
 }
 @media (prefers-reduced-motion:reduce){
-  .ambient-pin{background:url("assets/character-3.jpg") center top/cover no-repeat}
+  .ambient-pin{background:url("assets/character-3.jpg") center/contain no-repeat}
   .ambient-video{display:none}
 }
 
@@ -494,6 +493,7 @@ button{font:inherit;color:inherit;background:none;border:none}
 .shot-mode .section.shot-active,.shot-mode .outro.shot-active,.shot-mode .interlude.shot-active{display:block}
 .shot-mode .nav{display:none}
 .shot-mode.hero-shot .nav{display:block}
+.longshot .ambient-pin{position:absolute;top:0;left:0;right:0;width:100%}
 .longshot .hero{min-height:860px}
 .longshot .nav{position:absolute}
 .longshot .hero-media{height:860px}
@@ -663,7 +663,7 @@ button{font:inherit;color:inherit;background:none;border:none}
           <a class="btn btn-primary" href="/">查看体验 <span class="arr">↗</span></a>
           <a class="btn btn-ghost" href="https://github.com/QIU0826/karen-persona" target="_blank" rel="noopener">GitHub <span class="arr">↗</span></a>
         </div>
-        <p class="hero-note">开源 · MIT · 单机运行 · v0.9.22</p>
+        <p class="hero-note">开源 · MIT · 单机运行 · v0.9.23</p>
       </div>
 
       <div class="hero-foot">
@@ -682,7 +682,14 @@ button{font:inherit;color:inherit;background:none;border:none}
     </div>
   </div>
 
-  <!-- ── 01 她的日常 ─────────────────────────────── -->
+  <!-- ── 01 她的日常：只有这一节放很轻的动态背景 ─────── -->
+  <div class="ambient-scope">
+    <div class="ambient-pin" aria-hidden="true">
+      <video class="ambient-video" muted loop playsinline preload="none"
+             poster="assets/character-3.jpg" src="assets/ambient-loop.mp4"></video>
+      <div class="ambient-shade"></div>
+    </div>
+
   <section class="section" id="daily">
     <div class="wrap">
       <header class="sec-head reveal">
@@ -736,6 +743,7 @@ button{font:inherit;color:inherit;background:none;border:none}
       </div>
     </div>
   </section>
+  </div><!-- /.ambient-scope -->
 
   <!-- ── 02 消息形态 ─────────────────────────────── -->
   <section class="section section-chat" id="messages">
@@ -838,14 +846,6 @@ button{font:inherit;color:inherit;background:none;border:none}
   </figure>
 
 
-  <!-- ── 03–05 共用一层很轻的动态人像背景 ───────────── -->
-  <div class="ambient-scope">
-    <div class="ambient-pin" aria-hidden="true">
-      <video class="ambient-video" muted loop playsinline preload="none"
-             poster="assets/character-3.jpg" src="assets/ambient-loop.mp4"></video>
-      <div class="ambient-shade"></div>
-    </div>
-
   <section class="section" id="proactive">
     <div class="wrap">
       <header class="sec-head reveal">
@@ -900,7 +900,14 @@ button{font:inherit;color:inherit;background:none;border:none}
     </div>
   </section>
 
-  <!-- ── 04 记忆 ─────────────────────────────────── -->
+  <!-- ── 04–05 共用一层很轻的动态人像背景 ───────────── -->
+  <div class="ambient-scope">
+    <div class="ambient-pin" aria-hidden="true">
+      <video class="ambient-video" muted loop playsinline preload="none"
+             poster="assets/character-3.jpg" src="assets/ambient-loop.mp4"></video>
+      <div class="ambient-shade"></div>
+    </div>
+
   <section class="section section-memory" id="memory">
     <div class="wrap">
       <header class="sec-head reveal">
@@ -995,7 +1002,7 @@ button{font:inherit;color:inherit;background:none;border:none}
           <a href="#privacy">隐私</a>
           <a href="#top">回到顶部 ↑</a>
         </nav>
-        <span class="footer-meta">v0.9.22 · MIT · © 2026 QIU0826</span>
+        <span class="footer-meta">v0.9.23 · MIT · © 2026 QIU0826</span>
       </div>
       <div class="wrap footer-fine">角色图由作者提供；风景照片来自 Unsplash（Unsplash License）；表情来自 Twemoji（CC-BY 4.0）。本页为单文件静态站，无外部 CDN / 字体 / 统计脚本。</div>
     </footer>
@@ -1145,38 +1152,50 @@ button{font:inherit;color:inherit;background:none;border:none}
   })();
 
 
-  // 后半页氛围视频：进入范围才播、离开暂停；减少动态/省流量不加载（poster 静帧）
+  // 氛围视频（01 与 04–05）：进入范围才播、离开暂停；减少动态/省流量不加载（poster 静帧）
   (function () {
-    var scope = document.querySelector(".ambient-scope");
-    if (!scope) return;
-    var video = scope.querySelector(".ambient-video");
-    if (!video || reduceMotion) return;
+    var scopes = Array.prototype.slice.call(document.querySelectorAll(".ambient-scope"));
+    if (!scopes.length || reduceMotion) return;
     var conn = navigator.connection;
     if (conn && conn.saveData) return;
 
-    function play() {
+    var items = scopes.map(function (scope) {
+      return { scope: scope, video: scope.querySelector(".ambient-video"), visible: false };
+    }).filter(function (it) { return !!it.video; });
+    if (!items.length) return;
+
+    function play(it) {
       try {
-        var p = video.play();
+        var p = it.video.play();
         if (p && p.catch) p.catch(function () {});
       } catch (err) { /* ignore */ }
     }
 
     if ("IntersectionObserver" in window) {
-      new IntersectionObserver(function (entries) {
+      var io = new IntersectionObserver(function (entries) {
         entries.forEach(function (e) {
-          if (e.isIntersecting) play();
-          else video.pause();
+          var item = items.filter(function (it) { return it.scope === e.target; })[0];
+          if (!item) return;
+          item.visible = e.isIntersecting;
+          if (e.isIntersecting) play(item);
+          else item.video.pause();
         });
-      }, { rootMargin: "400px 0px" }).observe(scope);
+      }, { rootMargin: "300px 0px" });
+      items.forEach(function (it) { io.observe(it.scope); });
     } else {
-      play();
+      items.forEach(play);
     }
 
     document.addEventListener("visibilitychange", function () {
-      if (document.hidden) video.pause();
-      else play();
+      if (document.hidden) {
+        items.forEach(function (it) { it.video.pause(); });
+      } else {
+        items.forEach(function (it) { if (it.visible) play(it); });
+      }
     });
-    window.addEventListener("pointerdown", play, { once: true, passive: true });
+    window.addEventListener("pointerdown", function () {
+      items.forEach(function (it) { if (it.visible) play(it); });
+    }, { once: true, passive: true });
   })();
 
   // 长图截图工具：把页面真实高度写进标题，便于用 --dump-dom 取值
