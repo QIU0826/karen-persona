@@ -90,8 +90,8 @@ describe("photo-library 时间关系模型", () => {
     expect(low!.caption.length).toBeGreaterThan(0);
   });
 
-  it("图库有 25 张，连续 12 次选择就有明显多样性（修复「配文重复」）", () => {
-    expect(getPhotoCatalog().length).toBe(25);
+  it("图库有 27 张，连续 12 次选择就有明显多样性（修复「配文重复」）", () => {
+    expect(getPhotoCatalog().length).toBe(27);
     let n = 0;
     const random = () => ((n++ * 37) % 100) / 100;
     const photos = new Set<string>();
@@ -192,14 +192,14 @@ describe("chooseLocalPhotoShare：配文不盖到无关图上（v0.9.12）", () 
         emotion: 0,
         hour: 15,
         closeness: 5,
-        tags: ["cafe", "coffee", "warm"],
+        tags: ["coffee"],
         random: makeRandom(i + 1),
       });
       expect(choice).not.toBeNull();
       if (choice!.captionSource !== "scene") continue;
       sceneCaptions += 1;
       // 用了场景配文 → 图必须带请求标签之一
-      expect(choice!.photo.tags.some((tag) => ["cafe", "coffee", "warm"].includes(tag))).toBe(true);
+      expect(choice!.photo.tags.some((tag) => ["coffee"].includes(tag))).toBe(true);
     }
     expect(sceneCaptions).toBeGreaterThan(0);
   });

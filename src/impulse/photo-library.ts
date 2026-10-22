@@ -336,6 +336,30 @@ const PHOTOS: PhotoDef[] = [
     },
   },
   {
+    id: "karen-selfie-rain",
+    file: "karen-selfie-rain.jpg",
+    tags: ["selfie", "portrait", "me", "rain", "night", "quiet"],
+    scene: "night",
+    eras: ["today", "yesterday"],
+    captions: {
+      today: ["外面下雨，拍一张", "雨夜窗边，今天挺安静"],
+      yesterday: ["昨天雨夜拍的", "昨天窗边自拍，雨一直没停"],
+      past: [],
+    },
+  },
+  {
+    id: "karen-selfie-home",
+    file: "karen-selfie-home.jpg",
+    tags: ["selfie", "portrait", "me", "home", "indoor", "warm"],
+    scene: "indoor",
+    eras: ["today", "yesterday"],
+    captions: {
+      today: ["窝在沙发上，今天不出门", "家里灯光挺舒服，拍一张"],
+      yesterday: ["昨天在家拍的", "昨天窝在沙发上自拍"],
+      past: [],
+    },
+  },
+  {
     id: "bubble-tea",
     file: "bubble-tea.jpg",
     tags: ["tea", "drink", "bubble_tea", "cafe", "warm"],

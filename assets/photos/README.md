@@ -1,7 +1,7 @@
 # 本地图片库（她主动分享的「随手拍」兜底）
 
 - 用途：未配置 `UNSPLASH_ACCESS_KEY`（或 Unsplash 搜索失败）时，她仍能主动发一张本地图片。
-- 数量：**25 张**；其中 24 张统一裁成 800×600 JPEG（单张 20–160KB），另有 1 张 Karen 自拍缓存 832×921 JPEG。
+- 数量：**27 张**；其中 24 张统一裁成 800×600 JPEG（单张 20–160KB），另有 3 张 Karen 自拍缓存 832×921 JPEG（`karen-selfie-cafe/rain/home`）。
 - 来源：
   - 早期 7 张：Lorem Picsum（`https://picsum.photos/seed/<seed>/800/600`），素材来自 Unsplash；
   - 2026-10-20 新增 8 张：Unsplash 直链（`images.unsplash.com/photo-…`）。
