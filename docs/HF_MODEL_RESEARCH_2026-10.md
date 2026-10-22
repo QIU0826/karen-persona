@@ -268,3 +268,99 @@
 - Letta：https://github.com/letta-ai/letta
 - Hindsight：https://github.com/vectorize-io/hindsight
 - 记忆框架对比（有厂商立场）：https://vectorize.io/articles/best-ai-agent-memory-systems
+
+---
+
+## 7. 追加：如果全部放到 8×6000D 服务器上（2026-10-22 更新）
+
+> 前提：8×RTX 6000D（中国特供版单卡常见 84GB，国际版 96GB；以 `nvidia-smi` 为准）。
+> 结论：服务器让「原先因 Mac 内存/算力排除了的模型」重新进入候选，**但不需要把 8 张卡全用上**。
+
+### 7.1 语音：服务器上更值得先测的模型
+
+| 模型 | 权重/显存 | 许可 | 为什么在服务器上值得试 |
+|---|---|---|---|
+| **Qwen3-TTS-12Hz-1.7B-Base** | 4.5GB | **Apache-2.0** | 3 秒快速克隆；10 语言；流式；1.7B 很轻；可微调；可能是「自然度 + 音色」综合最优 |
+| **Qwen3-TTS-12Hz-1.7B-CustomVoice** | 4.5GB | Apache-2.0 | 9 个预置音色 + **自然语言情绪指令**（“用特别愤怒的语气说”）；适合情绪表达 |
+| **Qwen3-TTS-12Hz-1.7B-VoiceDesign** | 4.5GB | Apache-2.0 | 用描述设计声音（年龄/音色/情绪/语速）；可与 Base 组合成「设计参考→克隆」 |
+| **FireRedTTS3** | 20.8GB | Apache-2.0 | 24 语言/21 方言 + instruct 语音设计/编辑 + ICL 克隆；CUDA 上可行；中文方言强 |
+| **Higgs TTS 3（4B）** | 4B 级 | **研究/非商用许可** | 100 语言、表现力强；个人可用，产品需换许可 |
+| **GPT-SoVITS 微调** | 小 | MIT | 1–3 分钟录音微调，最像本人；与 Qwen3-TTS 做 A/B |
+| **Fish s2-pro** | 大 | 研究许可 | 83 语言、指令控制；许可不适合直接产品化 |
+| **VibeVoice-1.5B** | 1.5B | MIT（但研究限定 + 自动免责声明/水印） | 长播客/多说话人；聊天 TTS 不优先 |
+| **Ming-3.0-tts-0.5B** | 0.5B | MIT | 7 语言、克隆；小而新，可作轻量备选 |
+
+**推荐组合**：
+
+1. **Qwen3-TTS-1.7B-Base 微调 Karen 音色**（Apache、轻、自然）——主力；
+2. **Qwen3-TTS-CustomVoice / VoiceDesign** 负责「强烈情绪、撒娇、发火」等指令化台词；
+3. **GPT-SoVITS 微调**做盲测对照；如果它明显更「像她」，就保留为音色主模型；
+4. **FireRedTTS3** 作为中文方言/强克隆对照；**Higgs TTS 3** 只在个人非商用场景试听。
+
+> 这比「只上 GPT-SoVITS」更合理：GPT-SoVITS 音色像，但情感控制仍靠参考音；Qwen3-TTS 原生支持自然语言情绪指令，且 Apache。
+
+### 7.2 图像：服务器上重新进入候选的模型
+
+| 模型 | 权重 | 许可 | 说明 |
+|---|---|---|---|
+| **Qwen-Image-Edit-2509** | 57.7GB（20B） | **Apache-2.0** | 最强「同一个人 + 场景编辑」开源选项之一；单卡 84GB 可跑 |
+| **Z-Image-Turbo** | 32.9GB（6B） | Apache-2.0 | 照片/中文文字质量强；8 步；无参考编辑（Z-Image-Edit 未发布） |
+| **FLUX.2-klein-4B** | 23.7GB | Apache-2.0 | 4B、多参考编辑、轻；服务器/本机都友好 |
+| **FLUX.2-dev** | 32B（仓库 177GB） | 非商用 | 审美/质量上限高；8 卡可跑，但仅供个人/研究 |
+| **FLUX.2-klein-9B** | 9B | 非商用 | 比 4B 质量高，比 32B 轻 |
+| **HunyuanImage-3.0** | 80B，168GB | 腾讯社区许可 | 质量强，但 8 卡 + 大权重 + 许可限制，先不优先 |
+| **Qwen-Image-2.1** | 20B，33GB | qwen-research | 中文/编辑强；许可偏研究 |
+| **MOSS-Image-SFT** | 27GB | Apache-2.0 | 中文/英文、4 步；可作黑马测试 |
+
+**推荐组合**：
+
+- **角色一致性**：Qwen-Image-Edit-2509 + Karen 的 10–20 张参考图 → 训练 LoRA（最稳）；
+- **场景/氛围图**：Z-Image-Turbo 或 FLUX.2-klein-4B；
+- **只追求审美上限且个人使用**：FLUX.2-dev（非商用）或 HunyuanImage-3.0（需接受许可/显存）；
+- 不建议一上来就上 Qwen-Image-2.1 + FLUX.2-dev + Hunyuan 三套，先一套跑通。
+
+### 7.3 其他技术栈的服务器版升级
+
+| 能力 | 当前 | 服务器上更好的选择 |
+|---|---|---|
+| ASR | faster-whisper small | **Qwen3-ASR-1.7B**（Apache、52 语言/22 方言、流式、1.7B）；Whisper large-v3-turbo 备选 |
+| 语音情绪 | 无 | SenseVoiceSmall / emotion2vec+ large；把用户语气接入状态 |
+| 视觉 | DeepSeek Flash API | Qwen3-VL-8B/32B（Apache）；PaddleOCR-VL 截图 OCR |
+| Embedding | Qwen3-Embedding-0.6B | Qwen3-Embedding-4B/8B（Apache，按延迟选） |
+| Rerank | 关闭/DeepSeek | **Qwen3-Reranker-0.6B/4B**（Apache，本地 cross-encoder） |
+| 对话 LLM | DeepSeek API | 可选 **Qwen3-235B-A22B**（Apache，8×84GB FP8 可跑）；但 API 仍更省心 |
+| 记忆 | SQLite + 向量 + FTS | Graphiti 时序图 / Mem0 抽取操作 / Letta 自编辑记忆（借设计，不必整体替换） |
+
+### 7.4 8 卡怎么分配（建议）
+
+| GPU | 用途 |
+|---|---|
+| 0 | Qwen3-TTS-1.7B（克隆/情绪） |
+| 1 | Qwen-Image-Edit-2509（角色一致性） |
+| 2 | Z-Image-Turbo 或 FLUX.2-klein-4B（场景） |
+| 3 | Qwen3-ASR-1.7B + Qwen3-VL-8B + embedding/rerank |
+| 4–7 | 训练/备胎；GPT-SoVITS 微调、LoRA、A/B 时临时用 |
+
+不需要 8 卡分布式推理；单卡 84GB 对上述模型都足够。
+
+### 7.5 结论
+
+**全放服务器后，模型选择确实更多，但推荐不是“越多越好”：**
+
+- 语音：**Qwen3-TTS-1.7B-Base 微调（主力）+ Qwen3-TTS CustomVoice（情绪）**；GPT-SoVITS 做对照；FireRed/Higgs 做候选。
+- 图像：**Qwen-Image-Edit-2509 + LoRA（角色）**；Z-Image-Turbo / FLUX.2-klein 做场景；FLUX.2-dev 仅个人审美上限。
+- 其他：Qwen3-ASR、Qwen3-VL、Qwen3-Embedding/Reranker 可以真正跑起来。
+- Mac 只保留 QQ 桥接/编排；大模型全部服务器；通过 SSH 隧道接入，别公网暴露。
+
+**下一步**：先给服务器访问方式，我审计 `nvidia-smi`/Docker/磁盘；然后按「Qwen3-TTS + Qwen-Image-Edit」各占一张卡做 PoC，A/B 通过再替换生产。
+
+**追加来源**：
+- Qwen3-TTS：https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base
+- Qwen3-TTS CustomVoice：https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
+- Qwen3-ASR：https://huggingface.co/Qwen/Qwen3-ASR-1.7B
+- Higgs TTS 3：https://huggingface.co/bosonai/higgs-tts-3-4b
+- VibeVoice：https://huggingface.co/microsoft/VibeVoice-1.5B
+- Fish s2-pro：https://huggingface.co/fishaudio/s2-pro
+- Ming-3.0-tts：https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5B
+- HunyuanImage 3.0：https://huggingface.co/tencent/HunyuanImage-3.0
+- Qwen3-235B：https://huggingface.co/Qwen/Qwen3-235B-A22B-Instruct-2507
