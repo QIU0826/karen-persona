@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetCooldown, trySharePhoto } from "./unsplash-trigger.js";
+import { isCharacterPhotoRequest, resetCooldown, trySharePhoto } from "./unsplash-trigger.js";
 
 /** 构造最小 ConversationState（trySharePhoto 只读取这些字段） */
 function makeState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -131,5 +131,30 @@ describe("v0.9 多媒体相关性：没有钩子就不发图", () => {
     expect(photo!.source).toBe("local");
     // 「今天」的配文不会出现"昨天/以前"这类时间词（雪景照片的 yesterday 配文是「昨天拍的，雪还没化」）
     expect(photo!.caption).not.toMatch(/昨天|以前/);
+  });
+});
+
+describe("她要本人照片", () => {
+  it("识别自拍/看看你/你长什么样", () => {
+    expect(isCharacterPhotoRequest("发张你的自拍")).toBe(true);
+    expect(isCharacterPhotoRequest("想看看你")).toBe(true);
+    expect(isCharacterPhotoRequest("你长什么样")).toBe(true);
+    expect(isCharacterPhotoRequest("拍张晚霞")).toBe(false);
+    expect(isCharacterPhotoRequest("发张咖啡馆的照片")).toBe(false);
+  });
+
+  it("自拍请求走本地 Karen 自拍缓存，不调用场景生图", async () => {
+    resetCooldown();
+    const state = makeState({ persona: {
+      name: "小雅",
+      relationship: { closeness: 4.2 },
+      photoShare: { enabled: true, minCloseness: 4, cooldownHours: 2 },
+    } });
+    const result = await trySharePhoto(state as never, "好呀，给你看一张", {
+      requested: true,
+      userText: "发张你的自拍",
+    });
+    expect(result?.source).toBe("local");
+    expect(result?.imageFile).toContain("karen-selfie-cafe");
   });
 });

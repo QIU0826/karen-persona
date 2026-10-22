@@ -33,10 +33,10 @@ function countAssets(dir: string): number {
 }
 
 describe("资产数量与文档宣称一致", () => {
-  it("本地图库：实际张数 == 文档写的 24 张", () => {
+  it("本地图库：实际张数 == 文档写的 25 张", () => {
     const count = countAssets("assets/photos");
-    expect(count, "assets/photos 里的图数量变了，记得同步 README/CLAUDE").toBe(24);
-    expect(ALL_DOCS).toContain("24 张");
+    expect(count, "assets/photos 里的图数量变了，记得同步 README/CLAUDE").toBe(25);
+    expect(ALL_DOCS).toContain("25 张");
   });
 
   it("内置贴纸：实际张数 == 文档写的 11 个；贴纸目录里都有对应条目", async () => {

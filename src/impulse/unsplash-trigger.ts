@@ -140,6 +140,17 @@ const recentPhotoCaptions = new Map<string, string[]>();
 export const GENERATED_PHOTO_RATIO = 0.2;
 
 /**
+ * 用户是否在明确要"她本人"的照片（自拍/你长什么样/看看你）。
+ * 这类请求不能交给 Z-Image 场景模型，否则会生成一个不是 Karen 的人。
+ */
+export function isCharacterPhotoRequest(userText?: string, lastReply?: string): boolean {
+  const text = `${userText ?? ""}\n${lastReply ?? ""}`;
+  return /自拍|拍(?:一)?张你|拍你|看看你|你的(?:照片|样子|长相|自拍)|你长什么样|发(?:一)?张你|来(?:一)?张你|要看你/.test(
+    text,
+  );
+}
+
+/**
  * 尝试用本机 ComfyUI 生成一张"她随手拍的"照片。
  * 未开启 / 失败 / 超时 → 返回 null，由调用方回退本地图库（绝不阻塞聊天）。
  */
@@ -311,6 +322,18 @@ export async function trySharePhoto(
 
   // 提前锁定冷却（防止并发重复触发）
   cooldownMap.set(personaId, Date.now());
+
+  // 明确要"她本人"的照片：Z-Image 场景模型会生成别人，必须走本地 Karen 图库。
+  // （Qwen 精修约 95s，不放进 12s 流式发图；需要新场景时用 image:refine 离线补图。）
+  if (isCharacterPhotoRequest(options.userText, options.lastReply ?? lastReply)) {
+    const selfie = shareLocalPhoto(state, ["selfie"], options.preferEra);
+    if (selfie) {
+      log.info("photo.selfie_local", { source: selfie.source });
+      return selfie;
+    }
+    log.info("photo.selfie_missing", { reason: "no_selfie_asset" });
+    return shareLocalPhoto(state, options.preferredTags, options.preferEra);
+  }
 
   // v0.7：约 20% 的照片用本机 ComfyUI 生成（失败静默回退图库）
   const generated = await tryGeneratedPhoto(state, { ...options, lastReply: options.lastReply ?? lastReply });

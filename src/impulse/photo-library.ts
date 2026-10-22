@@ -322,6 +322,19 @@ const PHOTOS: PhotoDef[] = [
       past: [],
     },
   },
+  // ── v0.9.32：GPU2 Qwen 精修生成的 Karen 自拍缓存（非公开图库；已过 image-guard） ──
+  {
+    id: "karen-selfie-cafe",
+    file: "karen-selfie-cafe.jpg",
+    tags: ["selfie", "portrait", "me", "cafe", "indoor", "warm"],
+    scene: "indoor",
+    eras: ["today", "yesterday"],
+    captions: {
+      today: ["刚在窗边拍的，今天光线不错", "今天给自己拍了一张"],
+      yesterday: ["昨天的自拍，光线还行", "昨天在店里拍的，忘了发"],
+      past: [],
+    },
+  },
   {
     id: "bubble-tea",
     file: "bubble-tea.jpg",

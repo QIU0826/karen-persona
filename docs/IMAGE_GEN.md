@@ -255,3 +255,10 @@ KAREN_IMAGE_GUARD=on
 - 普通生活照/场景图走 GPU3 Z-Image，约 4.9s（含质检）；
 - 流式发图等待从 4s 放宽到 12s（`KAREN_PHOTO_SHARE_TIMEOUT_MS` 可覆盖），避免 5s 生成被截断；
 - 角色精修仍走 GPU2 Qwen，耗时约 95s，不放进聊天流式路径。
+
+### 自拍请求路由（2026-10-22）
+
+- 明确“发张你的自拍 / 看看你 / 你长什么样” → **不调用 Z-Image**，避免生成别人；
+- 从本地 `assets/photos` 选 `selfie` 标签的 Karen 缓存图；
+- 当前缓存：`karen-selfie-cafe.jpg`（Qwen 精修、image-guard 通过）；
+- 需要新自拍场景时用 `image:refine` 离线补图，不阻塞聊天。

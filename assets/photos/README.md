@@ -1,7 +1,7 @@
 # 本地图片库（她主动分享的「随手拍」兜底）
 
 - 用途：未配置 `UNSPLASH_ACCESS_KEY`（或 Unsplash 搜索失败）时，她仍能主动发一张本地图片。
-- 数量：**24 张**，统一裁成 800×600 JPEG（单张 20–160KB）。
+- 数量：**25 张**；其中 24 张统一裁成 800×600 JPEG（单张 20–160KB），另有 1 张 Karen 自拍缓存 832×921 JPEG。
 - 来源：
   - 早期 7 张：Lorem Picsum（`https://picsum.photos/seed/<seed>/800/600`），素材来自 Unsplash；
   - 2026-10-20 新增 8 张：Unsplash 直链（`images.unsplash.com/photo-…`）。
@@ -20,3 +20,9 @@
 - 每张图在 `src/impulse/photo-library.ts` 中有内容标签、场景（morning/day/dusk/night/indoor）与
   「今天/昨天/以前」三套配文；替换图片时请同步更新标签/配文。
 - 商用前请自行复核图源许可；若替换为第三方素材，更新本文件并确认授权。
+
+## Karen 自拍缓存（2026-10-22）
+
+`karen-selfie-cafe.jpg` 由 GPU2 的 Qwen-Image-Edit-2511 生成，参考图为项目内 `character-1/2`，
+已通过 `image:audit`（角色一致、无手部、场景/服装无明显异常）。它不是 Unsplash 图；
+用于用户明确说“发张你的自拍/看看你”时兜底，避免 Z-Image 场景模型生成一个不是 Karen 的人。
