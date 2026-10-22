@@ -40,7 +40,16 @@
 4. **World Info 式按需注入**（SillyTavern）——人设细节按话题触发，降低常驻 token。
 5. **ASR（语音转文字）**——参考 AIRI/Open-LLM-VTuber；目前用户发来的语音只当 `[语音]` 占位。
 
-## 4. 说明
+## 4. 2026-10-22 追加：qq-bridge（Derpyu520）深读
+
+- 对象：[Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge)（1.6k★，QQ ↔ DeepSeek Harness 桥 + 群聊仿真）。
+- 完整报告：[docs/QQ_BRIDGE_DERPYU_REVIEW.md](QQ_BRIDGE_DERPYU_REVIEW.md)。
+- 一句话：它的**工作记忆（进行中的话题/想说未说/对人的印象，带 TTL）**、
+  **发送后 get_msg 段校验**、**媒体 SSRF/大小/像素收口**、**群聊等待/已读水位/参与度**值得学；
+  但**没有情绪状态机**、没有长期记忆检索、没有入站 ASR，语音是预录库——
+  这些不要反向学。建议优先级：发送落地校验 → 入站媒体数组化/安全 → 工作记忆 → 表情语义层。
+
+## 5. 说明
 
 - 以上均为**设计参考**，未拷贝任何代码；本项目仍走自己的架构（人设六层 + 双管线 + T0–T3）。
 - 星标、更新时间会变，引用时以抓取日期为准。
