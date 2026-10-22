@@ -23,8 +23,8 @@ import path from "node:path";
 import { encode as encodeSilk } from "silk-wasm";
 import { createLogger } from "../obs/logger.js";
 import { isNeuralTtsEnabled, synthesizeWithKokoro } from "./neural-tts.js";
-import { isCosyVoiceEnabled, synthesizeWithCosyVoice } from "./cosyvoice-tts.js";
-import { buildSayText, planSpeechStyle, type SpeechStyle } from "./tts-style.js";
+import { buildCosyVoiceInstruct, isCosyVoiceEnabled, synthesizeWithCosyVoice } from "./cosyvoice-tts.js";
+import { buildSayText, planSpeechStyle, stripSpeechCommands, type SpeechStyle } from "./tts-style.js";
 
 const log = createLogger("tts");
 
@@ -328,13 +328,35 @@ export async function synthesizeSpeech(
     let wavSource: "say" | "kokoro" | "cosyvoice" = "say";
 
     // v0.9.16：零样本克隆（Fun-CosyVoice 3.0，实验性；CPU RTF≈2x）
+    // v0.9.29：把语气风格翻译成 instruct2（情绪/句读），不再只用固定参考音平铺直叙。
     if (isCosyVoiceEnabled()) {
-      const cloned = await synthesizeWithCosyVoice(spoken, {
+      const cloneText = plan ? stripSpeechCommands(plan.spokenText) : spoken;
+      const instruct = plan
+        ? buildCosyVoiceInstruct({
+            style: plan.style,
+            emotionVector: opts.style?.emotionVector,
+          })
+        : undefined;
+      const synthOpts = {
         timeoutMs: Math.max(timeoutMs, 60_000),
-      });
+        ...(instruct ? { instruct } : {}),
+      };
+      let cloned = await synthesizeWithCosyVoice(cloneText, synthOpts);
+      if (!cloned && instruct) {
+        // instruct2 不稳定时回退纯零样本（音色仍保留，只是不带情绪指令）
+        log.warn("tts.cosyvoice_instruct_fallback", { style: plan?.style });
+        cloned = await synthesizeWithCosyVoice(cloneText, {
+          timeoutMs: Math.max(timeoutMs, 60_000),
+        });
+      }
       if (cloned) {
         wav = cloned.wav;
         wavSource = "cosyvoice";
+        log.info("tts.cosyvoice", {
+          mode: cloned.mode ?? "zero_shot",
+          style: plan?.style ?? "none",
+          duration_ms: cloned.durationMs,
+        });
       }
     }
 

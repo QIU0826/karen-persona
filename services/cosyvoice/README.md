@@ -20,6 +20,10 @@ BASE="https://modelscope.cn/models/FunAudioLLM/Fun-CosyVoice3-0.5B-2512/resolve/
 
 服务：`npm run cosyvoice:start`（127.0.0.1:18087，内存约 8.3GB）；验证：`npm run cosyvoice:smoke`。
 
+v0.9.29 起 `/synthesize` 支持可选 `instruct`（自然语言情绪/语气，走 `inference_instruct2`，仍用同一条参考音）；
+响应头 `x-cosyvoice-instruct: 1` 表示本次走了指令路径。Node 侧由 `src/ai/cosyvoice-tts.ts` 的
+`buildCosyVoiceInstruct()` 按风格生成。
+
 参考音注册（运行时目录，不入库）：`data/voice-ref/<id>.wav` + `<id>.json`
 （字段：`ref_text` 必须与音频内容一致；`source`/`license` 记录授权；3–10s 真人录音，推荐 8–10s）。
 

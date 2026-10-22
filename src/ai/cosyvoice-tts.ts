@@ -29,6 +29,8 @@ export interface CosyVoiceSynthesisOptions {
   speed?: number;
   timeoutMs?: number;
   seed?: number;
+  /** 自然语言控制（情绪/语气），如「请非常开心地说这句话。」；走 instruct2 路径 */
+  instruct?: string;
   fetchFn?: typeof fetch;
   baseUrl?: string;
 }
@@ -40,6 +42,42 @@ export interface CosyVoiceSynthesisResult {
   elapsedMs: number;
   attempts?: number;
   verify?: string;
+  /** v0.9.29：zero_shot / instruct（是否走了情绪指令） */
+  mode?: "zero_shot" | "instruct";
+}
+
+export type CosyVoiceStyle = "natural" | "soft" | "lively" | "tired";
+
+/**
+ * v0.9.29：把她的语气风格翻译成 CosyVoice 的自然语言指令。
+ *
+ * 参考音只保音色；prosody/情绪靠 instruct2。情绪强度高时用强指令，
+ * 弱时用轻指令，避免每句都像在演戏。
+ */
+export function buildCosyVoiceInstruct(input: {
+  style?: CosyVoiceStyle;
+  emotionVector?: number;
+}): string | undefined {
+  const style = input.style ?? "natural";
+  const emo = Number(input.emotionVector ?? 0);
+  const strong = Math.abs(emo) >= 0.45;
+  const suffix = "<|endofprompt|>";
+  if (style === "lively") {
+    return strong
+      ? `You are a helpful assistant. 请非常开心、带着笑意地说这句话。${suffix}`
+      : `You are a helpful assistant. 请用轻快一点的语气说这句话。${suffix}`;
+  }
+  if (style === "soft") {
+    return strong && emo < 0
+      ? `You are a helpful assistant. 请用有点低落、委屈的语气说这句话。${suffix}`
+      : `You are a helpful assistant. 请用温柔、轻声的语气说这句话。${suffix}`;
+  }
+  if (style === "tired") {
+    return strong
+      ? `You are a helpful assistant. 请用很困、很累、慢慢说的语气说这句话。${suffix}`
+      : `You are a helpful assistant. 请用有点疲惫、放慢的语气说这句话。${suffix}`;
+  }
+  return `You are a helpful assistant. 请像日常聊天一样自然地说这句话。${suffix}`;
 }
 
 export function isCosyVoiceEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -114,6 +152,7 @@ export async function synthesizeWithCosyVoice(
         ...(voiceId ? { voice_id: voiceId } : {}),
         speed,
         ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
+        ...(opts.instruct ? { instruct: opts.instruct } : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -134,6 +173,8 @@ export async function synthesizeWithCosyVoice(
     const duration = Number(response.headers.get("x-cosyvoice-duration-ms"));
     const attempts = Number(response.headers.get("x-cosyvoice-attempts"));
     const verify = response.headers.get("x-cosyvoice-verify") ?? undefined;
+    const mode: "zero_shot" | "instruct" =
+      response.headers.get("x-cosyvoice-instruct") === "1" ? "instruct" : "zero_shot";
     return {
       wav,
       voiceId: response.headers.get("x-cosyvoice-voice") ?? voiceId,
@@ -141,6 +182,7 @@ export async function synthesizeWithCosyVoice(
       ...(Number.isFinite(duration) && duration > 0 ? { durationMs: duration } : {}),
       ...(Number.isFinite(attempts) && attempts > 0 ? { attempts } : {}),
       ...(verify ? { verify } : {}),
+      mode,
     };
   } catch (err) {
     log.warn("tts.cosyvoice_failed", {

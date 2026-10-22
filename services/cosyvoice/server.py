@@ -195,6 +195,8 @@ class SynthRequest(BaseModel):
     voice_id: str | None = None
     speed: float | None = None
     seed: int | None = None
+    # v0.9.29：自然语言控制（情绪/语气），走 inference_instruct2 + 同一条参考音
+    instruct: str | None = None
 
 
 @app.get("/health")
@@ -241,6 +243,11 @@ def synthesize(req: SynthRequest):
         raise HTTPException(status_code=400, detail="ref_audio_missing")
     speed = max(0.8, min(1.2, float(req.speed if req.speed is not None else 1.0)))
     seed = int(req.seed) if req.seed is not None else int(os.environ.get("COSYVOICE_SEED", "42"))
+    instruct = (req.instruct or "").strip()
+    if len(instruct) > 200:
+        raise HTTPException(status_code=400, detail="instruct_too_long")
+    if instruct and "<|endofprompt|>" not in instruct:
+        instruct = instruct + "<|endofprompt|>"
 
     started = time.time()
     import io
@@ -261,9 +268,16 @@ def synthesize(req: SynthRequest):
                 with _lock:
                     set_all_random_seed(attempt_seed)
                     chunks = []
-                    for out in model.inference_zero_shot(
-                        text, ref_text, str(ref_path), stream=False, speed=speed
-                    ):
+                    if instruct:
+                        # v0.9.29：情绪/语气控制；仍用同一条参考音保音色。
+                        stream = model.inference_instruct2(
+                            text, instruct, str(ref_path), stream=False, speed=speed
+                        )
+                    else:
+                        stream = model.inference_zero_shot(
+                            text, ref_text, str(ref_path), stream=False, speed=speed
+                        )
+                    for out in stream:
                         chunks.append(out["tts_speech"])
                     if not chunks:
                         raise RuntimeError("no audio chunks")
@@ -293,6 +307,7 @@ def synthesize(req: SynthRequest):
                             "x-cosyvoice-seed": str(attempt_seed),
                             "x-cosyvoice-attempts": str(attempt + 1),
                             "x-cosyvoice-verify": asr_reason,
+                            "x-cosyvoice-instruct": "1" if instruct else "0",
                         },
                     )
                 last_error = (

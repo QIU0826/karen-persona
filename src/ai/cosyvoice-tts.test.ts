@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   COSYVOICE_DEFAULT_URL,
+  buildCosyVoiceInstruct,
   checkCosyVoiceHealth,
   cosyVoiceBaseUrl,
   cosyVoiceVoiceId,
@@ -91,6 +92,27 @@ describe("synthesizeWithCosyVoice", () => {
     expect(result!.durationMs).toBe(5960);
     expect(result!.attempts).toBe(1);
     expect(result!.verify).toBe("asr_cer_0.00");
+  });
+
+  it("instruct2 情绪指令：按风格/强度生成，且随请求体发送", async () => {
+    expect(buildCosyVoiceInstruct({ style: "lively", emotionVector: 0.6 })).toContain("非常开心");
+    expect(buildCosyVoiceInstruct({ style: "lively", emotionVector: 0.2 })).toContain("轻快");
+    expect(buildCosyVoiceInstruct({ style: "soft", emotionVector: -0.6 })).toContain("低落");
+    expect(buildCosyVoiceInstruct({ style: "tired" })).toContain("疲惫");
+    expect(buildCosyVoiceInstruct({ style: "natural" })).toContain("日常聊天");
+    expect(buildCosyVoiceInstruct({ style: "lively" })).toContain("<|endofprompt|>");
+
+    const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body.instruct).toContain("非常开心");
+      return wavResponse({ "x-cosyvoice-duration-ms": "3000" });
+    });
+    const result = await synthesizeWithCosyVoice("今天真开心", {
+      voiceId: "xiaoya",
+      instruct: buildCosyVoiceInstruct({ style: "lively", emotionVector: 0.6 }),
+      fetchFn: fetchFn as never,
+    });
+    expect(result).not.toBeNull();
   });
 
   it("500 unstable_output → null（回退 Kokoro/say）", async () => {

@@ -1,6 +1,6 @@
 # 能力覆盖审计（Capability Coverage Audit）
 
-> 最后更新：2026-10-22（v0.9.28）
+> 最后更新：2026-10-22（v0.9.29）
 >
 > 目的：回答「文档里写着 ✅ 的能力，到底被验证到什么程度？」
 > 三层口径：**① 文档宣称 → ② 单测覆盖 → ③ 真实链路/端到端覆盖**。
@@ -58,6 +58,7 @@
 | 记忆注入（冷召回） | ✅ | ✅ `behavior-eval` memory-on 变体（3 种子 × 4 冷探针） | 冷召回 **4/12（33%）→ 12/12（100%）**、自然度 4→5、延迟 +73ms；评测用 `formatUserFacts` 生产同款格式 | 已验（模拟记忆块，真实库检索质量另测） |
 | 发图场景匹配/配文一致性 | ✅ | ✅ `photo-library.test.ts`（chooseLocalPhotoShare 4 条）+ `photo-scene-eval`（14 话术 × 200 抽样，零成本） | 场景命中率 100%；配文不一致率旧 22% → 新 0%；场景词覆盖 **17/17（100%）**（v0.9.13 补齐海边/早餐/夜宵/奶茶） | 已验 |
 | 回复里的自我暴露 | ✅ | ✅ `talk-moves.test.ts`（15 条，含素材注入/开关/冷却） | `selfshare:eval` 受控 A/B：含她生活内容 8/10→10/10、自然度 4→5；mock 长跑 A/B **未测出差异**（场景本身已多自述，±1 噪声） | 部分验 |
+| 情绪化语音（instruct2，v0.9.29） | ✅ | ✅ `cosyvoice-tts.test.ts`（指令映射 + 请求体 instruct）；`tts.test.ts` 覆盖回退链 | 真实产品链路 happy/soft 均 `mode=instruct`；ASR 全对；服务端 200 | 单测 + 真实服务抽检；主观“像不像人”待用户试听 |
 | 语音识别（ASR） | ✅ | ✅ `asr.test.ts`（11 条，含 silk-wasm 真实编解码往返） | `asr:smoke` 真实服务：SILK→ASR 1414ms「今天天气不错…」/ WAV 962ms「明天下午3点开会。」；桥接 E2E **真实 SILK 入站**（断言送给 ASR 的是解码后的 WAV）且转写进 prompt；`--scenario voice --voice-in` 真实长跑：入站语音 2 条 / ASR 成功 2 次，语音说的事实被记住，文字回问 1/1 通过 | 已验 |
 | 相识不编造 | ✅ | ✅ `meeting-guard.test.ts` | 21 轮回归：P0 编造「咖啡店」修复后复验改口 | 已验 |
 | 多媒体相关性 | ✅ | ✅ `media-relevance.test.ts` | 21 轮评审 2/5 → **4/5**（两轮复现） | 已验（定性） |

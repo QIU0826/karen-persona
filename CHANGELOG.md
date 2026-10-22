@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.9.29 — 2026-10-22
+
+**语音情绪化：CosyVoice 接入 instruct2。**
+
+### Added
+
+- `services/cosyvoice/server.py` `/synthesize` 新增可选 `instruct` 字段：走
+  `inference_instruct2`（同一条参考音保音色，自然语言控制情绪/语气）；响应头
+  `x-cosyvoice-instruct: 1` 标记走了指令路径。
+- `src/ai/cosyvoice-tts.ts` 新增 `buildCosyVoiceInstruct()`：按 `SpeechStyle`
+  （lively/soft/tired/natural）与情绪强度（±0.45 阈值）生成强/弱指令；
+  `synthesizeWithCosyVoice` 支持 `instruct`，结果带 `mode: zero_shot|instruct`。
+- `src/ai/tts.ts`：克隆路径改用去掉 macOS `[[...]]` 命令后的 `plan.spokenText`
+  （语气词/停顿真正进模型），并下发情绪指令；`instruct` 失败自动回退纯零样本。
+- 新增试听样本：`data/voice-samples/xiaoya-emotion-happy-20261022.wav`、
+  `xiaoya-emotion-soft-20261022.wav`（本地，不入库）。
+
+### Verified
+
+- 服务端真实合成：开心指令 2.52s、温柔 2.98s，ASR CER 0；
+- 产品链路 `synthesizeSpeech` 抽检 happy/soft 均 `mode=instruct`（9.5–10.1s/句，CPU）；
+- `npm test`：**127 文件 / 1481 用例**全部通过；`tsc`/lint 0；`eval:offline` 5/5；
+- 主观“有没有感情”仍需你试听样本判断；指令强度/参考音还可以继续调。
+
 ## v0.9.28 — 2026-10-22
 
 **图片描述改为后台生成，回复不再等 vision。**
