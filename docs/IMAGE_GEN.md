@@ -221,3 +221,8 @@ Z-Image-Turbo：6B、Apache-2.0、8 步、1024px，适合场景/照片/中文文
 - 主路径同样强制 `image:audit`；不合格回退图库
 - 角色一致性仍用 GPU2 的 Qwen-Image-Edit-2511
 - 21 步以下不发工单；Z-Image 只生成场景，不替代精修
+
+### 上下文进 prompt（2026-10-22）
+
+`buildScenePrompt` 现在除了场景标签，还会从 `lastReply` 提取具体线索（火锅/雨夜/看书/加班/猫…）放进 prompt；
+生成后再用同一段 `lastReply + tags` 做 image-guard 检查。这样"她说刚吃完火锅"不会生成咖啡馆。

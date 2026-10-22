@@ -121,10 +121,27 @@ const TAG_SCENES: Record<string, string> = {
   morning: "soft morning light through curtains, a mug of tea",
 };
 
+/** 聊天上下文里的具体场景线索 → 画面片段（比抽象标签更贴合这一轮对话） */
+const CONTEXT_SCENES: Array<[RegExp, string]> = [
+  [/火锅|麻辣烫|hotpot/i, "steaming hotpot on a wooden table, warm restaurant light"],
+  [/下雨|雨夜|淋雨|rain/i, "rainy street with blurred lights, wet pavement"],
+  [/咖啡|拿铁|美式|coffee/i, "coffee cup on a cafe table, warm light"],
+  [/看书|小说|书|read|book/i, "open book on a table, soft window light"],
+  [/晚饭|晚餐|吃饭|dinner/i, "home-cooked dinner on a wooden table"],
+  [/猫|猫咪|cat/i, "cat lounging nearby, soft afternoon light"],
+  [/加班|工作|电脑|laptop|work/i, "laptop on a desk at night, warm desk lamp"],
+  [/散步|走走|walk/i, "quiet street, soft evening light"],
+  [/海边|大海|seaside|ocean/i, "seaside at dusk, gentle waves"],
+  [/下雪|雪|snow/i, "light snow falling on a quiet street"],
+  [/鲜花|花|flowers/i, "small flowers in a glass jar"],
+];
+
 /**
  * 拼生图提示词（纯函数，便于单测与调参）。
  *
  * 原则：**像她用手机随手拍的**——真实、日常、不摆拍；避免"AI 感"的形容词堆砌。
+ * v0.9.32：把 lastReply 里的具体场景线索也带进 prompt，不再只靠抽象标签；
+ * 生成后仍由 image-guard 按同一段上下文检查。
  */
 export function buildScenePrompt(input: ScenePromptInput): string {
   const parts: string[] = [];
@@ -132,6 +149,10 @@ export function buildScenePrompt(input: ScenePromptInput): string {
   const scenes = [...chineseTags].map((t) => TAG_SCENES[t]).filter(Boolean);
   if (scenes.length > 0) parts.push(scenes[0]);
   else parts.push("casual everyday scene from her day, phone snapshot");
+
+  // 聊天上下文里的具体线索（火锅/雨夜/看书…），让画面跟这一轮对话走
+  const contextScene = CONTEXT_SCENES.find(([re]) => re.test(input.lastReply ?? ""))?.[1];
+  if (contextScene && !parts.includes(contextScene)) parts.push(contextScene);
 
   // 时段光线（她生活的真实感来源）
   const hour = input.hour;

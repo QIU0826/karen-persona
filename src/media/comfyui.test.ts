@@ -77,6 +77,12 @@ describe("buildScenePrompt", () => {
     expect(prompt).not.toContain("best quality");
   });
 
+  it("lastReply 里的具体场景会进入 prompt（火锅/雨夜/看书）", () => {
+    expect(buildScenePrompt({ hour: 18, lastReply: "我刚吃完火锅回来" })).toContain("hotpot");
+    expect(buildScenePrompt({ hour: 21, lastReply: "外面下雨了" })).toContain("rainy street");
+    expect(buildScenePrompt({ hour: 15, lastReply: "在窗边看书" })).toContain("open book");
+  });
+
   it("未知标签走兜底场景", () => {
     expect(buildScenePrompt({ tags: ["unknown_tag"], hour: 14 })).toContain("casual everyday scene");
   });

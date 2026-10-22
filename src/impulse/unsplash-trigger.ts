@@ -159,6 +159,7 @@ async function tryGeneratedPhoto(
     ...(options.preferredTags && options.preferredTags.length > 0
       ? { tags: options.preferredTags }
       : {}),
+    ...(options.lastReply ? { lastReply: options.lastReply } : {}),
     emotionVector: state.emotionState.vector,
     hour,
     ...(state.persona.photoShare?.aesthetic
