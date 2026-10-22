@@ -211,3 +211,13 @@ npm run image:audit -- --image data/image-samples/foo.png \
 - `KAREN_IMAGE_GUARD=on` + 本机 SDXL：生成图被视觉模型判 `guard_rejected`，产品自动回退图库，没有把不合格图发出去；
 - Qwen 精修链路：首次金发错角色被拦截、第二次蓝发无手通过；旧手部图 + `--require-no-hands` 被拒。
 - 结论：**“每次出图都检查”已经是代码路径，不是脚本约定**；质检失败宁可退回图库。
+
+## 10. GPU3 Z-Image-Turbo（2026-10-22）
+
+Z-Image-Turbo：6B、Apache-2.0、8 步、1024px，适合场景/照片/中文文字；**不负责 Karen 角色一致性**。
+
+- 服务：GPU3 `127.0.0.1:18111`；Mac 隧道 `19111 -> 18111`
+- 后端：`KAREN_IMAGE_BACKEND=z-image`，`ZIMAGE_URL=http://127.0.0.1:19111`
+- 主路径同样强制 `image:audit`；不合格回退图库
+- 角色一致性仍用 GPU2 的 Qwen-Image-Edit-2511
+- 21 步以下不发工单；Z-Image 只生成场景，不替代精修

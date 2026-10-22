@@ -267,6 +267,34 @@ describe("generateImage：失败一律返回 ok:false（调用方回退图库）
     });
   });
 
+  it("z-image 后端强制质检", async () => {
+    process.env.KAREN_IMAGE_GEN = "on";
+    process.env.KAREN_IMAGE_BACKEND = "z-image";
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d]);
+    const zImageGenerateFn = vi.fn(async () => ({ png, elapsedMs: 1 }));
+    const auditFn = vi.fn(async () => ({
+      pass: true,
+      scene_match: true,
+      character_match: true,
+      anatomy_ok: true,
+      hands_ok: true,
+      artifacts: [],
+      issues: [],
+      reason: "ok",
+    }));
+    const result = await generateImage(
+      { prompt: "傍晚屋顶", context: "她刚说想看看晚霞" },
+      { auditFn, zImageGenerateFn },
+    );
+    expect(result.ok).toBe(true);
+    expect(zImageGenerateFn).toHaveBeenCalled();
+    expect(auditFn).toHaveBeenCalledWith(png, {
+      context: "她刚说想看看晚霞",
+      prompt: "傍晚屋顶",
+      requireNoHands: false,
+    });
+  });
+
   it("超大图被拒（避免把 4MB+ 塞进 QQ）", async () => {
     process.env.KAREN_IMAGE_GEN = "on";
     process.env.KAREN_IMAGE_BACKEND = "comfyui";

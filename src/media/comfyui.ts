@@ -15,6 +15,7 @@
 
 import { auditImage } from "../ai/image-guard.js";
 import { generateQwenImageEdit } from "../ai/qwen-image-edit.js";
+import { generateZImage } from "../ai/z-image.js";
 
 export const GENERATED_DIR_NAME = "generated";
 /** 生成图保留天数 */
@@ -38,10 +39,11 @@ export function comfyBaseUrl(): string {
  * 为什么默认 service：ComfyUI 要从 GitHub 克隆源码，本机实测只有 ~17KB/s，不可行；
  * 而 PyPI（2MB/s）与 diffusers 都很快，所以自己起一个极简 HTTP 服务更实际。
  */
-export function imageBackend(): "service" | "comfyui" | "qwen-image-edit" {
+export function imageBackend(): "service" | "comfyui" | "qwen-image-edit" | "z-image" {
   const backend = (process.env.KAREN_IMAGE_BACKEND ?? "service").toLowerCase();
   if (backend === "comfyui") return "comfyui";
   if (backend === "qwen-image-edit" || backend === "qwen") return "qwen-image-edit";
+  if (backend === "z-image" || backend === "zimage") return "z-image";
   return "service";
 }
 
@@ -238,6 +240,8 @@ export interface GenerateDeps {
   auditFn?: typeof auditImage;
   /** 测试注入：Qwen-Image-Edit 生成 */
   qwenGenerateFn?: typeof generateQwenImageEdit;
+  /** 测试注入：Z-Image 生成 */
+  zImageGenerateFn?: typeof generateZImage;
 }
 
 /**
@@ -253,7 +257,7 @@ async function guardGenerated(
   requireNoHands: boolean,
 ): Promise<GenerateResult> {
   if (!result.ok || !result.bytes) return result;
-  const forced = imageBackend() === "qwen-image-edit";
+  const forced = imageBackend() === "qwen-image-edit" || imageBackend() === "z-image";
   if (!forced && (process.env.KAREN_IMAGE_GUARD ?? "off").toLowerCase() !== "on") return result;
   const audit = await (deps.auditFn ?? auditImage)(result.bytes, {
     context: options.context ?? options.prompt,
@@ -263,6 +267,30 @@ async function guardGenerated(
   if (!audit) return { ok: false, reason: "guard_unavailable", elapsedMs: result.elapsedMs };
   if (!audit.pass) return { ok: false, reason: "guard_rejected", elapsedMs: result.elapsedMs };
   return result;
+}
+
+async function generateViaZImage(
+  options: ComfyWorkflowOptions,
+  deps: GenerateDeps,
+): Promise<GenerateResult> {
+  const startedAt = Date.now();
+  const generated = await (deps.zImageGenerateFn ?? generateZImage)(options.prompt, {
+    width: options.width ?? 832,
+    height: options.height ?? 1216,
+    steps: Math.max(4, Math.min(30, options.steps && options.steps > 1 ? options.steps : 9)),
+    seed: options.seed ?? Math.floor(Math.random() * 1_000_000),
+    timeoutMs: 120_000,
+  });
+  if (!generated) return { ok: false, reason: "z_image_failed" };
+  if (generated.png.length > MAX_GENERATED_BYTES) {
+    return { ok: false, reason: "too_large", elapsedMs: Date.now() - startedAt };
+  }
+  return guardGenerated(
+    { ok: true, bytes: generated.png, elapsedMs: Date.now() - startedAt },
+    options,
+    deps,
+    false,
+  );
 }
 
 async function generateViaQwen(
@@ -301,6 +329,9 @@ export async function generateImage(
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   if (imageBackend() === "qwen-image-edit") {
     return generateViaQwen(options, deps);
+  }
+  if (imageBackend() === "z-image") {
+    return generateViaZImage(options, deps);
   }
   if (imageBackend() === "service") {
     return guardGenerated(await generateViaService(options, fetchImpl, timeoutMs), options, deps, false);
