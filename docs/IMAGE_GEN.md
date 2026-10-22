@@ -3,6 +3,8 @@
 > 目标：让她的照片不总是那 15 张图库——大约 20% 的照片由本机生成（"她此刻拍的"），其余仍用图库。
 > 代码：`src/media/comfyui.ts`（客户端 + 提示词构造）、`src/media/generated-store.ts`（生成物治理）、`src/impulse/unsplash-trigger.ts`（接入照片链路）。
 
+> **2026-10-22 复验**：本机 `npm run image:start` 后，`image:smoke` 全过（真出图 / PNG 合法 / 可复现 / 落盘），热态单张 **2.6s**（832×1216，MPS）；服务 `/health` loaded=true。
+
 ## 1. 为什么不是 ComfyUI 而是 diffusers
 
 原计划用 ComfyUI（GitHub 140k★，GPL-3.0，进程外调用）。实测**本机到 GitHub 只有 ~17KB/s**，

@@ -3,7 +3,7 @@
 > 目的：一眼看清**哪些是真做了、做到什么程度**。每一行都必须能在代码里找到对应，
 > 数字必须能复现（跑法写在「怎么复现」列）。不确定的地方写清楚弱项，不写成优点。
 >
-> 最后更新：2026-10-22（v0.9.30）。配套文档：[README](../README.md)（对外）、
+> 最后更新：2026-10-22（v0.9.31）。配套文档：[README](../README.md)（对外）、
 > [CLAUDE.md](../CLAUDE.md)（开发总控）、[PRODUCT_AUDIT.md](PRODUCT_AUDIT.md)（审计与路线图）。
 
 图例：✅ 可用 ｜ 🚧 有明确限制 ｜ ⛔ 受阻（代码就绪但依赖未到位）
@@ -40,6 +40,7 @@
 | 表情包持续收集 | `src/data/sticker-library.ts`、`src/bridge/qq.ts` | 🚧 | 入站图片自动入库：sha256 去重、库容 500、单文件≤2MB、可一键清空 | **采集默认关**（`KAREN_STICKER_COLLECT=on`）；出站使用默认关（`KAREN_STICKER_USE=on`） |
 | 内置贴纸 | `src/impulse/stickers.ts` | ✅ | 11 个 Twemoji（CC-BY 4.0），22% 概率顺手发、收到表情时 55%、5 分钟冷却 | 数量少，靠上一行补 |
 | 语音消息（TTS） | `src/ai/tts.ts`、`src/impulse/voice.ts` | ✅/🚧 | macOS `say`→WAV→SILK→QQ 语音条；实测 2.4s 语音 ≈9.3KB | **音色仍偏 AI**（用户明确反馈）；非 macOS 降级文字；群聊未接 |
+| **IndexTTS-2.5 语音（v0.9.31）** | `src/ai/indextts-tts.ts`、`src/ai/tts.ts`、`services/indextts2/server.py` | ✅ | 本机 MPS 零样本克隆 + 8 维情绪向量（高兴/愤怒/悲伤/害怕/厌恶/忧郁/惊讶/平静）；按风格映射 + `duration_factor`；产品冒烟 1.94s 音频 5.9s（热态），ASR 通过；服务 18088 | 模型/venv 在仓库外（约 13GB），首次调用加载 10–30s；MPS RTF≈3x；参考音授权由用户保证 |
 | **情绪化语音（v0.9.29–30）** | `src/ai/cosyvoice-tts.ts`、`src/ai/tts.ts`、`src/ai/tts-style.ts` | ✅ | CosyVoice `inference_instruct2`：按风格（活泼/温柔/疲惫/自然）+ 情绪强度下发指令；v0.9.30 在情绪中性时按回复文字线索选风格；语气词/停顿文本真正进克隆模型；instruct 失败回退纯零样本；真实产品抽检 happy/soft 均 `mode=instruct`，ASR 全对 | CPU 仍慢（约 9–13s/句）；情绪指令偶发过度/不稳定时回退；参考音授权由用户保证 |
 | 语音识别（ASR） | `src/ai/asr.ts`、`services/asr/server.py`、`scripts/asr-smoke.ts` | ✅ | **v0.9.0 新增**：faster-whisper CPU int8（small 484MB）；SILK→ASR 1414ms、WAV 962ms；OpenCC t2s 保证简体；`asr:robustness` 语速/台腔/粤语口音/5–10dB 噪声 CER 3.0–10.7%；失败回退 `[语音]` 占位；桥接 E2E 用**真实 SILK 入站**（断言 ASR 收到的是解码后的 WAV）且转写进 prompt；`voice` 长跑 4 轮：入站语音 2/ASR 2，语音事实被记住并答对（[报告](VOICE_ASR_E2E.md)） | 只支持中文；口音/噪声会错字；群聊语音不支持；服务需 `npm run asr:start` |
 | 相识不编造 | `src/persona/meeting-guard.ts` | ✅ | 无依据时确定性删掉编造场景（吧台/下雨/借伞），整条都在编就换含糊回应 | 有依据时仍可能细节漂移 |

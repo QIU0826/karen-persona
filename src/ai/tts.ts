@@ -24,6 +24,11 @@ import { encode as encodeSilk } from "silk-wasm";
 import { createLogger } from "../obs/logger.js";
 import { isNeuralTtsEnabled, synthesizeWithKokoro } from "./neural-tts.js";
 import { buildCosyVoiceInstruct, isCosyVoiceEnabled, synthesizeWithCosyVoice } from "./cosyvoice-tts.js";
+import {
+  buildIndexTtsEmotion,
+  isIndexTtsEnabled,
+  synthesizeWithIndexTts,
+} from "./indextts-tts.js";
 import { buildSayText, planSpeechStyle, stripSpeechCommands, type SpeechStyle } from "./tts-style.js";
 
 const log = createLogger("tts");
@@ -325,11 +330,40 @@ export async function synthesizeSpeech(
   let tempDir: string | null = null;
   try {
     let wav: Buffer | null = null;
-    let wavSource: "say" | "kokoro" | "cosyvoice" = "say";
+    let wavSource: "say" | "kokoro" | "cosyvoice" | "indextts2" = "say";
+
+    // v0.9.31：IndexTTS2（MPS，情绪 8 维向量；同一参考音）
+    // 文本先经过语气润色（语气词/停顿），natural 不传情绪向量，保留参考音本来语调。
+    if (isIndexTtsEnabled()) {
+      const cloneText = plan ? stripSpeechCommands(plan.spokenText) : spoken;
+      const emotion = plan
+        ? buildIndexTtsEmotion(plan.style, opts.style?.emotionVector)
+        : null;
+      const synth = await synthesizeWithIndexTts(cloneText, {
+        timeoutMs: Math.max(timeoutMs, 120_000),
+        ...(emotion
+          ? {
+              emoVector: emotion.vector,
+              emoAlpha: emotion.alpha,
+              durationFactor: emotion.durationFactor,
+            }
+          : {}),
+      });
+      if (synth) {
+        wav = synth.wav;
+        wavSource = "indextts2";
+        log.info("tts.indextts", {
+          mode: synth.mode,
+          style: plan?.style ?? "none",
+          duration_ms: synth.durationMs,
+          elapsed_ms: synth.elapsedMs,
+        });
+      }
+    }
 
     // v0.9.16：零样本克隆（Fun-CosyVoice 3.0，实验性；CPU RTF≈2x）
     // v0.9.29：把语气风格翻译成 instruct2（情绪/句读），不再只用固定参考音平铺直叙。
-    if (isCosyVoiceEnabled()) {
+    if (!wav && isCosyVoiceEnabled()) {
       const cloneText = plan ? stripSpeechCommands(plan.spokenText) : spoken;
       const instruct = plan
         ? buildCosyVoiceInstruct({

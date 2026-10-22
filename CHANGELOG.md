@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.9.31 — 2026-10-22
+
+**语音切换 IndexTTS-2.5（8 维情绪控制）。**
+
+### Added
+
+- 本机安装 IndexTTS-2.5（代码/venv/权重在仓库外 `~/玩具/index-tts`，约 13GB；
+  bilibili 模型使用许可，个人/研究用）；新增 `services/indextts2/server.py` +
+  `run.sh`（127.0.0.1:18088，MPS，输出 24k WAV）。
+- `src/ai/indextts-tts.ts`：客户端 + `buildIndexTtsEmotion()`（SpeechStyle → 8 维
+  [高兴/愤怒/悲伤/害怕/厌恶/忧郁/惊讶/平静] + emo_alpha + duration_factor）。
+- `src/ai/tts.ts` 后端顺序：IndexTTS2 → CosyVoice → Kokoro → say；失败回退。
+- `.env` 本机切 `KAREN_TTS_BACKEND=indextts2`；参考音仍用用户视频 8.3s。
+- `npm run indextts:start` / `indextts:smoke`；文档 `docs/INDEXTTS2.md`。
+
+### Verified
+
+- 服务 `/health` loaded=true、device=mps；产品冒烟 **1.94s 音频 / 5.9s**（热态），
+  直接合成 2.31s / 7.1s；ASR 中性/温柔样本识别正确（开心样本「店里」被 small ASR
+  听成「天理」，属发音/ASR 误差）；
+- `npm test`：**128 文件 / 1486 用例**全部通过；tsc/lint 0；eval:offline 5/5；
+- 试听样本（本地）：`data/voice-samples/xiaoya-indextts-{happy,soft,neutral}-20261022.wav`；
+- **生图复验**：SDXL-Turbo 服务 loaded=true、MPS，`image:smoke` 全过，热态单张 **2.6s**；
+- CosyVoice 服务已停用（保留代码/模型，可 `.env` 切回）；Kokoro 仍作回退。
+
 ## v0.9.30 — 2026-10-22
 
 **语音按这一句的文字线索选情绪。**
