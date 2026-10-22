@@ -27,7 +27,7 @@
 | 日记忆生成 | ✅ | ✅ `jobs.test.ts`（截断/幂等/解析） | `npm run digest:smoke`（真实模型）：事实不丢、同日幂等、92 条长日对抗 | 已验 |
 | 周汇总 | ✅ | ✅ `jobs.test.ts`（7 天覆盖/话题保留/≤400 字） | `npm run rollup:smoke`（零成本）：7 天全覆盖、注入文本 188 字 | 已验 |
 | 记忆注入预算 | ✅ | ✅ | 同上（注入路径由 `digest/anchor/rollup` 冒烟覆盖） | 已验 |
-| 工作记忆（进行中话题/想说未说/印象，v0.9.24） | ✅ | ✅ `working-memory.test.ts`（TTL/上限/upsert/格式/解析 10 条）+ `user-facts-extract.test.ts`（抽取写入） | 未做真实长跑 A/B（待补） | 单测 + 抽取集成已验；真实链路待补 |
+| 工作记忆（进行中话题/想说未说/印象，v0.9.24） | ✅ | ✅ `working-memory.test.ts`（TTL/上限/upsert/格式/解析 10 条）+ `user-facts-extract.test.ts`（抽取写入） | 真实模型抽检（临时库）：用户说「下周三去云南出差」→ 写入 1 条 topic「下周三去云南出差约五天 / 待追问：具体出发日期和行程安排」；未做长跑 A/B | 单测 + 抽取冒烟已验；长跑待补 |
 | 记忆金标（40 条） | ✅ | ✅ `memory-gold.test.ts`（id 唯一/字段齐全/答案有原文依据） | `eval:offline`（CI 每次跑，卡阈值） | 已验 |
 | 事实层 + 状态机 | ✅ | ✅ `user-facts.test.ts` 等 | 30 轮真实长跑：city/job/pet 抽取修复后正确 | 已验 |
 | 认识初期主动提问 | ✅ | ✅ | 30 轮长跑 + 真机 58 轮（会话中观察到） | 部分验（未专门冒烟） |
@@ -39,7 +39,7 @@
 | 打字节奏模拟器 | ✅ | ✅ `pacing.test.ts` | 21 轮长跑延迟归因（深夜 395ms/字）；E2E 中 NODE_ENV=test 快速模式 | 已验（延迟特性） |
 | 消息意图族（打错字/撤回/重发） | ✅ | ✅ `typo-recall.test.ts` + fake WS 链路 | 未在真实 QQ 上触发过（概率 4%） | **未验（真实触发）** |
 | 表情包持续收集 | 🚧 | ✅ `sticker-library.test.ts` | `bridge-e2e`：入站图片→入库（真实 bridge 子进程） | 已验（采集） |
-| 收藏表情语义备注 + 上下文选择（v0.9.24） | 🚧 | ✅ `sticker-library.test.ts`（note/scene_tags/单行化/context 打分 11 条） | 未在真实 QQ 收藏库上批量跑（打标依赖 vision） | 单测已验；真实链路待补 |
+| 收藏表情语义备注 + 上下文选择（v0.9.24） | 🚧 | ✅ `sticker-library.test.ts`（note/scene_tags/单行化/context 打分 11 条） | 真实模型抽检：一张猫笑脸 → note「表达开心、调皮或友善的附和…」+ tags 开心/猫/调皮/友善 + emotion=happy；未在真实 QQ 收藏库上批量跑 | 单测 + 打标冒烟已验；批量/长期选择效果待补 |
 | 出站媒体落地校验 / 入站媒体数组化（v0.9.24） | ✅ | ✅ `onebot-media-verify.test.ts`（7 条）、`onebot-media-list.test.ts`（7 条） | `bridge-e2e` 跑通（fake get_msg 返回空只告警）；真实 NapCat get_msg 回读未单独抽检 | 单测 + E2E；真实网关待抽检 |
 | 内置贴纸 | ✅ | ✅ `stickers.test.ts` | `bridge-e2e`：出站 CQ image 发送 | 已验 |
 | 语音消息（TTS→SILK） | ✅/🚧 | ✅ `voice.test.ts`（35 条）+ darwin-only 真实 say→silk | 真实 QQ 语音条只人工验过 1 次；mock OneBot 覆盖协议形态 | 部分验 |
