@@ -170,7 +170,7 @@ sips -s format jpeg -s formatOptions 82 /tmp/out.png --out assets/photos/xxx.jpg
 **新增链路**：Qwen-Image-Edit-2511（GPU2，Mac 隧道 `19110 -> 18110`）→ 独立视觉模型质检 → 不合格自动简化重试。
 
 **主路径闸门**：`KAREN_IMAGE_GUARD=on` 时，`generateImage()` 对 `service`/`comfyui`/`qwen-image-edit` 三种后端都先质检；不合格/质检不可用一律返回 `ok:false`，调用方回退图库（fail-closed）。Qwen 后端强制开启，不依赖该环境变量。
-产品默认仍走本机 SDXL；这条链路用于"同一个人"的精修图，当前不切换 `KAREN_IMAGE_BACKEND`。
+产品默认生图后端已切到 **Z-Image-Turbo（GPU3，约 4.9s/张）**；Qwen-Image-Edit 用于"同一个人"的精修图，走 `image:refine`。
 
 **命令**：
 
@@ -242,3 +242,16 @@ Z-Image-Turbo：6B、Apache-2.0、8 步、1024px，适合场景/照片/中文文
 |---|---|---|---|
 | Karen 自拍/精修 | true | true（simple 模式） | Qwen-Image-Edit，必须是她且不露手 |
 | 场景/风景/空镜 | false | false | Z-Image/本机 SDXL，不要求她出镜 |
+
+### 产品默认（2026-10-22 晚）
+
+```env
+KAREN_IMAGE_GEN=on
+KAREN_IMAGE_BACKEND=z-image
+ZIMAGE_URL=http://127.0.0.1:19111
+KAREN_IMAGE_GUARD=on
+```
+
+- 普通生活照/场景图走 GPU3 Z-Image，约 4.9s（含质检）；
+- 流式发图等待从 4s 放宽到 12s（`KAREN_PHOTO_SHARE_TIMEOUT_MS` 可覆盖），避免 5s 生成被截断；
+- 角色精修仍走 GPU2 Qwen，耗时约 95s，不放进聊天流式路径。

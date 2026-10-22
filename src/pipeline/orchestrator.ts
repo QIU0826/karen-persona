@@ -2469,7 +2469,7 @@ export async function* processMessageStream(
           userText: userInput,
           preferEra: asksForPresentMoment(userInput) ? "today" : undefined,
         }).catch(() => null),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), Number(process.env.KAREN_PHOTO_SHARE_TIMEOUT_MS) || 12_000)),
       ]);
       if (photo) {
         yield {
