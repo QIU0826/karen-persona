@@ -46,7 +46,7 @@
 | 相识不编造 | `src/persona/meeting-guard.ts` | ✅ | 无依据时确定性删掉编造场景（吧台/下雨/借伞），整条都在编就换含糊回应 | 有依据时仍可能细节漂移 |
 | **未说完先等（v0.9.25）** | `src/bridge/pacing.ts`、`src/bridge/qq.ts` | ✅ | 句尾「我跟你讲/但是/然后/等我/对了/话说…」命中时，私聊合并窗口 400ms→1500ms；无补充最多多等 1.1s；3 条单测 | 只做确定性尾部词检测，不猜语义；群聊未接 |
 | **多媒体相关性** | `src/impulse/media-relevance.ts`、`src/impulse/photo-library.ts` | ✅ | 只在点名/场景命中/她刚分享生活时发图；场景配文池；21 轮评审 **2/5→4/5**（两轮复现）；**v0.9.12 配文只在照片真有该场景时才用**（旧逻辑不一致率 22%→0%，`photo:scene-eval`） | 抽象话题下宁可少发，图库 20 张；「海边」场景图库没有 |
-| 被点名要媒体会真给 | `src/impulse/media-request.ts` | ✅ | 要照片跳概率判定（亲密度/冷却仍生效）、按场景挑图；要语音/表情提高概率并跳冷却 | 图库 27 张（v0.9.11/0.9.13 本机生成补 9 张），仍会撞图 |
+| 被点名要媒体会真给 | `src/impulse/media-request.ts` | ✅ | 要照片跳概率判定（亲密度/冷却仍生效）、按场景挑图；要语音/表情提高概率并跳冷却 | 图库 29 张（v0.9.11/0.9.13 本机生成补 9 张），仍会撞图 |
 
 ---
 
@@ -69,7 +69,7 @@
 |---|---|---|---|---|
 | 本机生图（diffusers+MPS） | `src/media/comfyui.ts`、`services/image/server.py` | ✅ | `stabilityai/sdxl-turbo` fp16 已本地化（5.14GB）；**热态 2.1–2.2s/张**（832×1216，MPS）；`npm run image:smoke` 全过；mock 长跑真的发出 2 张生成图；失败静默回退图库 | 无角色一致性（只有场景照）；首次请求加载模型约 10s；服务需手动启动（`npm run image:start`） |
 | 生成图治理 | `src/media/generated-store.ts` | ✅ | 按日期落盘、30 天自动清理、可 purge、可统计占用 | 依赖上一行启用才有内容 |
-| 照片分享 | `src/impulse/unsplash-trigger.ts` | ✅ | 时间关系（今天/昨天/以前）+ 场景匹配（晚霞/雨/猫…）+ 亲密度门槛 | 无 Unsplash Key 时 27 张本地图 |
+| 照片分享 | `src/impulse/unsplash-trigger.ts` | ✅ | 时间关系（今天/昨天/以前）+ 场景匹配（晚霞/雨/猫…）+ 亲密度门槛 | 无 Unsplash Key 时 29 张本地图 |
 | 图片识别 | `src/ai/vision.ts` | ✅ | DeepSeek Flash 多模态，`detail=high`，截图逐字转述 ≤200 字 | 中文小字/模糊截图仍可能错 |
 | **入站媒体数组化（v0.9.24）** | `src/bridge/onebot.ts` | ✅ | `detectMediaList` 按消息段返回全部媒体：多图/引用+图不再丢；单条最多识别 5 张；mface summary 单行化限长，防伪造 prompt 段落；6 条单测 | 群聊仍走旧的单媒体路径（待接）；大图/像素上限未做 |
 | **发送落地校验（v0.9.24）** | `src/bridge/onebot.ts`、`src/bridge/qq.ts` | ✅ | 语音/照片/贴纸发完用 `get_msg` 回读 record/image 段，日志带 `verified`；只回段类型不回 file/url；超时 2s 不拖慢回复 | 网关不支持 get_msg 时只告警；目前不改用户可见文案 |

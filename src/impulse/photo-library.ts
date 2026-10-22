@@ -371,6 +371,30 @@ const PHOTOS: PhotoDef[] = [
       past: ["以前公司楼下就有一家", "很久没喝这家了"],
     },
   },
+  {
+    id: "karen-selfie-sea",
+    file: "karen-selfie-sea.jpg",
+    tags: ["selfie", "portrait", "me", "sea", "beach", "dusk"],
+    scene: "dusk",
+    eras: ["today", "yesterday"],
+    captions: {
+      today: ["傍晚海边，风把头发吹乱了", "今天来海边走了走"],
+      yesterday: ["昨天在海边拍的", "昨天傍晚的海风很舒服"],
+      past: [],
+    },
+  },
+  {
+    id: "karen-selfie-night",
+    file: "karen-selfie-night.jpg",
+    tags: ["selfie", "portrait", "me", "night", "street", "city"],
+    scene: "night",
+    eras: ["today", "yesterday"],
+    captions: {
+      today: ["晚上出来走走，霓虹灯挺好看", "今天街上人不多"],
+      yesterday: ["昨天夜里拍的", "昨天这条街的灯特别亮"],
+      past: [],
+    },
+  },
 ];
 
 /** 图库里是否有匹配这些场景标签的照片（用于发图前的相关性判定）。 */

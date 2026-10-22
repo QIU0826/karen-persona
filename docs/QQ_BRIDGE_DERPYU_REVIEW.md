@@ -280,7 +280,7 @@ working_memory(
 
 ### KAREN 现状
 
-- 出站：27 张本地图库 + 约 154 条配文、本机生图、11 张 Twemoji、
+- 出站：29 张本地图库 + 约 154 条配文、本机生图、11 张 Twemoji、
   从聊天持续收集的表情库（500 上限）、按情绪/时段/冷却/概率挑（`src/impulse/stickers.ts`、
   `src/data/sticker-library.ts`）。
 - 入站：`src/ai/vision.ts` 先调视觉把图转成文字，再进对话；贴纸收集的 tags 是

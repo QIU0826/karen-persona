@@ -90,8 +90,8 @@ describe("photo-library 时间关系模型", () => {
     expect(low!.caption.length).toBeGreaterThan(0);
   });
 
-  it("图库有 27 张，连续 12 次选择就有明显多样性（修复「配文重复」）", () => {
-    expect(getPhotoCatalog().length).toBe(27);
+  it("图库有 29 张，连续 12 次选择就有明显多样性（修复「配文重复」）", () => {
+    expect(getPhotoCatalog().length).toBe(29);
     let n = 0;
     const random = () => ((n++ * 37) % 100) / 100;
     const photos = new Set<string>();
