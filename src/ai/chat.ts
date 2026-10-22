@@ -19,7 +19,29 @@ export interface ChatOptions {
   shortTermContext?: string;
   /** 消息复杂度分级。未提供时从 messages 自动推断。 */
   complexity?: MessageComplexity;
+  /**
+   * v0.9.26：本轮用户消息附带的图片（data URL，最多 2 张）。
+   * 直接作为 image content part 给多模态模型，避免「只看到 220 字描述」。
+   * 历史消息仍保留文字描述；只在当前轮附加图片，不把 base64 存进会话。
+   */
+  images?: string[];
 }
+
+/** 发送给模型的图片 content part（OpenAI 兼容格式）。 */
+export interface ChatImagePart {
+  type: "image_url";
+  image_url: { url: string; detail?: "high" | "low" | "auto" };
+}
+
+type ChatTextPart = { type: "text"; text: string };
+type ChatContentPart = ChatTextPart | ChatImagePart;
+type ChatInputMessage = { role: "system" | "user" | "assistant"; content: string };
+export type ChatFinalMessage =
+  | { role: "system" | "assistant"; content: string }
+  | { role: "user"; content: string | ChatContentPart[] };
+
+/** 最多附带几张原图；再多会让 prompt token 与请求体过大。 */
+const MAX_ATTACHED_IMAGES = 2;
 
 /** 请求超时默认值（30s），可用环境变量 LLM_TIMEOUT_MS 覆盖。 */
 const DEFAULT_LLM_TIMEOUT_MS = 30_000;
@@ -71,20 +93,42 @@ function getLlmTimeoutMs(): number {
 }
 
 /** 拼接短期 + 长期上下文到首条 system message 末尾（保持原有行为）。 */
-function buildFinalMessages(
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+export function buildFinalMessages(
+  messages: ChatInputMessage[],
   options?: ChatOptions
-): Array<{ role: "system" | "user" | "assistant"; content: string }> {
-  const finalMessages = [...messages];
+): ChatFinalMessage[] {
+  const finalMessages: ChatFinalMessage[] = messages.map((m) => ({ ...m }));
   const contextParts: string[] = [];
   if (options?.shortTermContext) contextParts.push(options.shortTermContext);
   if (options?.ragContext) contextParts.push(options.ragContext);
 
   if (contextParts.length > 0 && finalMessages[0]?.role === "system") {
     finalMessages[0] = {
-      ...finalMessages[0],
-      content: finalMessages[0].content + "\n" + contextParts.join("\n"),
+      role: "system",
+      content: String(finalMessages[0].content) + "\n" + contextParts.join("\n"),
     };
+  }
+
+  // v0.9.26：把本轮图片附到最后一条 user message 上。
+  // 只接受 data:image/*，最多 2 张；图片不进会话历史，历史仍由调用方写入的文字描述承担。
+  const images = (options?.images ?? [])
+    .filter((url): url is string => typeof url === "string" && /^data:image\//i.test(url))
+    .slice(0, MAX_ATTACHED_IMAGES);
+  if (images.length > 0) {
+    let lastUser = -1;
+    for (let i = finalMessages.length - 1; i >= 0; i -= 1) {
+      if (finalMessages[i]!.role === "user") { lastUser = i; break; }
+    }
+    if (lastUser >= 0) {
+      const text = String(finalMessages[lastUser]!.content);
+      finalMessages[lastUser] = {
+        role: "user",
+        content: [
+          { type: "text", text },
+          ...images.map((url): ChatImagePart => ({ type: "image_url", image_url: { url, detail: "high" } })),
+        ],
+      };
+    }
   }
   return finalMessages;
 }
@@ -311,7 +355,7 @@ interface DeepSeekChatBody {
  */
 function buildChatBody(args: {
   modelConfig: ModelConfig;
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  messages: ChatFinalMessage[];
   maxTokens: number;
   thinking: ThinkingConfig;
 }): DeepSeekChatBody {

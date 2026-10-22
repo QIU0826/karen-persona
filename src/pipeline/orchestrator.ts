@@ -375,6 +375,8 @@ export interface ProcessOptions {
   skipUserPersist?: boolean;
   /** 跳过主动发图（群聊默认不发生活照：省一次图片决策/资源读写） */
   skipPhoto?: boolean;
+  /** v0.9.26：当前轮用户图片（data URL），直接作为 image content part 给多模态模型 */
+  images?: string[];
 }
 
 // ── 初始化 ────────────────────────────────────
@@ -1837,7 +1839,7 @@ export async function processMessage(
   // M. AI 回复（近期消息已在 messages 里，避免 shortTerm 重复注入；只注入长期 RAG）
   const complexity = classifyComplexity(userInput);
   if (complexity !== "normal") logs.push(`[路由] ${complexity}(${userInput.length}字)`);
-  let rawReply = await chat(messages, persona, { ragContext, complexity });
+  let rawReply = await chat(messages, persona, { ragContext, complexity, images: opts.images });
   // 确定性兜底：prompt 已禁用「考我/记性没那么差」话术，模型偶尔仍会说 → 出站前删掉分句
   const guarded = stripMemoryDeflection(rawReply);
   if (guarded.changed) {
@@ -2353,7 +2355,7 @@ export async function* processMessageStream(
 
   try {
     try {
-      const stream = chatStream(messages, persona, { ragContext, complexity });
+      const stream = chatStream(messages, persona, { ragContext, complexity, images: opts.images });
 
       for await (const token of stream) {
         fullReply += token;
@@ -2400,7 +2402,7 @@ export async function* processMessageStream(
       // 流式失败：仅在尚未发送任何内容时降级为非流式，避免「半句 + 完整」重复发送
       if (!yieldedAny) {
         console.log("[流式] 失败，回落到非流式");
-        fullReply = await chat(messages, persona, { ragContext });
+        fullReply = await chat(messages, persona, { ragContext, images: opts.images });
         const lines = fullReply.split("\n").filter(Boolean);
         for (const line of lines) {
           const frag = stripOutboundMediaMarkers(line.trim());

@@ -78,7 +78,7 @@ import {
   type GroupMessageEvent,
   type CqCode,
 } from "./onebot.js";
-import { describeImage, labelStickerImage } from "../ai/vision.js";
+import { describeImage, fetchImageAsDataUrl, labelStickerImage } from "../ai/vision.js";
 import { checkMediaUrl } from "../ai/media-url.js";
 import { handleControlCommand } from "../commands/control.js";
 import { exportUserData } from "../data/user-export.js";
@@ -291,6 +291,8 @@ interface DeferredPrivateContext {
   text: string;
   state: ConversationState;
   sharedBase: SharedBase;
+  /** v0.9.26：本轮图片 data URL；进程内补发时保留，重启后靠文字描述兜底 */
+  images?: string[];
   /** 持久化队列中的记录 id（恢复/重试时必需） */
   pendingId?: number;
 }
@@ -354,6 +356,7 @@ async function deliverDeferredPrivateReply(ctx: DeferredPrivateContext): Promise
       userId: ctx.userId,
       userName: ctx.userName,
       options: { bypassGate: true, skipUserPersist: true },
+      images: ctx.images,
       logPrefix: "延迟补发",
     });
     if (outcome.deferredDelayMs !== undefined) {
@@ -1407,10 +1410,12 @@ async function streamPrivateReply(params: {
   userId: number;
   userName: string;
   options?: { bypassGate?: boolean; skipUserPersist?: boolean };
+  /** v0.9.26：本轮图片 data URL（最多 2 张），附到当前 user message */
+  images?: string[];
   /** 日志前缀，用于区分正常回复与延迟补发 */
   logPrefix?: string;
 }): Promise<PrivateStreamOutcome> {
-  const { state, text, userId, options } = params;
+  const { state, text, userId, options, images } = params;
   const logPrefix = params.logPrefix ?? "回复";
   const pendingSnapshot = userPending.get(userId) ?? 0;
   let sentCount = 0;
@@ -1428,7 +1433,7 @@ async function streamPrivateReply(params: {
   const pacing = buildPacing(state);
   let pacedFirstTextSent = false;
 
-  const stream = processMessageStream(state, text, options);
+  const stream = processMessageStream(state, text, { ...options, images });
   for await (const frag of stream) {
     // 中断检测：用户发来新消息 → 丢弃剩余 burst
     if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
@@ -1822,6 +1827,7 @@ async function handlePrivateBatch(
 
   // 处理每个事件的媒体，合并文本
   const texts: string[] = [];
+  const attachedImages: string[] = [];
   let inboundSticker = false;
   for (const event of events) {
     // v0.9.24：处理消息里的**所有**媒体段。旧逻辑只看第一个非文本段，
@@ -1846,11 +1852,17 @@ async function handlePrivateBatch(
         if (imageCount > 5) {
           syntheticText = "[图片]（超过单条 5 张，已跳过识别）";
         } else if (media.data?.url) {
-          const desc = await describeImage(media.data.url);
+          // v0.9.26：先下载一次 data URL。既用于历史描述，也把原图附给当前轮模型
+          //（最多 2 张），避免模型只看到 220 字描述、看不到截图细节。
+          const dataUrl = await fetchImageAsDataUrl(media.data.url);
+          const desc = dataUrl
+            ? await describeImage(dataUrl)
+            : await describeImage(media.data.url);
           if (desc) {
             syntheticText = `[图片：${desc}]`;
             log.info("vision.described", { chars: charCount(desc), source: "private" });
           }
+          if (dataUrl && attachedImages.length < 2) attachedImages.push(dataUrl);
           maybeCollectSticker(media.data.url, ownerForQq(userId), desc);
         }
       }
@@ -2036,12 +2048,13 @@ async function handlePrivateBatch(
       text,
       userId,
       userName,
+      images: attachedImages,
     });
 
     // 消息门判定晚点回：调度定时补发（用户消息此时已落库）
     if (outcome.deferredDelayMs !== undefined) {
       scheduleDeferredPrivateReply(
-        { userId, userName, text, state, sharedBase },
+        { userId, userName, text, state, sharedBase, images: attachedImages },
         outcome.deferredDelayMs,
       );
     } else if (outcome.sentCount > 0) {

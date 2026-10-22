@@ -132,6 +132,17 @@ async function downloadAsDataUrl(imageUrl: string): Promise<string | null> {
 }
 
 /**
+ * 把入站图片下载成 data URL（v0.9.26，图片直进多模态用）。
+ * 与 describeImage 共用同一套大小/像素护栏；data URL 直接放行。
+ */
+export async function fetchImageAsDataUrl(imageUrl: string): Promise<string | null> {
+  const checked = checkMediaUrl(imageUrl, { allowDataUrl: true });
+  if (!checked.ok || !checked.url) return null;
+  if (checked.url.startsWith("data:")) return checked.url;
+  return downloadAsDataUrl(checked.url);
+}
+
+/**
  * 用 DeepSeek Flash 识别图片内容：截图优先转述文字，画面给 40-80 字描述。
  * 失败时返回 null，调用方应降级为 [图片] 占位符。
  */

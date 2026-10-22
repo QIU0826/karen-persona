@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.9.26 — 2026-10-22
+
+**当前轮图片直进多模态（qq-bridge 深读 P1 第三批）。**
+
+### Added
+
+- **图片原图直进多模态**：QQ 私聊收到图片时，本轮图片（最多 2 张，data URL）作为
+  `image_url` content part 附到最后一条 user message，直接交给 DeepSeek Flash；
+  不再只让模型看视觉描述。改动 `src/ai/chat.ts`（`ChatOptions.images` +
+  `buildFinalMessages` content parts）、`src/ai/vision.ts`（`fetchImageAsDataUrl`）、
+  `src/bridge/qq.ts`（图片只下载一次，同时拿描述与原图）、
+  `src/pipeline/orchestrator.ts`（reply/stream/fallback 传 images）。
+- 历史消息仍保留视觉描述，所以下一轮追问「刚才那张图」不会丢上下文；延迟补发在进程内
+  保留图片，桥接重启后靠文字描述兜底（不持久化 base64）。
+- 群聊图片暂未接（群聊仍走文字描述）。
+
+### Verified
+
+- 真实 DeepSeek 抽检：把一张猫笑脸作为 `image_url` 发送，回复正确识别
+  「黄色卡通猫脸、圆睁眼睛、粉色鼻子、咧嘴、既开心又调皮」；
+- `npm test`：**127 文件 / 1479 用例**全部通过；`tsc`/lint 0；`eval:offline` 5/5；
+- 新增测试：`chat.test.ts` 5 条（附图/上限/非 data 过滤/无图回归/system 上下文）；
+- 未省掉 vision 调用（历史描述仍生成），这是有意的折中：先保证当前轮看清 + 后续追问有上下文；
+  真实 QQ 图片轮与 bridge E2E 中的图片请求形态待进一步抽检。
+
 ## v0.9.25 — 2026-10-22
 
 **媒体安全护栏 + 未说完先等（qq-bridge 深读第二批）。**

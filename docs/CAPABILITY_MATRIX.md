@@ -3,7 +3,7 @@
 > 目的：一眼看清**哪些是真做了、做到什么程度**。每一行都必须能在代码里找到对应，
 > 数字必须能复现（跑法写在「怎么复现」列）。不确定的地方写清楚弱项，不写成优点。
 >
-> 最后更新：2026-10-22（v0.9.25）。配套文档：[README](../README.md)（对外）、
+> 最后更新：2026-10-22（v0.9.26）。配套文档：[README](../README.md)（对外）、
 > [CLAUDE.md](../CLAUDE.md)（开发总控）、[PRODUCT_AUDIT.md](PRODUCT_AUDIT.md)（审计与路线图）。
 
 图例：✅ 可用 ｜ 🚧 有明确限制 ｜ ⛔ 受阻（代码就绪但依赖未到位）
@@ -71,6 +71,7 @@
 | 图片识别 | `src/ai/vision.ts` | ✅ | DeepSeek Flash 多模态，`detail=high`，截图逐字转述 ≤200 字 | 中文小字/模糊截图仍可能错 |
 | **入站媒体数组化（v0.9.24）** | `src/bridge/onebot.ts` | ✅ | `detectMediaList` 按消息段返回全部媒体：多图/引用+图不再丢；单条最多识别 5 张；mface summary 单行化限长，防伪造 prompt 段落；6 条单测 | 群聊仍走旧的单媒体路径（待接）；大图/像素上限未做 |
 | **发送落地校验（v0.9.24）** | `src/bridge/onebot.ts`、`src/bridge/qq.ts` | ✅ | 语音/照片/贴纸发完用 `get_msg` 回读 record/image 段，日志带 `verified`；只回段类型不回 file/url；超时 2s 不拖慢回复 | 网关不支持 get_msg 时只告警；目前不改用户可见文案 |
+| **当前轮图片直进多模态（v0.9.26）** | `src/ai/chat.ts`、`src/ai/vision.ts` | ✅ | `buildFinalMessages` 把最多 2 张 data URL 作为 `image_url` 附到最后一条 user message；`fetchImageAsDataUrl` 复用大小/像素护栏；历史仍保留 vision 描述；真实 DeepSeek 抽检正确识别卡通猫脸；5 条单测 | 图片只在当前轮发送，历史消息仍是文字描述；没有省掉 vision 调用；群聊未接 |
 | **图像像素/媒体 URL 护栏（v0.9.25）** | `src/ai/image-meta.ts`、`src/ai/media-url.ts` | ✅ | 文件头解析 PNG/GIF/JPEG/WebP 宽高；>64MP 在 base64 前拒绝；URL 只允许 http(s)、拒绝 credentials/控制字符/超长；可选 `KAREN_MEDIA_ALLOWED_HOSTS`；12 条单测 | 完整 SSRF 私网判定未做（NapCat 本机 URL 不能一刀切禁私网）；WebP 只覆盖常见容器 |
 | **收藏表情语义备注（v0.9.24）** | `src/data/sticker-library.ts`、`src/ai/vision.ts` | 🚧 | `note/scene_tags` 迁移；采集后后台 vision 打标；选择按 上下文匹配 ×25 + 情绪 ×10 - 使用次数 打分；保留概率/冷却/最近不复用；11 条单测 | **只做半套**：模型仍不知道她发了哪张表情（没有工具循环）；打标默认随采集开启，可 `KAREN_STICKER_LABEL=off` |
 
@@ -90,7 +91,7 @@
 
 | 项 | 状态 | 实测 |
 |---|---|---|
-| 单元/集成测试 | ✅ | **126 文件 / 1474 用例**（`npm test`）；验证方法论见 [VERIFICATION_PLAYBOOK.md](VERIFICATION_PLAYBOOK.md)；覆盖核对见 [COVERAGE_AUDIT.md](COVERAGE_AUDIT.md)；文档数字核对见 `doc-facts.test.ts` |
+| 单元/集成测试 | ✅ | **127 文件 / 1479 用例**（`npm test`）；验证方法论见 [VERIFICATION_PLAYBOOK.md](VERIFICATION_PLAYBOOK.md)；覆盖核对见 [COVERAGE_AUDIT.md](COVERAGE_AUDIT.md)；文档数字核对见 `doc-facts.test.ts` |
 | 类型检查 + lint | ✅ | `tsc --noEmit` 0 错误；`npm run lint`（未使用代码）0 违规 |
 | 覆盖率 | 🚧 | 行 59.21%（`npm run test:coverage`，CI 阈值守护） |
 | 离线评测守门 | ✅ | `npm run eval:offline`：facts≥95% / recall@8≥90% / 合并≥95% / anti-forget PASS / 锚点≥30 条；5 项全达标；CI 已接入 |
