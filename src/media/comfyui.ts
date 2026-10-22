@@ -276,6 +276,7 @@ async function guardGenerated(
   options: ComfyWorkflowOptions,
   deps: GenerateDeps,
   requireNoHands: boolean,
+  expectCharacter: boolean,
 ): Promise<GenerateResult> {
   if (!result.ok || !result.bytes) return result;
   const forced = imageBackend() === "qwen-image-edit" || imageBackend() === "z-image";
@@ -284,6 +285,7 @@ async function guardGenerated(
     context: options.context ?? options.prompt,
     prompt: options.prompt,
     requireNoHands,
+    expectCharacter,
   });
   if (!audit) return { ok: false, reason: "guard_unavailable", elapsedMs: result.elapsedMs };
   if (!audit.pass) return { ok: false, reason: "guard_rejected", elapsedMs: result.elapsedMs };
@@ -311,6 +313,7 @@ async function generateViaZImage(
     options,
     deps,
     false,
+    false,
   );
 }
 
@@ -334,6 +337,7 @@ async function generateViaQwen(
     options,
     deps,
     true,
+    true,
   );
 }
 
@@ -355,7 +359,7 @@ export async function generateImage(
     return generateViaZImage(options, deps);
   }
   if (imageBackend() === "service") {
-    return guardGenerated(await generateViaService(options, fetchImpl, timeoutMs), options, deps, false);
+    return guardGenerated(await generateViaService(options, fetchImpl, timeoutMs), options, deps, false, false);
   }
   const startedAt = Date.now();
   const base = comfyBaseUrl();
@@ -403,6 +407,7 @@ export async function generateImage(
       { ok: true, bytes, elapsedMs: Date.now() - startedAt },
       options,
       deps,
+      false,
       false,
     );
   } catch (err) {

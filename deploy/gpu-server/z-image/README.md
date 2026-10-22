@@ -46,3 +46,10 @@ curl -s -X POST http://127.0.0.1:18111/generate \
 - 输出未经过 `image-guard`；接入主路径时必须先 `image:audit`，不合格回退。
 - 主要用途：场景图/草稿/中文文字；"同一个人"仍走 Qwen-Image-Edit-2511。
 - 先只占 GPU3，不动 GPU2 的 VoxCPM2 + Qwen-Image-Edit。
+
+## 实测（2026-10-22）
+
+- GPU3 加载后 20.5GB；推理约 25.5GB。
+- 832×1216、9 步：首张 5.9s，热图 4.8–4.9s。
+- `KAREN_IMAGE_BACKEND=z-image` + `KAREN_IMAGE_GUARD=on` 产品路径实测 `ok=true` 4.9s。
+- 场景图质检需传 `expectCharacter=false`（`generateImage` 已自动传）。

@@ -205,6 +205,7 @@ describe("generateImage：失败一律返回 ok:false（调用方回退图库）
       context: "她在咖啡馆窗边",
       prompt: "x",
       requireNoHands: false,
+      expectCharacter: false,
     });
   });
 
@@ -270,6 +271,7 @@ describe("generateImage：失败一律返回 ok:false（调用方回退图库）
       context: "聊天上下文",
       prompt: "x",
       requireNoHands: true,
+      expectCharacter: true,
     });
   });
 
@@ -298,6 +300,7 @@ describe("generateImage：失败一律返回 ok:false（调用方回退图库）
       context: "她刚说想看看晚霞",
       prompt: "傍晚屋顶",
       requireNoHands: false,
+      expectCharacter: false,
     });
   });
 

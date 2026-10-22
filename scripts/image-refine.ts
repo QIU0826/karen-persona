@@ -93,7 +93,7 @@ async function main(): Promise<void> {
       return;
     }
 
-    const audit = await auditImage(generated.png, { context, prompt, requireNoHands: simple });
+    const audit = await auditImage(generated.png, { context, prompt, requireNoHands: simple, expectCharacter: true });
     if (!audit) {
       console.error(`[image:refine] try ${attempt + 1}: guard unavailable -> fail-closed`);
       lastAudit = null;

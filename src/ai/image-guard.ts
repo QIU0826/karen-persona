@@ -32,6 +32,8 @@ export interface ImageAuditContext {
   prompt?: string;
   /** 本次是否要求画面不出现手/手臂（simple 模式） */
   requireNoHands?: boolean;
+  /** 本次是否要求 Karen 出镜；场景图/风景图传 false */
+  expectCharacter?: boolean;
 }
 
 interface RawAudit {
@@ -122,10 +124,14 @@ export async function auditImage(
   const noHandsRule = ctx.requireNoHands
     ? "本次硬性要求：画面中不允许出现任何手或手臂；只要出现手/手臂，hands_ok=false 且 scene_match=false。"
     : "";
+  const characterRule = (ctx.expectCharacter ?? true)
+    ? "character_match：检查是否仍是同一个蓝发短发少女；脸型、发色、年龄、气质应一致。"
+    : "character_match：本次是场景/照片，不要求 Karen 出镜；画面无人时填 true；若出现主人物，不能与 Karen 明显冲突，但不要因为没人而判 false。";
   const userText = [
     `聊天上下文/期望画面：${(ctx.context ?? "").slice(0, 1200)}`,
     ctx.prompt ? `生图 prompt：${ctx.prompt.slice(0, 1200)}` : "",
     noHandsRule,
+    characterRule,
     AUDIT_PROMPT,
   ]
     .filter(Boolean)

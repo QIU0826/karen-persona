@@ -33,6 +33,7 @@ async function main(): Promise<void> {
     context,
     prompt: arg("prompt"),
     requireNoHands: hasFlag("require-no-hands"),
+    expectCharacter: !hasFlag("no-character"),
   });
   if (!audit) {
     console.error("[image:audit] guard unavailable/parse failed -> fail-closed");

@@ -226,3 +226,19 @@ Z-Image-Turbo：6B、Apache-2.0、8 步、1024px，适合场景/照片/中文文
 
 `buildScenePrompt` 现在除了场景标签，还会从 `lastReply` 提取具体线索（火锅/雨夜/看书/加班/猫…）放进 prompt；
 生成后再用同一段 `lastReply + tags` 做 image-guard 检查。这样"她说刚吃完火锅"不会生成咖啡馆。
+
+### Z-Image 实测（2026-10-22）
+
+- GPU3 加载后 **20.5GB**；推理时约 **25.5GB**，GPU3 余 ~59GB；
+- 832×1216、9 步：首张 **5.9s**，热图 **4.8–4.9s**；
+- 产品路径 `KAREN_IMAGE_BACKEND=z-image` + `KAREN_IMAGE_GUARD=on`：`generateImage` **4.9s 返回 ok=true**；
+- 场景图不要求 Karen 出镜：`generateImage` 自动传 `expectCharacter=false`；
+  手工检查用 `npm run image:audit -- ... --no-character`；
+- 空镜晚霞图通过质检；带手持手机的画面按场景图也通过（手部结构正常，不属于手部畸形）。
+
+### 角色 / 场景两种质检
+
+| 类型 | expectCharacter | requireNoHands | 用途 |
+|---|---|---|---|
+| Karen 自拍/精修 | true | true（simple 模式） | Qwen-Image-Edit，必须是她且不露手 |
+| 场景/风景/空镜 | false | false | Z-Image/本机 SDXL，不要求她出镜 |
