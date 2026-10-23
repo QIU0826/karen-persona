@@ -529,7 +529,11 @@ export function buildAnchorInjection(anchors: AnchorRow[]): string {
     loss: "失去",
   };
   const lines = anchors.map((a) => `- [${kindLabel[a.kind] ?? "记忆"}] ${a.summary}`);
-  return `\n## 你记得的关键时刻\n${lines.join("\n")}\n（这些是你们真实经历过的事，可以自然提起，但别每次都说。）\n`;
+  return (
+    `\n## 你记得的关键时刻\n${lines.join("\n")}\n` +
+    "（标「共同经历」的才是你们一起做过的；其他是你听说过的或她自己的经历，" +
+    "引用时别把主语说错，也别每次都说。）\n"
+  );
 }
 
 // ── 日记忆 ────────────────────────────────────

@@ -15,6 +15,7 @@
  */
 import type { Database } from "better-sqlite3";
 import { addAnchor, findAnchorBySummary, type AnchorKind } from "../data/memory-v2.js";
+import { validateAnchorVerdict } from "../data/anchor-validation.js";
 
 /** 候选门槛：低于这个显著度的日常闲聊不值得复筛 */
 /**
@@ -37,6 +38,8 @@ export interface RefineCandidate {
   content: string;
   salience: number;
   createdAt: number;
+  /** t2_episodes.source（chat / internal_monologue / persona_journal…），用于归属校验。 */
+  source: string;
 }
 
 export interface AnchorVerdict {
@@ -71,6 +74,8 @@ export function buildAnchorRefinePrompt(input: {
     "规则：",
     "- 值得记：承诺/约定、关系变化(表白/和好/吵架)、重大生活事件(生病/搬家/换工作/失去)、说过的秘密、第一次做的事；",
     "- 不值得记：日常闲聊、天气、心情抱怨、一次性玩笑、重复的日常；",
+    "- shared_experience 只能标「你们双方都参与」的事；对方和自己同事/朋友的事不是共同经历，摘要里要能看出是你们一起做的；",
+    "- first_meet 只在对话里明确说过相识经过时才标，不确定就不标；promise 要写清答应/约定了什么，不能把「工作」这类泛词当约定；",
     "- summary 用第三人称一句话，≤24 字，必须能在原文里找到依据，不要脑补；",
     "- kind 只能取：first_meet/confession/conflict/makeup/promise/secret/shared_experience/loss；",
     "- 每条候选都必须给一个判断（anchor true 或 false）。",
@@ -121,7 +126,14 @@ export function parseAnchorVerdicts(
 
 /** 选出当天值得复筛的候选（边界显著度、还没进锚点）。 */
 export function selectRefineCandidates(
-  rows: Array<{ id: number; content: string; salience: number | null; anchor_id: number | null; created_at: number }>,
+  rows: Array<{
+    id: number;
+    content: string;
+    salience: number | null;
+    anchor_id: number | null;
+    created_at: number;
+    source?: string | null;
+  }>,
 ): RefineCandidate[] {
   return rows
     .filter((r) => r.anchor_id === null || r.anchor_id === undefined)
@@ -130,6 +142,7 @@ export function selectRefineCandidates(
       content: (r.content ?? "").replace(/\s+/g, " ").trim().slice(0, SNIPPET_CHARS),
       salience: Number(r.salience ?? 0),
       createdAt: r.created_at,
+      source: r.source ?? "unknown",
     }))
     .filter((c) => c.content.length > 0 && c.salience >= REFINE_MIN_SALIENCE && c.salience < REFINE_MAX_SALIENCE)
     .slice(0, REFINE_MAX_CANDIDATES);
@@ -158,17 +171,38 @@ export async function runAnchorRefine(input: {
 }): Promise<AnchorRefineResult> {
   const now = input.now ?? Date.now();
   const bounds = dayBounds(input.day);
-  let rows: Array<{ id: number; content: string; salience: number | null; anchor_id: number | null; created_at: number }>;
+  let rows: Array<{
+    id: number;
+    content: string;
+    salience: number | null;
+    anchor_id: number | null;
+    created_at: number;
+    source: string | null;
+  }>;
   try {
     rows = input.db
       .prepare(
-        `SELECT id, content, salience, anchor_id, created_at FROM t2_episodes
+        `SELECT id, content, salience, anchor_id, created_at, source FROM t2_episodes
          WHERE persona_id = ? AND created_at >= ? AND created_at < ?
          ORDER BY salience DESC LIMIT 60`,
       )
       .all(input.personaId, bounds.start, bounds.end) as typeof rows;
   } catch {
-    return { ok: false, reason: "db_failed", candidates: 0, created: 0 };
+    // 旧库/测试库可能没有 source 列：退回不选 source，归属校验按 unknown 处理。
+    try {
+      const legacy = input.db
+        .prepare(
+          `SELECT id, content, salience, anchor_id, created_at FROM t2_episodes
+           WHERE persona_id = ? AND created_at >= ? AND created_at < ?
+           ORDER BY salience DESC LIMIT 60`,
+        )
+        .all(input.personaId, bounds.start, bounds.end) as Array<
+        Omit<(typeof rows)[number], "source">
+      >;
+      rows = legacy.map((row) => ({ ...row, source: null }));
+    } catch {
+      return { ok: false, reason: "db_failed", candidates: 0, created: 0 };
+    }
   }
 
   const candidates = selectRefineCandidates(rows);
@@ -207,14 +241,29 @@ export async function runAnchorRefine(input: {
       }
       continue;
     }
+    // P0-4：归属/证据校验（防止「我和同事一起吃的」被记成共同经历、泛词被记成约定）
+    const validation = validateAnchorVerdict(candidate, verdict);
+    if (!validation.ok) {
+      console.log(`  [锚点] 拒绝一条（${verdict.kind}）：${validation.reason}`);
+      try {
+        input.db
+          .prepare("UPDATE t2_episodes SET anchor_id = ? WHERE id = ? AND persona_id = ?")
+          .run(REFINE_REJECTED_SENTINEL, candidate.id, input.personaId);
+      } catch {
+        // 标记失败不影响其它条目
+      }
+      continue;
+    }
+    const kind = validation.kind ?? verdict.kind;
+    const summary = validation.summary ?? verdict.summary;
     // v0.8.17：先看是否已存在同 summary 的锚点——已存在只是"复述强化"，不算新建
     // （否则日志会写"新增 N 条"，实际一条没建，误导排查）。
-    const before = findAnchorBySummary(input.db, input.personaId, input.ownerId, verdict.summary);
+    const before = findAnchorBySummary(input.db, input.personaId, input.ownerId, summary);
     const id = addAnchor(input.db, {
       personaId: input.personaId,
       ownerId: input.ownerId,
-      kind: verdict.kind,
-      summary: verdict.summary,
+      kind,
+      summary,
       quote: candidate.content.slice(0, 200),
       strength: Math.max(0.5, candidate.salience),
       now,

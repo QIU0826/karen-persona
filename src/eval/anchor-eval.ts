@@ -153,6 +153,7 @@ export async function runAnchorEvalLive(options: {
       content: c.content,
       salience: 0.6,
       createdAt: 0,
+      source: "chat",
     }));
     const raw = await options.chatFn(
       buildAnchorRefinePrompt({

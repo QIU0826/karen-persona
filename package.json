@@ -74,7 +74,8 @@
     "indextts:start": "bash services/indextts2/run.sh",
     "indextts:smoke": "tsx scripts/indextts-smoke.ts",
     "voice:ref:add": "tsx scripts/voice-ref-add.ts",
-    "photo:reply-eval": "tsx scripts/photo-reply-eval.ts --seeds 2"
+    "photo:reply-eval": "tsx scripts/photo-reply-eval.ts --seeds 2",
+    "anchor:audit": "tsx scripts/anchor-audit.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",
