@@ -95,7 +95,10 @@ export function buildMediaRequestNote(request: MediaRequest): string {
     lines.push("他想要个表情包（系统会发）：别在文字里写 [表情包]/[表情] 标记，也别只说「我有」却不给。");
   }
   if (request.voice) {
-    lines.push("他想听你说话（语音由系统发出）：别在文字里写 [语音] 标记，也不用解释「我要发语音了」。");
+    lines.push(
+      "他现在想听你说话（这一轮由系统直接发语音，不会先发文字）：直接说内容，" +
+        "不要写 [语音] 标记，也不要说「等会儿/稍后/改天给你录」——系统现在就会发。",
+    );
   }
   if (lines.length === 0) return "";
   return `\n[本条内部提示，不要照抄] ${lines.join(" ")}`;

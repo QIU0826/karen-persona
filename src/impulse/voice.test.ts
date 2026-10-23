@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_VOICE_SETTINGS,
   decideVoice,
+  decideVoiceFirst,
   isInQuietHours,
   pickVoiceLine,
   resolveVoiceSettings,
@@ -290,5 +291,70 @@ describe("shouldThrottleVoice（v0.8.11 连发语音）", () => {
 
   it("非点名：由冷却逻辑处理，这里不额外拦截", () => {
     expect(shouldThrottleVoice(0, 1_000, false)).toBe(false);
+  });
+});
+
+
+describe("decideVoiceFirst（P0-3：语音代替文字）", () => {
+  function input(overrides: Partial<Parameters<typeof decideVoiceFirst>[0]> = {}) {
+    return {
+      requested: false,
+      inboundVoice: false,
+      closeness: 5,
+      hour: 15,
+      quietHours: { start: 2, end: 7 },
+      now: 1_000_000,
+      ...overrides,
+    };
+  }
+
+  it("点名要语音：即使免打扰/冷却也发（用户在等你开口）", () => {
+    const decision = decideVoiceFirst(
+      input({ requested: true, hour: 3, lastSentAt: 999_000 }),
+      settings(),
+      { random: () => 0.99 },
+    );
+    expect(decision).toEqual({ speak: true, reason: "requested" });
+  });
+
+  it("总开关关 / 危机 / 亲密度不够 / TTS 不可用 → 文字", () => {
+    expect(decideVoiceFirst(input({ requested: true }), settings({ enabled: false })).reason).toBe(
+      "disabled",
+    );
+    expect(decideVoiceFirst(input({ isCrisis: true }), settings()).reason).toBe("crisis");
+    expect(
+      decideVoiceFirst(input({ requested: true, closeness: 1 }), settings({ minCloseness: 2.5 }))
+        .reason,
+    ).toBe("closeness");
+    expect(
+      decideVoiceFirst(input({ requested: true }), settings(), { speechAvailable: false }).reason,
+    ).toBe("tts_unavailable");
+  });
+
+  it("非点名时免打扰/冷却生效", () => {
+    expect(decideVoiceFirst(input({ hour: 3 }), settings()).reason).toBe("quiet_hours");
+    expect(
+      decideVoiceFirst(input({ lastSentAt: 1_000_000 - 60_000 }), settings({ cooldownMinutes: 8 }))
+        .reason,
+    ).toBe("cooldown");
+  });
+
+  it("对方发语音：60% 概率回语音", () => {
+    expect(
+      decideVoiceFirst(input({ inboundVoice: true }), settings(), { random: () => 0.59 }).speak,
+    ).toBe(true);
+    expect(
+      decideVoiceFirst(input({ inboundVoice: true }), settings(), { random: () => 0.6 }).speak,
+    ).toBe(false);
+  });
+
+  it("普通轮按 voice_probability / 2 偶尔整条语音", () => {
+    expect(decideVoiceFirst(input(), settings({ probability: 0.12 }), { random: () => 0.05 })).toEqual({
+      speak: true,
+      reason: "random",
+    });
+    expect(
+      decideVoiceFirst(input(), settings({ probability: 0.12 }), { random: () => 0.06 }).speak,
+    ).toBe(false);
   });
 });

@@ -665,6 +665,7 @@ export function buildGateContext(
       5 * 60 * 1000;
   const msgType: GateContext["messageType"] =
     /^\[图片/.test(trimmed) ? "image" : /^\[语音/.test(trimmed) ? "voice" : "text";
+  const mediaRequest = detectMediaRequest(trimmed);
 
   return {
     personaId: persona.name,
@@ -678,6 +679,7 @@ export function buildGateContext(
     messageCountToday,
     isRapidFollowUp,
     isQuickChat: trimmed.length <= 6 && /[\?？]/.test(trimmed),
+    isMediaRequest: mediaRequest.photo || mediaRequest.sticker || mediaRequest.voice,
     closeness: persona.relationship.closeness,
     dailyRhythm: persona.world.dailyRhythm as Array<{ time: string; activity: string }>,
     quietHours: {
@@ -774,6 +776,17 @@ function noteRepetitionIfAny(
 /** 他在问"当下"（现在啥样/这会儿拍的/马上看看）→ 照片必须是今天的（v0.8.11） */
 function asksForPresentMoment(userText: string): boolean {
   return /(现在|此刻|这会儿|这时候|马上|刚刚|此时此刻)/.test(userText ?? "");
+}
+
+/**
+ * 发图的时间关系：点名「拍张照看看」默认是现在（今天），
+ * 只有明确说「以前/小时候/老照片」才翻旧图；避免用户要现在却收到「昨天的晚饭」。
+ */
+function preferredPhotoEra(userText: string): "today" | "past" | undefined {
+  const text = userText ?? "";
+  if (/(以前|之前|小时候|旧照|老照片|好多年前|过去的)/.test(text)) return "past";
+  if (asksForPresentMoment(text) || detectMediaRequest(text).photo) return "today";
+  return undefined;
 }
 
 /** 未化解的冲突：给她的下一条回复一个「还没缓过来」的处境，而不是当没事发生 */
@@ -2015,7 +2028,7 @@ export async function processMessage(
           // v0.9：相关性判定需要知道"她刚说了什么 / 他在聊什么"
           lastReply: rawReply,
           userText: userInput,
-          preferEra: asksForPresentMoment(userInput) ? "today" : undefined,
+          preferEra: preferredPhotoEra(userInput),
         });
     if (photo) {
       imageUrl = photo.imageUrl;
@@ -2489,7 +2502,7 @@ export async function* processMessageStream(
           preferredTags: detectPhotoSceneTags(userInput),
           lastReply: fullReply,
           userText: userInput,
-          preferEra: asksForPresentMoment(userInput) ? "today" : undefined,
+          preferEra: preferredPhotoEra(userInput),
         }).catch(() => null),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), Number(process.env.KAREN_PHOTO_SHARE_TIMEOUT_MS) || 12_000)),
       ]);

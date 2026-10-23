@@ -10,7 +10,11 @@
  * 保证纯函数可测试、无隐式全局状态。
  *
  * 真实 TTS/SILK 能力见 `src/ai/tts.ts`；本模块只做决策，便于单测与后续复用（CLI/Web）。
+ *
+ * v0.9.32（P0-3）：新增 `decideVoiceFirst()`——决定「这一轮整条用语音代替文字」。
+ * 之前是文字发完再补一条念同一句的语音（复读），现在改成二选一。
  */
+import { isQuietHour } from "./message-gate.js";
 
 export interface VoiceSettings {
   /** 总开关（默认 false，显式开启才发语音）。 */
@@ -280,4 +284,83 @@ export function shouldThrottleVoice(
   if (lastSentAt === undefined) return false;
   const minGapMs = requested ? 20_000 : 0;
   return now - lastSentAt < minGapMs;
+}
+
+
+/** 「语音优先」决策的输入（P0-3）。 */
+export interface VoiceFirstInput {
+  /** 用户明确点名要语音（发条语音/说句话听听）。 */
+  requested: boolean;
+  /** 用户这一条本身就是语音消息（转写成功时）。 */
+  inboundVoice: boolean;
+  closeness: number;
+  hour: number;
+  isGroup?: boolean;
+  quietHours?: { start: number; end: number };
+  isCrisis?: boolean;
+  /** 上一次发语音的时间戳（bridge 侧维护）。 */
+  lastSentAt?: number;
+  now?: number;
+}
+
+export interface VoiceFirstDecision {
+  /** true = 这一轮用语音代替文字；false = 正常文字回复。 */
+  speak: boolean;
+  /** 稳定 reason，便于日志/测试。 */
+  reason: string;
+}
+
+export interface VoiceFirstDeps {
+  random?: () => number;
+  /** TTS 是否可用（bridge 启动时探测后传入）。 */
+  speechAvailable?: boolean;
+}
+
+/**
+ * 决定这一轮是否「整条用语音回复」而不是文字。
+ *
+ * 规则（按优先级）：
+ * - 总开关关 / 危机 / 群聊未开 / 亲密度不够 / TTS 不可用 → 文字；
+ * - 点名要语音 → 语音（不吃免打扰/冷却，用户在等你开口）；
+ * - 免打扰时段 → 文字（不主动制造夜间语音）；
+ * - 刚发过语音 → 冷却，文字；
+ * - 用户自己发语音 → 60% 概率用语音回（她也在说话）；
+ * - 其余按 `voice_probability / 2` 偶尔整条语音（真人也会懒得打字直接说）。
+ */
+export function decideVoiceFirst(
+  input: VoiceFirstInput,
+  settings: VoiceSettings = DEFAULT_VOICE_SETTINGS,
+  deps: VoiceFirstDeps = {},
+): VoiceFirstDecision {
+  if (!settings.enabled) return { speak: false, reason: "disabled" };
+  if (input.isCrisis) return { speak: false, reason: "crisis" };
+  if (input.isGroup && settings.allowedInGroup !== true) {
+    return { speak: false, reason: "group" };
+  }
+  if (deps.speechAvailable === false) return { speak: false, reason: "tts_unavailable" };
+  if (input.closeness < settings.minCloseness) return { speak: false, reason: "closeness" };
+  if (input.requested) return { speak: true, reason: "requested" };
+
+  const now = input.now ?? Date.now();
+  if (input.quietHours && isQuietHour(input.hour, input.quietHours)) {
+    return { speak: false, reason: "quiet_hours" };
+  }
+  if (
+    input.lastSentAt !== undefined &&
+    now - input.lastSentAt < settings.cooldownMinutes * 60_000
+  ) {
+    return { speak: false, reason: "cooldown" };
+  }
+
+  const random = deps.random ?? Math.random;
+  if (input.inboundVoice) {
+    return random() < 0.6
+      ? { speak: true, reason: "inbound_voice" }
+      : { speak: false, reason: "inbound_voice_skip" };
+  }
+
+  // 不点名时把「整条回复变语音」的概率减半：它比「补一条语音」打扰更强。
+  return random() < settings.probability / 2
+    ? { speak: true, reason: "random" }
+    : { speak: false, reason: "random_skip" };
 }

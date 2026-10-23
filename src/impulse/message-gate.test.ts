@@ -1,7 +1,7 @@
 /**
  * 消息门免打扰时段测试（M1-4 基础能力）。
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { decideGate, isQuietHour, type GateContext } from "./message-gate.js";
 
 function ctx(overrides: Partial<GateContext> = {}): GateContext {
@@ -70,5 +70,43 @@ describe("decideGate 免打扰", () => {
   it("start == end 时关闭免打扰", () => {
     const action = decideGate(ctx({ currentHour: 3, quietHours: { start: 0, end: 0 } }));
     expect(action.type).toBe("reply");
+  });
+});
+
+
+describe("点名要多媒体不掷工作延迟（P0-3 真机回归）", () => {
+  it("工作时段 + 已聊很多 + 点名要语音 → 立即回复", () => {
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      const action = decideGate(
+        ctx({
+          currentHour: 15,
+          isWorkHours: true,
+          messageCountToday: 20,
+          closeness: 3,
+          isMediaRequest: true,
+        }),
+      );
+      expect(action.type).toBe("reply");
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  it("同样条件但不是多媒体请求 → 会被工作延迟（证明上一条不是碰巧）", () => {
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      const action = decideGate(
+        ctx({
+          currentHour: 15,
+          isWorkHours: true,
+          messageCountToday: 20,
+          closeness: 3,
+        }),
+      );
+      expect(action.type).toBe("delay");
+    } finally {
+      randomSpy.mockRestore();
+    }
   });
 });

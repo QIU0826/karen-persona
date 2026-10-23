@@ -30,6 +30,12 @@ export interface GateContext {
   isQuickChat: boolean;
   /** 亲密度 0-10 */
   closeness: number;
+  /**
+   * 用户明确索要多媒体（照片/表情/语音）。
+   * 这类请求是「现在就要」的行为触发，不应被工作忙/日常延迟门挡住；
+   * 否则真机出现「发条语音听听」被延迟 46 分钟、随后被新消息取消。
+   */
+  isMediaRequest?: boolean;
   /** 她的日常作息（匹配当前时段活动） */
   dailyRhythm?: DailySlot[];
   /** 免打扰时段（小时，支持小数；start === end 视为关闭） */
@@ -100,7 +106,10 @@ export function decideGate(ctx: GateContext): GateAction {
   const exemptEarlyMsg = ctx.messageCountToday < 3;
   const exemptRapid = ctx.isRapidFollowUp;
   const exemptQuick = ctx.isQuickChat;
-  const shouldConsiderDelay = !exemptEarlyMsg && !exemptRapid && !exemptQuick;
+  // 点名要照片/语音/表情包：不掷工作延迟（她可以边忙边拍/录一条，或直接拒绝）。
+  const exemptMediaRequest = ctx.isMediaRequest === true;
+  const shouldConsiderDelay =
+    !exemptEarlyMsg && !exemptRapid && !exemptQuick && !exemptMediaRequest;
 
   if (shouldConsiderDelay) {
     // P1-3: 多媒体更吸引注意力，基础概率更低

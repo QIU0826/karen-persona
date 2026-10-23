@@ -105,7 +105,7 @@ import { startHealthServer, type HealthServerHandle } from "../obs/health-server
 import { notifyDesktop } from "../obs/notify.js";
 import { startWebServer, type WebServerHandle } from "../web/server.js";
 import { isSpeechAvailable, synthesizeSpeech } from "../ai/tts.js";
-import { decideVoice, shouldThrottleVoice, type VoiceSettings } from "../impulse/voice.js";
+import { decideVoiceFirst } from "../impulse/voice.js";
 import { detectMediaRequest } from "../impulse/media-request.js";
 import {
   buildStickerContextHint,
@@ -1587,6 +1587,8 @@ async function streamPrivateReply(params: {
   stickerHint?: string;
   /** 日志前缀，用于区分正常回复与延迟补发 */
   logPrefix?: string;
+  /** P0-3：整条用语音代替文字（点名要语音/收到语音/低概率）。 */
+  voiceMode?: boolean;
 }): Promise<PrivateStreamOutcome> {
   const { state, text, userId, options, images, stickerHint } = params;
   const logPrefix = params.logPrefix ?? "回复";
@@ -1601,6 +1603,11 @@ async function streamPrivateReply(params: {
   let mergedTail = "";
   /** 每轮最多演一次「打错字撤回」，避免多气泡放大触发率 */
   let typoDecided = false;
+  /** P0-3：voice-first 时先攒着文字，合成成功就只发语音；失败再回退文字。 */
+  const voiceFirst = params.voiceMode === true;
+  let bufferedText = "";
+  /** 危机轮强制文字（求助资源后不能只跟一条语音）。 */
+  let forceText = false;
 
   // v0.6：这一轮的打字节奏（人设 × 情绪 × 时段），整轮复用
   const pacing = buildPacing(state);
@@ -1621,6 +1628,8 @@ async function streamPrivateReply(params: {
     }
 
     if (frag.qqFace) {
+      // voice-first 不发 QQ 表情：语音条后面再接表情像机器人补装饰。
+      if (voiceFirst) continue;
       // 最后一条：QQ 表情（流结束后追加）
       await sleep(400 + Math.random() * 400);
       if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
@@ -1645,12 +1654,20 @@ async function streamPrivateReply(params: {
       // 合规：危机求助资源（程序生成，独立消息）
       sendPrivateMsg(userId, frag.safetyMessage);
       safetySent = true;
+      forceText = true;
       log.info("compliance.crisis_resources_sent", { user_id: userId });
       continue;
     }
 
     const outboundText = stripOutboundMediaMarkers(frag.text);
     if (!outboundText) continue;
+
+    // voice-first：先攒文字，等流结束后再决定发语音还是回退文字。
+    if (voiceFirst && !forceText) {
+      bufferedText += (bufferedText ? "\n" : "") + outboundText;
+      sentText = bufferedText;
+      continue;
+    }
 
     // 当轮去重：同一轮里几乎相同的话只发一次（流式分条常见）
     if (isWithinTurnDuplicate(outboundText, sentFragments)) {
@@ -1696,6 +1713,39 @@ async function streamPrivateReply(params: {
       deferred: logPrefix !== "回复",
     });
     sentCount++;
+  }
+
+  // P0-3：voice-first 的收尾——语音成功只发语音；失败/危机回退文字。
+  if (voiceFirst) {
+    const flushBufferedAsText = async (): Promise<void> => {
+      const lines = bufferedText
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) await sleep(typingTimeFor(lines[i]!, pacing));
+        sendPrivateMsg(userId, lines[i]!);
+        log.info("reply.sent", {
+          user_id: userId,
+          chars: charCount(lines[i]!),
+          deferred: logPrefix !== "回复",
+        });
+        sentCount++;
+      }
+      sentText = lines.join("\n");
+      bufferedText = "";
+    };
+
+    if (bufferedText && !forceText && !state.interrupted) {
+      const voiceSent = await sendVoiceNote(userId, state, bufferedText);
+      if (voiceSent) {
+        sentCount++;
+        return { sentCount, interrupted: false, sentText, safetySent, photoSent };
+      }
+      log.warn("voice.first_fallback_text", { user_id: userId });
+    }
+    if (bufferedText) await flushBufferedAsText();
+    return { sentCount, interrupted: false, sentText, safetySent, photoSent };
   }
 
   // 超出气泡上限的内容合并成一条发出（保持在 4 条以内，又不会丢话）
@@ -1895,74 +1945,22 @@ async function isSpeechReady(): Promise<boolean> {
  * - 亲密度/免打扰/冷却/概率/危机语境都会拦截
  * - 发送前按语音时长等待（像真人先录完再发）；调用方用 void 调用，不阻塞主流程
  */
-async function maybeSendVoice(
+/**
+ * 合成并发送一条语音（P0-3）——决策在 `decideVoiceFirst`，这里只做 TTS + 发送。
+ * 失败返回 false，由调用方回退成文字（绝不静默吞掉回复）。
+ */
+async function sendVoiceNote(
   userId: number,
-  config: AppConfig,
   state: ConversationState,
-  outcome: PrivateStreamOutcome,
-  opts: { requested?: boolean; mediaSentThisTurn?: boolean } = {},
-): Promise<void> {
-  if (!config.voice_enabled) return;
-  if (outcome.safetySent || outcome.interrupted) return;
-  // 同一轮/相邻轮不连发语音（点名要也至少隔 20s）
-  if (shouldThrottleVoice(userLastVoiceAt.get(userId), Date.now(), opts.requested === true)) {
-    log.info("voice.throttled", { user_id: userId });
-    return;
-  }
-  // 同一轮已经发过照片/贴纸就不再补语音：真人不会连发三种形态
-  // （但用户点名要语音时例外——他明确想听，就给一条）
-  if (!opts.requested && (outcome.photoSent || opts.mediaSentThisTurn)) return;
-  if (!outcome.sentText.trim()) return;
-  if (!(await isSpeechReady())) return;
-
-  const settings: VoiceSettings = {
-    enabled: true,
-    // loadConfig 一定会给出数值；这里兜底防止老配置文件/测试桩漏字段
-    probability: opts.requested ? 1 : (config.voice_probability ?? 0.12),
-    minCloseness: config.voice_min_closeness ?? 2.5,
-    cooldownMinutes: config.voice_cooldown_minutes ?? 8,
+  text: string,
+): Promise<boolean> {
+  const config = state.config;
+  const speech = await synthesizeSpeech(text, {
     maxChars: config.voice_max_chars ?? 40,
-    allowedInGroup: config.voice_group_enabled === true,
-  };
-  const decision = decideVoice(
-    {
-      text: outcome.sentText,
-      closeness: state.persona.relationship.closeness,
-      hour: new Date().getHours(),
-      isGroup: false,
-      // 用户点名要语音时，免打扰时段不再拦截（她正在回他，不是主动打扰）
-      quietHours: opts.requested
-        ? undefined
-        : { start: config.quiet_hours_start, end: config.quiet_hours_end },
-    },
-    settings,
-    // 点名要语音时不吃冷却（他明确想听），其余情况按冷却节流
-    {
-      lastSentAt: opts.requested ? undefined : userLastVoiceAt.get(userId),
-      speechAvailable: true,
-    },
-  );
-  // 点名要语音但这一轮没有「适合念出来的句子」时，从回复里截一段短的兜底，
-  // 避免出现「嘴上说发了语音、实际什么都没发」的言行不一致。
-  let line = decision.line;
-  if (!line && opts.requested) {
-    line = outcome.sentText
-      .replace(/\[CQ:[^\]]+\]/g, "")
-      .replace(/[^\p{Script=Han}A-Za-z0-9，、。！？\s]/gu, "")
-      .replace(/\s+/g, "")
-      .slice(0, 24)
-      .trim();
-    if (Array.from(line).length < 4) line = undefined;
-  }
-  if (!line) return;
-
-  const speech = await synthesizeSpeech(line, {
-    maxChars: settings.maxChars,
     voice: config.voice_tts_voice,
     rate: config.voice_tts_rate,
     styleEnabled: config.voice_style_enabled !== false,
     style: {
-      // 语气跟着她此刻的情绪和作息走：开心快一点、深夜慢一点、偶尔带个语气词
       emotionVector: state.emotionState.vector,
       hour: new Date().getHours(),
       closeness: state.persona.relationship.closeness,
@@ -1970,11 +1968,11 @@ async function maybeSendVoice(
     },
   });
   if (!speech) {
-    log.warn("voice.synth_failed", { user_id: userId });
-    return;
+    log.warn("voice.synth_failed", { user_id: userId, mode: "voice_first" });
+    return false;
   }
 
-  // 真人会先录完再发：等待 ≈ 语音时长 + 一点操作时间（上限防止超长等待）
+  // 真人会先录完再发：等待 ≈ 语音时长 + 一点操作时间。
   const recordDelay = Math.min(
     speech.durationMs + VOICE_RECORD_PADDING_MS + Math.random() * 400,
     VOICE_MAX_SEND_DELAY_MS,
@@ -1986,15 +1984,59 @@ async function maybeSendVoice(
     "record",
     "voice",
   );
-  if (!sent.sent) return;
+  if (!sent.sent) return false;
   userLastVoiceAt.set(userId, Date.now());
   log.info("voice.sent", {
     user_id: userId,
+    mode: "voice_first",
     duration_ms: speech.durationMs,
     bytes: speech.byteLength,
     verified: sent.verified,
   });
+  return true;
 }
+
+/** 这一轮要不要整条用语音（P0-3）。点名/收到语音优先，普通轮低概率。 */
+async function resolveVoiceFirst(
+  userId: number,
+  state: ConversationState,
+  text: string,
+  inboundVoice: boolean,
+): Promise<{ voice: boolean; reason: string }> {
+  // 单测/E2E（vitest 子进程）里关闭随机语音，保证断言确定性；
+  // 需要覆盖语音链路时显式设 KAREN_VOICE_ALLOW_TEST=1。
+  if (process.env.NODE_ENV === "test" && process.env.KAREN_VOICE_ALLOW_TEST !== "1") {
+    return { voice: false, reason: "test_disabled" };
+  }
+  if ((state.config.voice_enabled ?? true) !== true) {
+    return { voice: false, reason: "disabled" };
+  }
+  const speechAvailable = await isSpeechReady();
+  const decision = decideVoiceFirst(
+    {
+      requested: detectMediaRequest(text).voice,
+      inboundVoice,
+      closeness: state.persona.relationship.closeness,
+      hour: new Date().getHours(),
+      quietHours: {
+        start: state.config.quiet_hours_start,
+        end: state.config.quiet_hours_end,
+      },
+      lastSentAt: userLastVoiceAt.get(userId),
+    },
+    {
+      enabled: true,
+      probability: state.config.voice_probability ?? 0.12,
+      minCloseness: state.config.voice_min_closeness ?? 2.5,
+      cooldownMinutes: state.config.voice_cooldown_minutes ?? 8,
+      maxChars: state.config.voice_max_chars ?? 40,
+      allowedInGroup: state.config.voice_group_enabled === true,
+    },
+    { speechAvailable },
+  );
+  return { voice: decision.speak, reason: decision.reason };
+}
+
 
 async function handlePrivateBatch(
   events: PrivateMessageEvent[],
@@ -2011,6 +2053,7 @@ async function handlePrivateBatch(
   const attachedImages: string[] = [];
   const pendingImageDescriptions: Array<Promise<string | null>> = [];
   let inboundSticker = false;
+  let inboundVoice = false;
   for (const event of events) {
     // v0.9.24：处理消息里的**所有**媒体段。旧逻辑只看第一个非文本段，
     // 图+图、引用+图、图+表情时会静默丢掉后面的图。
@@ -2049,6 +2092,7 @@ async function handlePrivateBatch(
 
       // v0.23：语音识别（QQ 语音条 SILK → 本地 whisper → 文本）
       if (media.type === "record") {
+        inboundVoice = true;
         const transcribed = await describeVoiceMessage(media.data?.url);
         if (transcribed) syntheticText = transcribed;
       }
@@ -2225,6 +2269,13 @@ async function handlePrivateBatch(
 
   try {
     const stickerHint = stickerHintFor(ownerForQq(userId), text);
+    // P0-3：先决定这一轮是语音还是文字；voice-first 时流式文字只会被攒起来。
+    const voiceMode = await resolveVoiceFirst(userId, state, text, inboundVoice);
+    log.info("voice.mode", {
+      user_id: userId,
+      mode: voiceMode.voice ? "voice" : "text",
+      reason: voiceMode.reason,
+    });
     const outcome = await streamPrivateReply({
       state,
       text,
@@ -2232,6 +2283,7 @@ async function handlePrivateBatch(
       userName,
       images: attachedImages,
       ...(stickerHint ? { stickerHint } : {}),
+      voiceMode: voiceMode.voice,
     });
     void applyImageDescriptions(state, text, pendingImageDescriptions);
 
@@ -2241,21 +2293,15 @@ async function handlePrivateBatch(
         { userId, userName, text, state, sharedBase, images: attachedImages, ...(stickerHint ? { stickerHint } : {}) },
         outcome.deferredDelayMs,
       );
-    } else if (outcome.sentCount > 0) {
-      // 用户点名要表情包/语音时，别装没听见：提高对应动作的概率
+    } else if (outcome.sentCount > 0 && !voiceMode.voice) {
+      // 用户点名要表情包时，别装没听见：提高对应动作的概率
       const mediaRequest = detectMediaRequest(text);
-      const stickerSent = await maybeSendSticker(
+      await maybeSendSticker(
         { kind: "private", userId },
         state,
         inboundSticker,
         { requested: mediaRequest.sticker && !mediaRequest.voice, contextText: text },
       );
-      void maybeSendVoice(userId, sharedBase.config, state, outcome, {
-        requested: mediaRequest.voice,
-        mediaSentThisTurn: stickerSent && !mediaRequest.voice,
-      }).catch((err: unknown) => {
-        log.warn("voice.error", { user_id: userId, error: errMessage(err) });
-      });
     }
   } catch (err: unknown) {
     log.error("reply.failed", { user_id: userId, error: errMessage(err) });
