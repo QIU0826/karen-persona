@@ -4,6 +4,7 @@ import { classifyComplexity } from "../ai/router.js";
 import { addMessage, buildChatMessages, loadSession, type ConversationSession } from "../data/history.js";
 import { buildMediaContextNote, hasRecentUserImage } from "./media-context.js";
 import { buildConsistencyInjection } from "./self-consistency.js";
+import { getPromiseInjection } from "../data/promise-ledger.js";
 import { applyTimeGapToMessages } from "./time-gap.js";
 import { decideGate, getBusyLevel, type GateAction, type GateContext } from "../impulse/message-gate.js";
 import {
@@ -1855,6 +1856,7 @@ export async function processMessage(
     factsContext +
     buildWorkingMemoryInjection(state) +
     buildConsistencyInjection(session.messages) +
+    getPromiseInjection(state.owner, state.storagePersona) +
     buildReflectionNote(state) +
     buildRelationshipDimsInjection(state) +
     buildFactConflictInjection(state) +
@@ -2361,6 +2363,7 @@ export async function* processMessageStream(
     factsContext +
     buildWorkingMemoryInjection(state) +
     buildConsistencyInjection(session.messages) +
+    getPromiseInjection(state.owner, state.storagePersona) +
     buildReflectionNote(state) +
     buildRelationshipDimsInjection(state) +
     buildFactConflictInjection(state) +
@@ -3115,6 +3118,7 @@ export async function processProactive(
     proactiveInject +
     buildWorkingMemoryInjection(state) +
     buildConsistencyInjection(session.messages) +
+    getPromiseInjection(state.owner, state.storagePersona) +
     t1ArcContext +
     avoidRepeatNote;
   const messages = buildChatMessages(session, fullSystem);

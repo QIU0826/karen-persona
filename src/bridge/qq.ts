@@ -134,6 +134,7 @@ import { isCharacterPhotoRequest, pickFallbackSelfie } from "../impulse/unsplash
 import { replyRefusesPhoto } from "../impulse/photo-refusal.js";
 import { generateSelfie, isSelfieGenerationEnabled, pickSelfieCaption } from "../media/selfie-generator.js";
 import { saveGeneratedImage } from "../media/generated-store.js";
+import { markPromisesDone, recordPromisesFromMessages } from "../data/promise-ledger.js";
 import {
   DEFAULT_TYPO_RECALL_SETTINGS,
   type TypoRecallSettings,
@@ -421,6 +422,10 @@ async function deliverDeferredPrivateReply(ctx: DeferredPrivateContext): Promise
     if (outcome.sentCount === 0) {
       log.info("gate.deferred_empty", { user_id: ctx.userId });
     }
+    recordTurnPromises(ctx.state, {
+      voiceSent: outcome.voiceSent === true,
+      photoSent: outcome.photoSent,
+    });
   } catch (err) {
     const msg = errMessage(err);
     log.error("gate.deferred_failed", { user_id: ctx.userId, error: msg });
@@ -1102,6 +1107,8 @@ interface PrivateStreamOutcome {
   safetySent: boolean;
   /** 本轮是否发过照片（同一轮不再补语音，避免多媒体叠在一起） */
   photoSent: boolean;
+  /** P1-1：本轮是否真的发出了一条语音（用于标记承诺已兑现）。 */
+  voiceSent?: boolean;
 }
 
 /**
@@ -1658,6 +1665,7 @@ async function streamPrivateReply(params: {
 
     if (frag.image) {
       await sendPhotoToUser(userId, frag.image, sentText);
+      markPromisesDone(state.owner, state.storagePersona, ["photo"]);
       photoSent = true;
       continue;
     }
@@ -1752,7 +1760,7 @@ async function streamPrivateReply(params: {
       const voiceSent = await sendVoiceNote(userId, state, bufferedText);
       if (voiceSent) {
         sentCount++;
-        return { sentCount, interrupted: false, sentText, safetySent, photoSent };
+        return { sentCount, interrupted: false, sentText, safetySent, photoSent, voiceSent: true };
       }
       log.warn("voice.first_fallback_text", { user_id: userId });
     }
@@ -2003,12 +2011,14 @@ async function sendVoiceNote(
   );
   if (!sent.sent) return false;
   userLastVoiceAt.set(userId, Date.now());
+  const done = markPromisesDone(state.owner, state.storagePersona, ["voice"]);
   log.info("voice.sent", {
     user_id: userId,
     mode: "voice_first",
     duration_ms: speech.durationMs,
     bytes: speech.byteLength,
     verified: sent.verified,
+    promises_done: done,
   });
   return true;
 }
@@ -2120,6 +2130,7 @@ async function sendRequestedSelfie(
           userRecentSelfieCaptions.get(userId) ?? [],
         );
         await sendPhotoToUser(userId, { file, caption }, lastReply);
+        markPromisesDone(state.owner, state.storagePersona, ["photo"]);
         userLastSelfieAt.set(userId, now);
         userRecentSelfieCaptions.set(
           userId,
@@ -2162,6 +2173,29 @@ async function sendRequestedSelfie(
     log.warn("selfie.error", { user_id: userId, error: errMessage(err) });
   } finally {
     selfieInFlight.delete(userId);
+  }
+}
+
+/** P1-1：每轮结束后从最近消息抽承诺/日程；本轮真发过语音/照片则顺手标记兑现。 */
+function recordTurnPromises(
+  state: ConversationState,
+  opts: { voiceSent?: boolean; photoSent?: boolean } = {},
+): void {
+  try {
+    recordPromisesFromMessages(
+      state.owner,
+      state.storagePersona,
+      state.session.messages,
+      Date.now(),
+    );
+    const kinds: Array<"voice" | "photo"> = [];
+    if (opts.voiceSent) kinds.push("voice");
+    if (opts.photoSent) kinds.push("photo");
+    if (kinds.length > 0) {
+      markPromisesDone(state.owner, state.storagePersona, kinds);
+    }
+  } catch {
+    // 承诺记账失败不影响回复
   }
 }
 
@@ -2448,6 +2482,10 @@ async function handlePrivateBatch(
         log.warn("selfie.spawn_failed", { user_id: userId, error: errMessage(err) });
       });
     }
+    recordTurnPromises(state, {
+      voiceSent: outcome.voiceSent === true,
+      photoSent: outcome.photoSent,
+    });
   } catch (err: unknown) {
     log.error("reply.failed", { user_id: userId, error: errMessage(err) });
     // 不发送「[系统] 消息发送失败」这类破坏人设的消息，只用一句人设内兜底

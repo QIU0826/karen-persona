@@ -75,7 +75,8 @@
     "indextts:smoke": "tsx scripts/indextts-smoke.ts",
     "voice:ref:add": "tsx scripts/voice-ref-add.ts",
     "photo:reply-eval": "tsx scripts/photo-reply-eval.ts --seeds 2",
-    "anchor:audit": "tsx scripts/anchor-audit.ts"
+    "anchor:audit": "tsx scripts/anchor-audit.ts",
+    "promises": "tsx scripts/promises.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",
