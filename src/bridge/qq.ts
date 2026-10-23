@@ -135,6 +135,7 @@ import {
   type TypoRecallSettings,
 } from "../impulse/typo-recall.js";
 import { intentSettingsFromTypo, planMessageIntent } from "../impulse/message-intent.js";
+import { findPendingVoicePromise, isVoiceFollowUp } from "../pipeline/self-consistency.js";
 
 // ── 常量 ────────────────────────────────────────
 
@@ -2012,9 +2013,24 @@ async function resolveVoiceFirst(
     return { voice: false, reason: "disabled" };
   }
   const speechAvailable = await isSpeechReady();
+  // P0-6：跨轮承诺兜底——她之前答应过语音还没兑现，用户来催（好了吗/语音呢…）
+  // 时也走 voice-first，而不是让模型继续嘴上「等会儿」。
+  const pendingVoicePromise = findPendingVoicePromise(
+    state.session.messages,
+    Date.now(),
+    userLastVoiceAt.get(userId),
+  );
+  const promiseFollowUp =
+    pendingVoicePromise !== null && isVoiceFollowUp(text);
+  if (promiseFollowUp) {
+    log.info("voice.promise_followup", {
+      user_id: userId,
+      age_min: Math.max(1, Math.round((Date.now() - pendingVoicePromise!.at) / 60_000)),
+    });
+  }
   const decision = decideVoiceFirst(
     {
-      requested: detectMediaRequest(text).voice,
+      requested: detectMediaRequest(text).voice || promiseFollowUp,
       inboundVoice,
       closeness: state.persona.relationship.closeness,
       hour: new Date().getHours(),

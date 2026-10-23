@@ -113,6 +113,29 @@ describe("working memory 注入格式", () => {
     const wm = await mod();
     expect(wm.getWorkingMemoryInjection("qq:1", "xiaoya")).toBe("");
   });
+
+  it("昨天写的「今天下午…」不再当进行中注入（P0-6）", async () => {
+    const wm = await mod();
+    const now = new Date(2026, 9, 23, 15, 0).getTime();
+    const yesterday = new Date(2026, 9, 22, 16, 40).getTime();
+    wm.upsertWorkingMemory({
+      ownerId: "qq:1",
+      personaId: "xiaoya",
+      kind: "topic",
+      text: "用户下午要见一个厉害的人，还没聊结果",
+      now: yesterday,
+    });
+    wm.upsertWorkingMemory({
+      ownerId: "qq:1",
+      personaId: "xiaoya",
+      kind: "topic",
+      text: "云南出差",
+      now: yesterday,
+    });
+    const text = wm.getWorkingMemoryInjection("qq:1", "xiaoya", now);
+    expect(text).not.toContain("下午要见");
+    expect(text).toContain("云南出差");
+  });
 });
 
 describe("parseWorkingMemoryJson / apply", () => {

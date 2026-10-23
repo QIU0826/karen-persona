@@ -103,6 +103,7 @@ export function buildDailyDigestPrompt(dayKey: string, messages: ChatLine[]): Da
       "- events 0-4 条，每条 ≤20 字，只写具体事件；",
       "- open_threads 0-3 条，每条 ≤20 字，写还没聊完/答应过的事；",
       "- 只允许写片段里出现过的内容，不要编造；片段里没有就留空数组。",
+      "- 人称固定：对方一律写「他」，她自己一律写「你」；不要把「你」写成「她」或人设名；不要输出 [stream]/[T3] 等系统标记。",
     ].join("\n"),
     user: `日期：${dayKey}\n片段：\n${lines || "（当天没有聊天）"}`,
   };

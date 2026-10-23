@@ -244,7 +244,17 @@ function relativeMinutes(ts: number, now: number): string {
  * 总预算 420 字，超出按 topic → thought → impression 顺序砍。
  */
 export function formatWorkingMemory(rows: WorkingMemoryRow[], now = Date.now()): string {
-  const topics = rows.filter((r) => r.kind === "topic").slice(0, 6);
+  // P0-6：昨天写的「今天下午/晚上要…」不能今天还当「进行中」注入——
+  // 真机里 10-22 16:40 的「下午要见一个厉害的人」到 10-23 下午还在注入，
+  // 会让她追问已经聊过/已经过去的事。
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+  const isStaleRelativeTopic = (row: WorkingMemoryRow): boolean =>
+    row.created_at < todayStart.getTime() &&
+    /(今天|今晚|下午|上午|晚上|刚才|明天|早上|中午)/.test(row.text);
+  const topics = rows
+    .filter((r) => r.kind === "topic" && !isStaleRelativeTopic(r))
+    .slice(0, 6);
   const thoughts = rows.filter((r) => r.kind === "thought").slice(0, 6);
   const impressions = rows.filter((r) => r.kind === "impression").slice(0, 4);
   if (topics.length + thoughts.length + impressions.length === 0) return "";
