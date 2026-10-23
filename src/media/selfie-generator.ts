@@ -78,7 +78,7 @@ export function inferSelfieScene(input: SelfieRequestInput): string {
   if (/雨/.test(text)) return "下雨的窗边，玻璃上有水珠";
   if (/海边|沙滩|海浪/.test(text)) return "傍晚的海边，风把头发吹起来";
   if (/公园|花|春天|外面走走/.test(text)) return "春天的公园长椅，自然光";
-  if (/夜|街|霓虹|路灯/.test(text)) return "夜晚街头，霓虹灯虚化背景";
+  if (/夜|街|霓虹|路灯/.test(text)) return "夜晚街头，远处霓虹灯虚化，人物脸部有柔和主光，环境光不要染色头发";
   if (/家|沙发|窝在|卧室|床上/.test(text)) return "家里的沙发上，暖色台灯";
   if (/店|咖啡|吧台|上班/.test(text)) return "咖啡馆吧台，木质台面和暖光";
   const hour = input.hour;

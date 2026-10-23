@@ -21,14 +21,17 @@
   「今天/昨天/以前」三套配文；替换图片时请同步更新标签/配文。
 - 商用前请自行复核图源许可；若替换为第三方素材，更新本文件并确认授权。
 
-## Karen 自拍缓存（2026-10-22）
+## Karen 自拍缓存（2026-10-23 重生成）
 
-`karen-selfie-cafe.jpg` 由 GPU2 的 Qwen-Image-Edit-2511 生成，参考图为项目内 `character-1/2`，
-已通过 `image:audit`（角色一致、无手部、场景/服装无明显异常）。它不是 Unsplash 图；
+5 张 `karen-selfie-{cafe,home,night,rain,sea}.jpg`（832×921 JPEG）由 GPU2 的
+Qwen-Image-Edit-2511 生成，参考图为宣传页人物 `promo/assets/character-2.jpg`，
+全部通过 image-guard（角色一致、无手部、场景无明显异常）。它们不是 Unsplash 图；
 用于用户明确说“发张你的自拍/看看你”时兜底，避免 Z-Image 场景模型生成一个不是 Karen 的人。
 
 ## 自拍统一画风
 
-从 2026-10-22 起，所有新自拍统一以 `karen-selfie-cafe.jpg` 为画风/角色参考：
-日系动漫插画、干净线稿、柔和赛璐璐 + 轻厚涂、通透皮肤、浅景深暖光、近景、不露手。
-生成命令：`npm run image:selfie -- --name <id> --context "<聊天上下文>" --prompt "<场景>"`。
+从 2026-10-23 起，所有新自拍统一以宣传页人物（`character-2.jpg`）为画风/角色参考：
+低饱和、细腻铅笔/墨线 + 淡彩水彩、轻微纸纹、中蓝发色（不要洗白/银白）、近景、不露手。
+运行时自拍由 `src/media/selfie-generator.ts` 异步生成（Qwen-Image-Edit + image-guard，
+失败换 seed 重试一次）；离线补图命令：
+`npm run image:selfie -- --name <id> --context "<聊天上下文>" --prompt "<场景>"`。
