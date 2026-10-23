@@ -3,6 +3,7 @@ import { chat, chatStream } from "../ai/chat.js";
 import { classifyComplexity } from "../ai/router.js";
 import { addMessage, buildChatMessages, loadSession, type ConversationSession } from "../data/history.js";
 import { buildMediaContextNote, hasRecentUserImage } from "./media-context.js";
+import { buildTimeGapNote } from "./time-gap.js";
 import { decideGate, getBusyLevel, type GateAction, type GateContext } from "../impulse/message-gate.js";
 import {
   insertT1Snapshot,
@@ -1848,6 +1849,7 @@ export async function processMessage(
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
     buildTurnMediaContext(state, userInput, opts) +
+    buildTimeGapNote(session, userInput) +
     buildTalkMoveInjection(state, userInput, crisis) +
     buildMentionPacingInjection(state) +
     buildInitiativeReplyNote(state, userInput, Boolean(crisis)) +
@@ -2352,6 +2354,7 @@ export async function* processMessageStream(
     avoidRepeatNote +
     buildMediaRequestNote(mediaRequest) +
     buildTurnMediaContext(state, userInput, opts) +
+    buildTimeGapNote(session, userInput) +
     buildTalkMoveInjection(state, userInput, crisis) +
     buildMentionPacingInjection(state) +
     buildInitiativeReplyNote(state, userInput, Boolean(crisis)) +
