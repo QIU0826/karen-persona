@@ -28,7 +28,15 @@ describe("detectMediaRequest 明确索要多媒体", () => {
   });
 
   it("要语音", () => {
-    for (const text of ["发条语音听听", "用语音说", "我想听听你的声音", "说句话听听嘛"]) {
+    for (const text of [
+      "发条语音听听",
+      "用语音说",
+      "我想听听你的声音",
+      "说句话听听嘛",
+      "语音呢",
+      "听你说话",
+      "说话",
+    ]) {
       expect(detectMediaRequest(text).voice, text).toBe(true);
     }
   });
