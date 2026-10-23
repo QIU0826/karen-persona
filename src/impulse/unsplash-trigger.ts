@@ -373,6 +373,14 @@ export function pickFallbackSelfie(state: ConversationState): PhotoShareResult |
   return shareLocalPhoto(state, ["selfie"]);
 }
 
+/** P1-4：主动消息附带的本地图（50% 自拍 / 50% 生活照）；图库选择器与回复路径共用。 */
+export function pickProactivePhoto(
+  state: ConversationState,
+  random: () => number = Math.random,
+): PhotoShareResult | null {
+  return random() < 0.5 ? shareLocalPhoto(state, ["selfie"]) : shareLocalPhoto(state);
+}
+
 /** 测试用：重置冷却 */
 export function resetCooldown(personaId?: string): void {
   if (personaId) {

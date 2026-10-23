@@ -107,6 +107,7 @@ import { notifyDesktop } from "../obs/notify.js";
 import { startWebServer, type WebServerHandle } from "../web/server.js";
 import { isSpeechAvailable, synthesizeSpeech } from "../ai/tts.js";
 import { decideVoiceFirst } from "../impulse/voice.js";
+import { decideProactiveMedia } from "../impulse/proactive-media.js";
 import { detectMediaRequest } from "../impulse/media-request.js";
 import {
   buildStickerContextHint,
@@ -131,7 +132,7 @@ import { isWithinTurnDuplicate } from "../persona/anti-repetition.js";
 import { stripOutboundMediaMarkers } from "../persona/outbound-markers.js";
 import { updateUserMessageContent } from "../data/history.js";
 import { shouldSendPhotoCaption } from "../impulse/photo-caption.js";
-import { isCharacterPhotoRequest, pickFallbackSelfie } from "../impulse/unsplash-trigger.js";
+import { isCharacterPhotoRequest, pickFallbackSelfie, pickProactivePhoto } from "../impulse/unsplash-trigger.js";
 import { replyRefusesPhoto } from "../impulse/photo-refusal.js";
 import { generateSelfie, isSelfieGenerationEnabled, pickSelfieCaption } from "../media/selfie-generator.js";
 import { saveGeneratedImage } from "../media/generated-store.js";
@@ -978,28 +979,93 @@ async function main() {
           .split("\n")
           .map((line) => stripOutboundMediaMarkers(line))
           .filter(Boolean);
-        for (const line of lines) {
-          // 中断检测：主动 burst 中用户回复了就停
-          const nowPending = userPending.get(userId) ?? 0;
-          if (nowPending > pendingSnapshot) {
-            log.info("proactive.interrupted", { user_id: userId });
-            state.interrupted = true;
-            break;
+
+        // P1-4：低频把主动消息改成语音，或文字后补一张本地图。
+        const proactiveMediaEnabled = (process.env.KAREN_PROACTIVE_MEDIA ?? "on") !== "off";
+        const mediaDecision = decideProactiveMedia({
+          voiceEnabled: proactiveMediaEnabled && (state.config.voice_enabled ?? true) === true,
+          photoEnabled: proactiveMediaEnabled,
+          closeness: state.persona.relationship.closeness,
+          hour: new Date().getHours(),
+          quietHours: {
+            start: state.config.quiet_hours_start,
+            end: state.config.quiet_hours_end,
+          },
+          lastVoiceAt: userLastVoiceAt.get(userId),
+          lastPhotoAt: userLastProactivePhotoAt.get(userId),
+          now: Date.now(),
+        });
+
+        let mediaVoiceSent = false;
+        if (
+          mediaDecision.kind === "voice" &&
+          (userPending.get(userId) ?? 0) <= pendingSnapshot &&
+          (await isSpeechReady())
+        ) {
+          const voiceSent = await sendVoiceNote(userId, state, result.reply);
+          if (voiceSent) {
+            mediaVoiceSent = true;
+            log.info("proactive.voice", {
+              user_id: userId,
+              channel: result.channel,
+              reason: mediaDecision.reason,
+            });
+          }
+        }
+
+        if (!mediaVoiceSent) {
+          for (const line of lines) {
+            // 中断检测：主动 burst 中用户回复了就停
+            const nowPending = userPending.get(userId) ?? 0;
+            if (nowPending > pendingSnapshot) {
+              log.info("proactive.interrupted", { user_id: userId });
+              state.interrupted = true;
+              break;
+            }
+
+            sendPrivateMsg(userId, line.trim());
+            log.info("proactive.sent", {
+              user_id: userId,
+              channel: result.channel,
+              chars: charCount(line.trim()),
+            });
+            await sleep(1500 + Math.random() * 2000);
+          }
+          if (result.qqFace) {
+            const nowPending = userPending.get(userId) ?? 0;
+            if (nowPending <= pendingSnapshot) {
+              await sleep(400 + Math.random() * 600);
+              sendPrivateMsg(userId, asCqCode(result.qqFace));
+            }
           }
 
-          sendPrivateMsg(userId, line.trim());
-          log.info("proactive.sent", {
-            user_id: userId,
-            channel: result.channel,
-            chars: charCount(line.trim()),
-          });
-          await sleep(1500 + Math.random() * 2000);
-        }
-        if (result.qqFace) {
-          const nowPending = userPending.get(userId) ?? 0;
-          if (nowPending <= pendingSnapshot) {
-            await sleep(400 + Math.random() * 600);
-            sendPrivateMsg(userId, asCqCode(result.qqFace));
+          // 语音没发时才考虑补图；用户中途回复就不再发。
+          if (
+            mediaDecision.kind === "photo" &&
+            (userPending.get(userId) ?? 0) <= pendingSnapshot
+          ) {
+            const photo = pickProactivePhoto(state);
+            if (photo) {
+              await sendPhotoToUser(
+                userId,
+                {
+                  ...(photo.imageFile ? { file: photo.imageFile } : {}),
+                  ...(photo.imageUrl ? { url: photo.imageUrl } : {}),
+                  caption: photo.caption,
+                },
+                result.reply,
+              );
+              userLastProactivePhotoAt.set(userId, Date.now());
+              if (recordRelationshipMilestone(state, "first-photo", "第一次给他发照片")) {
+                persistRuntimeState(state);
+              }
+              log.info("proactive.photo", {
+                user_id: userId,
+                channel: result.channel,
+                source: photo.source,
+                reason: mediaDecision.reason,
+              });
+            }
           }
         }
       } catch (err: unknown) {
@@ -1951,6 +2017,8 @@ const selfieInFlight = new Set<number>();
 const userLastSelfieAt = new Map<number, number>();
 const userRecentSelfieCaptions = new Map<number, string[]>();
 const SELFIE_COOLDOWN_MS = 90_000;
+/** P1-4：主动消息附带照片的上次发送时间（24h 冷却）。 */
+const userLastProactivePhotoAt = new Map<number, number>();
 /** 语音能力懒探测：null=未探测；false=本机不可用（之后不再尝试，静默降级为文字） */
 let speechAvailable: boolean | null = null;
 
