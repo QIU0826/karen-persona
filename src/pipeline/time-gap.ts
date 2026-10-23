@@ -30,5 +30,40 @@ export function buildTimeGapNote(
   if (!previous) return "";
   const gap = now - previous.timestamp;
   if (!Number.isFinite(gap) || gap < MIN_GAP_MS) return "";
-  return `\n[时间上下文，仅内部可见] 你和他上一轮对话在 ${formatGap(gap)}；他现在才回你。先自然接住时间差（例如“昨晚那么早就睡啦？今天起这么早”），不要把上一轮的时间点当成现在反问。`;
+
+  const nowLabel = new Date(now).toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const prevLabel = new Date(previous.timestamp).toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `\n[时间上下文，仅内部可见] 现在是 ${nowLabel}；上一轮对话在 ${prevLabel}（${formatGap(gap)}）。这是新的一天/新时段。除非他明确接着昨晚的事说，否则先自然接住时间差（问候、问今天安排、接当下），不要继续昨晚的话题，也不要把旧时间点当成现在反问。`;
+}
+
+/**
+ * 把时间提示直接贴到最后一条 user message 前面（prompt-only，不落库）。
+ * 放在 system 末尾容易被大 prompt 淹没；贴在当前输入旁更有效。
+ */
+export function applyTimeGapToMessages(
+  messages: Array<{ role: string; content: string }>,
+  session: ConversationSession,
+  currentInput: string,
+  now = Date.now(),
+): void {
+  const note = buildTimeGapNote(session, currentInput, now);
+  if (!note) return;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "user") {
+      messages[i]!.content = `${note.trim()}\n\n${messages[i]!.content}`;
+      return;
+    }
+  }
 }
