@@ -229,7 +229,10 @@ npm run dev
 | 首次引导 2.0 | ✅ | `npm run setup` 是「第一段对话」：写入会话 + `user_facts`（名字/城市/认识方式）+ 18+ 确认，并生成 `data/onboarding.json` 标记；CLI/QQ 首次聊天不再重复 18+ 确认（AI 披露默认关闭）；`npm run setup -- --force` 重设 |
 | 类型检查 + lint + 单测 + 端到端 + 覆盖率 + 评测守门 | ✅ | `npm run typecheck`（0 错误）、`npm run lint`（tsc 未使用代码检查，0 违规）、`npm test`（**110 文件 / 1316 用例**，含 mock-OneBot 桥接 E2E、setup E2E、人设包、多用户 Web、TTS 真实链路、相识编造守卫）、`npm run test:coverage`（行覆盖 59.21%，阈值守护）、`npm run eval:offline`（记忆 40 条 + 锚点 30 条，卡阈值，CI 跑） |
 | 结构化日志 | ✅ | 默认脱敏（消息只记长度/摘要，正文 `[redacted N chars]`；`LOG_CONTENT=1` 才输出 40 字预览）；TTY 可读，非 TTY JSON lines |
-| 健康检查 | ✅ | `GET http://127.0.0.1:18081/health`（仅本机；返回 ws/db/pending/成本/最近错误） |
+| 健康检查 | ✅ | `GET http://127.0.0.1:18081/health`（仅本机；返回 ws/db/pending/成本/最近错误）；2026-10-23 起增加 `status`/`dependencies`/`degraded`：按 `.env` 实际启用的 TTS/ASR/嵌入/生图逐项探活，降级不再静默 |
+| 服务体检 + 依赖告警 | ✅ | `npm run health`：一次性体检桥接 + TTS/ASR/嵌入/生图（任一不可达退出码 1）；`/health` 后台 60s 探活，依赖掉线/恢复时弹 macOS 通知（`KAREN_DESKTOP_NOTIFY=off` 可关）；见 [docs/OPS.md](docs/OPS.md) |
+| 守护与自启（macOS） | ✅ | `bash scripts/install-launchd.sh all`：桥接 / SSH 隧道（19102/19110-19113）/ 本地嵌入三个 LaunchAgent，KeepAlive + 登录自启；手动 `npm run qq` 仍可用 |
+| 数据备份 | ✅ | `npm run backup` 热备（含 WAL）+ `npm run backup:install` 每日 03:30；恢复前 `npm run backup:verify -- <日期目录>`；见 [docs/BACKUP.md](docs/BACKUP.md) |
 | 成本统计 | ✅ | `GET /cost` 7 日摘要；DeepSeek 峰谷价 + 缓存命中；主对话与旁路 LLM（事实抽取/独白/T3/视觉等）均按 `kind` 记账，Web 控制台可按模型/按用途查看 |
 | PM2 守护 | ✅ | 改跑 `dist/bridge/qq.js`，部署前需 `npm run build` |
 | CI（GitHub Actions） | ✅ | push/PR：Node 22 + `npm ci` + typecheck + lint + test；**ubuntu / macOS / Windows 三平台矩阵**；Linux 额外跑覆盖率基线 + **离线评测守门**（`npm run eval:offline`） |
@@ -250,6 +253,7 @@ npm run dev
 - **本地存储**：`data/`（SQLite 记忆库、会话 JSON）、`personas/`、`config.yaml`、`.env` 都在你自己的电脑里。
 - 本项目**不运营任何云端服务器**，不会把数据上传到作者那里，也没有任何遥测。
 - 注意：本地存储 ≠ 数据不出本机。用到的 LLM / 视觉 / 天气 / 图库服务都是第三方 API。
+- **备份**：`npm run backup` 用 SQLite Online Backup API 热备（含 WAL 里最新对话）到仓库同级 `karen-backups/`，默认保留 14 天；`npm run backup:install` 安装 macOS 每日 03:30 定时备份；恢复前用 `npm run backup:verify -- <日期目录>` 校验。详见 [docs/BACKUP.md](docs/BACKUP.md)。
 
 ### 哪些内容会离开你的电脑（如实说明）
 

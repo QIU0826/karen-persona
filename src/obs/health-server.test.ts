@@ -10,6 +10,7 @@ import path from "node:path";
 import net from "node:net";
 import http from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DependencySnapshot, DependencyStatus } from "./dependency-health.js";
 
 let dir: string;
 let handles: Array<{ stop(): void; server: http.Server }> = [];
@@ -127,11 +128,58 @@ describe("/health", () => {
     expect(String(body?.version)).toMatch(/^\d+\.\d+\.\d+/);
     expect(typeof body?.cost_today).toBe("number");
     expect(body?.last_error).toBeNull();
+    expect(body?.status).toBe("ok");
+    expect(body?.dependencies).toEqual([]);
+    expect(body?.dependencies_checked_at).toBeNull();
+    expect(body?.degraded).toEqual([]);
 
     // 不泄露敏感信息（本次没有任何凭据字段，但兜底断言）
     const raw = JSON.stringify(body);
     expect(raw).not.toContain("sk-");
     expect(raw).not.toContain("api_key");
+    vector.closeVectorDb();
+  });
+
+  it("status=degraded 时列出不可达依赖与 qq-bridge", async () => {
+    const { health, vector } = await loadModules();
+    const port = await getFreePort();
+    const down: DependencyStatus = {
+      name: "tts-voxcpm2",
+      role: "tts",
+      label: "VoxCPM2 语音合成",
+      url: "http://127.0.0.1:19102",
+      checkLoaded: true,
+      up: false,
+      latencyMs: 800,
+      error: "timeout",
+    };
+    const snapshot: DependencySnapshot = {
+      checkedAt: Date.now(),
+      statuses: [down],
+      degraded: [down],
+    };
+    const handle = health.startHealthServer({
+      port,
+      getWsConnections: () => 0,
+      startedAt: Date.now() - 180_000,
+      getDependencySnapshot: () => snapshot,
+    });
+    handles.push(handle!);
+    await waitListening(handle!.server);
+
+    const { status, body } = await getJson(handle!.port!, "/health");
+    expect(status).toBe(200);
+    expect(body?.status).toBe("degraded");
+    expect(body?.degraded).toContain("tts-voxcpm2");
+    expect(body?.degraded).toContain("qq-bridge");
+    const deps = body?.dependencies as Array<Record<string, unknown>>;
+    expect(deps[0]).toMatchObject({
+      name: "tts-voxcpm2",
+      up: false,
+      latency_ms: 800,
+      error: "timeout",
+    });
+    expect(typeof body?.dependencies_checked_at).toBe("number");
     vector.closeVectorDb();
   });
 

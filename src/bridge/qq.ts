@@ -102,6 +102,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import { createLogger, configureLogger } from "../obs/logger.js";
 import { startHealthServer, type HealthServerHandle } from "../obs/health-server.js";
+import { notifyDesktop } from "../obs/notify.js";
 import { startWebServer, type WebServerHandle } from "../web/server.js";
 import { isSpeechAvailable, synthesizeSpeech } from "../ai/tts.js";
 import { decideVoice, shouldThrottleVoice, type VoiceSettings } from "../impulse/voice.js";
@@ -748,10 +749,25 @@ async function main() {
   }
 
   // ── 可观测性：/health + /cost（仅 127.0.0.1；启动失败不影响桥接）──
+  // P0-2：/health 聚合 TTS/ASR/嵌入/生图依赖；掉线/恢复时弹 macOS 通知。
   const healthServer: HealthServerHandle | null = startHealthServer({
     port: config.health_port,
     getWsConnections: () => getConnectionStatus().count,
     getPendingReplies: () => countPendingReplies(),
+    enableDependencyMonitor: true,
+    onDependencySnapshot: (snapshot, previous) => {
+      if (!previous) return;
+      const previousDown = new Set(previous.degraded.map((status) => status.name));
+      const newlyDown = snapshot.degraded.filter((status) => !previousDown.has(status.name));
+      if (newlyDown.length > 0) {
+        notifyDesktop(
+          "Karen 依赖掉线",
+          `${newlyDown.map((status) => status.label).join("、")} 不可达；她可能在降级运行（旧图库/系统音/听不懂语音）。`,
+        );
+      } else if (previous.degraded.length > 0 && snapshot.degraded.length === 0) {
+        notifyDesktop("Karen 依赖恢复", "语音/图像/识别链路已恢复。");
+      }
+    },
   });
 
   // ── 本地 Web 控制台（只读四视图；仅 127.0.0.1；失败不影响桥接）──

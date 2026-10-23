@@ -6,10 +6,14 @@
  * 绝不让桥接进程崩溃。
  *
  * 路由：
- *   GET /health  → { ok, uptime, version, ws_connections, db_ok, pending_replies,
- *                    cost_today, last_error }
+ *   GET /health  → { ok, status, uptime, version, ws_connections, db_ok, pending_replies,
+ *                    cost_today, last_error, dependencies, dependencies_checked_at, degraded }
  *   GET /cost    → 最近 7 天成本摘要（by_day / by_model / total）
  *   其他路径/方法 → 404 JSON
+ *
+ * 说明：`ok` 仍表示「核心可用」（SQLite 可用），兼容旧调用方；`status=degraded` 表示
+ * 某个已配置依赖（TTS/ASR/嵌入/生图）不可达，或桥接 120s 后仍无 WS 连接。降级时 HTTP
+ * 仍返回 200（核心没死），但响应体与 `degraded` 字段会明确列出不可达项。
  *
  * 返回内容不含任何消息正文、token 或 Key（last_error 也经过 logger 脱敏）。
  *
@@ -22,6 +26,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { createLogger, getLastError } from "./logger.js";
 import { getCostReport, getTodayCostSummary } from "./cost-tracker.js";
+import {
+  getLastDependencySnapshot,
+  startDependencyMonitor,
+  type DependencySnapshot,
+} from "./dependency-health.js";
 import { getVectorDb } from "../data/vector.js";
 import { countPendingReplies } from "../data/pending-queue.js";
 
@@ -39,6 +48,14 @@ export interface HealthServerOptions {
   getPendingReplies?: () => number;
   /** 业务启动时间（uptime 基准），默认 startHealthServer 调用时刻。 */
   startedAt?: number;
+  /** 依赖快照读取（默认读模块缓存；测试可注入）。 */
+  getDependencySnapshot?: () => DependencySnapshot | null;
+  /** 是否启动后台依赖探活（桥接传 true；测试默认不启动）。 */
+  enableDependencyMonitor?: boolean;
+  /** 依赖探活间隔（毫秒，默认 60s，最小 5s）。 */
+  dependencyMonitorIntervalMs?: number;
+  /** 每次探活后回调（桥接用来做桌面告警）。 */
+  onDependencySnapshot?: (snapshot: DependencySnapshot, previous: DependencySnapshot | null) => void;
 }
 
 export interface HealthServerHandle {
@@ -49,8 +66,21 @@ export interface HealthServerHandle {
   stop(): void;
 }
 
+interface HealthDependencyPayload {
+  name: string;
+  role: string;
+  label: string;
+  url: string;
+  up: boolean;
+  latency_ms: number;
+  http_status?: number;
+  error?: string;
+}
+
 interface HealthPayload {
   ok: boolean;
+  /** ok=核心可用；degraded=有已配置依赖不可达 / WS 长时间为 0。 */
+  status: "ok" | "degraded";
   uptime: number;
   version: string;
   ws_connections: number;
@@ -58,6 +88,11 @@ interface HealthPayload {
   pending_replies: number;
   cost_today: number;
   last_error: string | null;
+  /** 已配置依赖的最近一次探活结果（未开启 monitor 时为空）。 */
+  dependencies: HealthDependencyPayload[];
+  dependencies_checked_at: number | null;
+  /** 具体降级项：`db` / `qq-bridge` / 依赖 name。 */
+  degraded: string[];
 }
 
 let cachedVersion: string | null = null;
@@ -96,9 +131,13 @@ function checkDbOk(): boolean {
 
 /** 组装 /health 响应（导出便于测试）。不含敏感信息。 */
 export function buildHealthPayload(
-  options: Pick<HealthServerOptions, "getWsConnections" | "getPendingReplies" | "startedAt">
+  options: Pick<
+    HealthServerOptions,
+    "getWsConnections" | "getPendingReplies" | "startedAt" | "getDependencySnapshot"
+  >
 ): HealthPayload {
   const startedAt = options.startedAt ?? Date.now();
+  const uptime = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
   const wsConnections = safeNumber(options.getWsConnections, 0);
   const pendingReplies = options.getPendingReplies
     ? safeNumber(options.getPendingReplies, 0)
@@ -112,15 +151,39 @@ export function buildHealthPayload(
   }
 
   const dbOk = checkDbOk();
+  const snapshot = (options.getDependencySnapshot ?? getLastDependencySnapshot)();
+  const dependencies: HealthDependencyPayload[] = (snapshot?.statuses ?? []).map((status) => ({
+    name: status.name,
+    role: status.role,
+    label: status.label,
+    url: status.url,
+    up: status.up,
+    latency_ms: status.latencyMs,
+    ...(status.httpStatus !== undefined ? { http_status: status.httpStatus } : {}),
+    ...(status.error !== undefined ? { error: status.error } : {}),
+  }));
+
+  const degraded: string[] = [];
+  if (!dbOk) degraded.push("db");
+  // 启动 120s 内 WS 尚未连上属于正常（NapCat 可能还没起）；之后仍为 0 视为降级。
+  if (wsConnections === 0 && uptime >= 120) degraded.push("qq-bridge");
+  for (const dependency of dependencies) {
+    if (!dependency.up && !degraded.includes(dependency.name)) degraded.push(dependency.name);
+  }
+
   return {
     ok: dbOk,
-    uptime: Math.max(0, Math.round((Date.now() - startedAt) / 1000)),
+    status: degraded.length === 0 ? "ok" : "degraded",
+    uptime,
     version: getAppVersion(),
     ws_connections: wsConnections,
     db_ok: dbOk,
     pending_replies: pendingReplies,
     cost_today: costToday,
     last_error: getLastError(),
+    dependencies,
+    dependencies_checked_at: snapshot?.checkedAt ?? null,
+    degraded,
   };
 }
 
@@ -231,9 +294,33 @@ export function startHealthServer(options: HealthServerOptions): HealthServerHan
   }
 
   let stopped = false;
+  const dependencyMonitor = options.enableDependencyMonitor
+    ? startDependencyMonitor({
+        ...(options.dependencyMonitorIntervalMs !== undefined
+          ? { intervalMs: options.dependencyMonitorIntervalMs }
+          : {}),
+        onSnapshot: (snapshot, previous) => {
+          const down = snapshot.degraded.map((status) => status.name);
+          const previousDown = new Set((previous?.degraded ?? []).map((status) => status.name));
+          const changed =
+            previous === null ||
+            down.length !== previousDown.size ||
+            down.some((name) => !previousDown.has(name));
+          if (changed) {
+            log.info("health.deps", {
+              checked_at: snapshot.checkedAt,
+              down,
+              total: snapshot.statuses.length,
+            });
+          }
+          options.onDependencySnapshot?.(snapshot, previous);
+        },
+      })
+    : null;
   const stop = (): void => {
     if (stopped) return;
     stopped = true;
+    dependencyMonitor?.stop();
     try {
       server.close();
     } catch {

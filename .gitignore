@@ -12,6 +12,10 @@ data/qq/
 data/voice-samples/
 data/voice-ref/
 data/stickers-collected/
+# 生成图/测试样本含她的照片，默认不入库（备份脚本会单独热备）
+data/generated/
+data/image-samples/
+data/realism-audit/
 vendor/
 # 本地模型统一放 KAREN_MODELS_DIR（默认 ~/Library/Application Support/karen/models），仓库内不落模型
 *.log
@@ -39,3 +43,4 @@ __pycache__/
 # GPU server local secrets (never commit)
 deploy/gpu-server/*.pem
 deploy/gpu-server/*.key
+data/*.txt
