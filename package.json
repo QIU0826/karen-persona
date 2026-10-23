@@ -76,7 +76,8 @@
     "voice:ref:add": "tsx scripts/voice-ref-add.ts",
     "photo:reply-eval": "tsx scripts/photo-reply-eval.ts --seeds 2",
     "anchor:audit": "tsx scripts/anchor-audit.ts",
-    "promises": "tsx scripts/promises.ts"
+    "promises": "tsx scripts/promises.ts",
+    "memory:audit": "tsx scripts/memory-audit.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",
