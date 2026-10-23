@@ -128,5 +128,8 @@ HF 直连不通、hf_hub 默认走 Xet CDN 也不可达；`hf-mirror.com` 可用
 - 客户端：`src/ai/qwen-omni.ts`，失败回退 SenseVoice → faster-whisper
 - 配置：`KAREN_ASR_BACKEND=qwen-omni`、`QWEN_OMNI_URL=http://127.0.0.1:19113`
 - 目标：transcript + tone/emotion/singing/sarcasm/background；不确定返回 uncertain
-- 当前状态：镜像已构建；模型还在下载；SSH/隧道一度中断，尚未启动/激活
-
+- 当前状态：**已部署到 GPU3**（18113，Mac 隧道 19113），21GB 权重，GPU3 约 51.5GB
+- 实测：首请求 8.3s 音频约 **15.6s**；热态 3.7–3.8s 音频约 **0.9–1.2s**
+- 情绪：happy 样本判 happy（confidence 1.0）、angry 样本判 angry（0.8）；参考音 tone/emotion 为 uncertain
+- 唱歌/阴阳怪气：参考音判 singing=no、sarcasm=uncertain；**尚无真实唱歌/阴阳怪气样本，不能承诺准确**
+- 桥接当前因 QQ/NapCat 未启动而 ws_connections=0，需先启动 QQ/NapCat 再验收

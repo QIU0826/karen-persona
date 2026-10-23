@@ -48,6 +48,19 @@ PROMPT = """听这段语音，只输出一个 JSON，不要 Markdown、不要解
 
 def _parse_json(raw: str) -> dict | None:
     text = (raw or "").strip()
+    # generate() 的 batch_decode 会把 system/user prompt 一起带回来；
+    # 只从 assistant 段/最后一个 transcript 字段附近取 JSON，避免解析到 prompt 模板。
+    marker = '\"transcript\"'
+    idx = text.rfind(marker)
+    if idx >= 0:
+        start = text.rfind("{", 0, idx)
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                obj = json.loads(text[start : end + 1])
+                return obj if isinstance(obj, dict) else None
+            except Exception:
+                pass
     text = re.sub(r"^```(?:json)?", "", text, flags=re.I).strip()
     text = re.sub(r"```$", "", text).strip()
     start = text.find("{")

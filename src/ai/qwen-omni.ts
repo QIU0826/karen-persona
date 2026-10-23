@@ -47,7 +47,8 @@ export function formatQwenOmniVoice(result: QwenOmniResult): string | null {
   else if (result.singing === "uncertain") parts.push("唱歌：不确定");
   if (result.sarcasm === "yes") parts.push("阴阳怪气：可能");
   else if (result.sarcasm === "uncertain") parts.push("阴阳怪气：不确定");
-  if (result.background) parts.push(`背景：${result.background}`);
+  const bg = (result.background ?? "").trim();
+  if (bg && !/^(no|none|无|没有|无背景)$/i.test(bg)) parts.push(`背景：${bg}`);
   return `${parts.join("｜")}]`;
 }
 
