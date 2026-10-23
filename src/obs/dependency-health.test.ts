@@ -68,6 +68,42 @@ describe("collectDependencies", () => {
     });
   });
 
+  it("KAREN_HEALTH_CLOUD=on 时加一个 DeepSeek 可达性探针", () => {
+    const specs = collectDependencies({ KAREN_HEALTH_CLOUD: "on" });
+    const cloud = specs.find((spec) => spec.name === "cloud-deepseek");
+    expect(cloud).toMatchObject({
+      name: "cloud-deepseek",
+      role: "cloud",
+      url: "https://api.deepseek.com",
+      probePath: "/models",
+      treatAuthAsUp: true,
+    });
+  });
+
+  it("云服务未带 Key 的 401 也视为可达", async () => {
+    const fetchImpl = vi.fn(async () => new Response("unauthorized", { status: 401 })) as unknown as typeof fetch;
+    const snapshot = await probeDependencies(
+      [
+        {
+          name: "cloud-deepseek",
+          role: "cloud",
+          label: "DeepSeek API",
+          url: "https://api.deepseek.com",
+          checkLoaded: false,
+          probePath: "/models",
+          treatAuthAsUp: true,
+        },
+      ],
+      { fetchImpl },
+    );
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api.deepseek.com/models",
+      expect.anything(),
+    );
+    expect(snapshot.statuses[0]?.up).toBe(true);
+    expect(snapshot.degraded).toEqual([]);
+  });
+
   it("全部关闭时返回空清单（say 后端没有网络依赖）", () => {
     const specs = collectDependencies({
       KAREN_TTS_BACKEND: "say",

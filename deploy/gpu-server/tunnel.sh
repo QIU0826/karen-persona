@@ -32,19 +32,14 @@ if [ -n "$GPU_KEY" ]; then
   key_args=(-i "$GPU_KEY" -o IdentitiesOnly=yes)
 fi
 
-# 本地端口:远程端口
+# 本地端口:远程端口（与仓库 .env / docs 的 191xx 对齐；2026-10-23 修正）
+# 生产实际入口是 scripts/gpu-tunnel.sh（launchd 守护）；本脚本供手工/其他机器使用。
 pairs=(
-  "19080:18100"  # GPT-SoVITS
-  "19081:18101"  # Qwen3-TTS Base
-  "19082:18102"  # Qwen3-TTS CustomVoice
-  "19083:18103"  # Qwen3-TTS VoiceDesign
-  "19088:18104"  # FireRedTTS3
-  "19084:18110"  # Qwen-Image-Edit-2511
-  "19085:18111"  # Z-Image-Turbo
-  "19086:18120"  # Qwen3-ASR
-  "19087:18122"  # Qwen3-VL
-  "19089:18130"  # 本地 LLM（可选）
-  "19090:18123"  # Embedding/Reranker
+  "19102:127.0.0.1:18102"  # VoxCPM2 TTS
+  "19110:127.0.0.1:18110"  # Qwen-Image-Edit-2511（自拍/精修）
+  "19111:127.0.0.1:18111"  # Z-Image-Turbo（场景图）
+  "19112:127.0.0.1:18112"  # SenseVoice（ASR + 情绪）
+  "19113:127.0.0.1:18113"  # Qwen2.5-Omni-7B（音频理解）
 )
 
 forward_args=()
@@ -55,11 +50,12 @@ done
 cmd=(ssh -N
   -o ServerAliveInterval=30
   -o ServerAliveCountMax=3
-  -o ExitOnForwardFailure=yes
-  "${key_args[@]}"
-  -p "$GPU_PORT"
-  "${forward_args[@]}"
-  "${GPU_USER}@${GPU_HOST}")
+  -o ExitOnForwardFailure=yes)
+# macOS 自带 bash 3.2 在 set -u 下展开空数组会报 unbound variable。
+if [ "${#key_args[@]}" -gt 0 ]; then
+  cmd+=("${key_args[@]}")
+fi
+cmd+=(-p "$GPU_PORT" "${forward_args[@]}" "${GPU_USER}@${GPU_HOST}")
 
 if [ "$FORWARD_ONLY" = "1" ]; then
   printf '%q ' "${cmd[@]}"
@@ -67,6 +63,6 @@ if [ "$FORWARD_ONLY" = "1" ]; then
   exit 0
 fi
 
-echo "建立隧道：${GPU_USER}@${GPU_HOST}:${GPU_PORT} -> ${LOCAL_BIND}:19080-19090"
+echo "建立隧道：${GPU_USER}@${GPU_HOST}:${GPU_PORT} -> ${LOCAL_BIND}:19102/19110-19113"
 echo '按 Ctrl-C 断开；保持这个终端运行。'
 exec "${cmd[@]}"

@@ -44,7 +44,8 @@ bash scripts/install-launchd.sh --uninstall
 | `com.karen.persona.embed` | `scripts/start-embed.sh` | 18083 本地语义嵌入 |
 
 - `KeepAlive=true`：崩溃/被杀后 15s 重启；登录后 `RunAtLoad` 启动。
-- 日志：`data/logs/{tunnel,bridge,embed}.log`（目前不轮转，见「已知限制」）。
+- 日志：`data/logs/{tunnel,bridge,embed}.log`；每日 `scripts/backup.sh` 会把 >5MB 的日志
+  copytruncate 成 `.log.1`（保留一份历史，不打断正在写的进程）。
 - 隧道依赖 `~/.ssh/config` 的 `karen-gpu`（可用 `KAREN_GPU_SSH_HOST` 覆盖）；服务器上的容器用
   `--restart=unless-stopped`，重启服务器不会丢服务。
 - **安装 bridge 前先停掉手动 `npm run qq`**，否则端口冲突会反复重启。
@@ -68,6 +69,6 @@ bash scripts/install-launchd.sh --uninstall
 
 ## 已知限制
 
-- `data/logs/*.log` 未做轮转，长期运行需按周清理或加 newsyslog。
-- 依赖探活只覆盖本机/隧道端点；DeepSeek、Unsplash 等云服务不可用不在其中（会体现在回复失败/日志）。
+- `data/logs/*.log` 由 `scripts/backup.sh` 每日轮转（>5MB → `.log.1`，只保留 1 份历史）。
+- 依赖探活默认只覆盖本机/隧道端点；`KAREN_HEALTH_CLOUD=on` 时额外探测 DeepSeek API 可达性（不带 Key，401 也算可达）。Unsplash 等其余云服务仍看回复失败/日志。
 - 桥接没有「NapCat 掉线」的独立回执：WS 连接数为 0 超过 120s 会体现在 `status=degraded`，但不会主动通知（下一步可接）。

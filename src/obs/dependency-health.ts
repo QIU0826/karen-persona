@@ -15,7 +15,7 @@ import { createLogger } from "./logger.js";
 
 const log = createLogger("deps");
 
-export type ServiceRole = "tts" | "asr" | "embed" | "image";
+export type ServiceRole = "tts" | "asr" | "embed" | "image" | "cloud";
 
 export interface DependencySpec {
   /** 稳定 id，例如 `tts-voxcpm2`。 */
@@ -27,6 +27,10 @@ export interface DependencySpec {
   url: string;
   /** `/health` 返回 `loaded:false` 时算未就绪（模型还在加载）。 */
   checkLoaded: boolean;
+  /** 探活路径，默认 `/health`；云服务用 `/models` 等。 */
+  probePath?: string;
+  /** 云服务未带 Key 时 401/403 也说明“可达”，按 up 处理。 */
+  treatAuthAsUp?: boolean;
 }
 
 export interface DependencyStatus extends DependencySpec {
@@ -52,7 +56,7 @@ export interface ProbeOptions {
 /** 单次探活超时（毫秒）；可用 KAREN_HEALTH_PROBE_TIMEOUT_MS 覆盖。 */
 export const DEFAULT_PROBE_TIMEOUT_MS = 800;
 
-const ROLE_ORDER: Record<ServiceRole, number> = { tts: 0, asr: 1, embed: 2, image: 3 };
+const ROLE_ORDER: Record<ServiceRole, number> = { tts: 0, asr: 1, embed: 2, image: 3, cloud: 4 };
 
 function trimUrl(value: string | undefined, fallback: string): string {
   const raw = (value ?? "").trim();
@@ -206,6 +210,20 @@ export function collectDependencies(env: NodeJS.ProcessEnv = process.env): Depen
     });
   }
 
+  // 云服务（可选）：只验证网络可达，不发送 Key/不消耗 token；
+  // 未带 Key 的 401/403 视为可达（DeepSeek 正常响应）。
+  if ((envValue(env, "KAREN_HEALTH_CLOUD") ?? "off").toLowerCase() === "on") {
+    specs.push({
+      name: "cloud-deepseek",
+      role: "cloud",
+      label: "DeepSeek API",
+      url: "https://api.deepseek.com",
+      checkLoaded: false,
+      probePath: "/models",
+      treatAuthAsUp: true,
+    });
+  }
+
   return specs.sort(
     (a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || a.name.localeCompare(b.name),
   );
@@ -236,7 +254,7 @@ export async function probeDependencies(
     specs.map(async (spec): Promise<DependencyStatus> => {
       const startedAt = Date.now();
       try {
-        const response = await fetchImpl(`${spec.url}/health`, {
+        const response = await fetchImpl(`${spec.url}${spec.probePath ?? "/health"}`, {
           method: "GET",
           signal: AbortSignal.timeout(timeoutMs),
         });
@@ -248,7 +266,10 @@ export async function probeDependencies(
         } catch {
           // 非 JSON 的 /health 也允许：只看 HTTP 状态码。
         }
-        const up = response.ok && (!spec.checkLoaded || loaded !== false);
+        const authOk =
+          spec.treatAuthAsUp === true &&
+          (response.status === 401 || response.status === 403);
+        const up = (response.ok || authOk) && (!spec.checkLoaded || loaded !== false);
         return {
           ...spec,
           up,
