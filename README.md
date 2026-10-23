@@ -243,6 +243,7 @@ npm run dev
 | PM2 守护 | ✅ | 改跑 `dist/bridge/qq.js`，部署前需 `npm run build` |
 | CI（GitHub Actions） | ✅ | push/PR：Node 22 + `npm ci` + typecheck + lint + test；**ubuntu / macOS / Windows 三平台矩阵**；Linux 额外跑覆盖率基线 + **离线评测守门**（`npm run eval:offline`） |
 | 环境体检 | ✅ | `npm run doctor` |
+| 一致性回放 | ✅ | `npm run consistency:eval`：回放真实 session，扫描 30 分钟内「忙/闲」「在店/在家」硬矛盾 + 未兑现承诺数；2026-10-23 实测 104 条消息抓出 3 个修复前历史矛盾 |
 | 真实 QQ 长跑观察 | ✅ | `npm run qq:watch -- --duration 1800`：只读观察真实回合/延迟/成本/事实，结束写 `data/realrun-*.md` 报告；流程见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md) |
 | 真实验证台（mock OneBot + 真实模型） | ✅ | `node node_modules/tsx/dist/cli.mjs scripts/mock-onebot-longrun.ts --turns 15`：本地扮演 NapCat、用另一个真实 DeepSeek 扮演用户，跑多轮对话并输出延迟/气泡/多媒体/记忆探针/重复度/成本/LLM 评审报告；临时目录隔离，不碰真实 QQ 与真实 data/。见 [docs/MOCK_VALIDATION.md](docs/MOCK_VALIDATION.md) |
 | Docker | 🚧 | 提供 node:22-slim 多阶段镜像（非 root）；仅面向开发者/Linux，NapCat 仍需宿主机运行，未在所有平台验证 |
