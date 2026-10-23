@@ -325,11 +325,26 @@ export async function storeConversationEpisodeAsync(
 }
 
 /** 记忆内容压成单行，防止用户原话里的换行伪造 prompt 段落。 */
-function oneLineMemoryContent(raw: string): string {
+/**
+ * P1-6：记忆注入前清洗系统标记/角色前缀。
+ * T3/日记忆/进化日志里的 `[T3记忆]`、`[对话]`、`[stream]` 等是内部标记，
+ * 直接注入会让她把"系统痕迹"当成记忆内容；`用户/回复` 也统一成「他/她」，
+ * 减少把用户和 Karen 的角色说混。
+ */
+export function sanitizeMemoryContent(raw: string): string {
   return String(raw ?? "")
+    .replace(/\[(?:T3记忆|T3|对话|独白|进化日志)\]/gi, " ")
+    .replace(/\[stream\]/gi, "那段聊天")
+    .replace(/用户\s*[:：]/g, "他：")
+    .replace(/回复\s*[:：]/g, "她：")
+    .replace(/([他她]：)\s+/g, "$1")
     .replace(/[\r\n\u2028\u2029\u0000-\u001f\u007f]+/g, " ")
     .replace(/[\s\u3000]+/g, " ")
     .trim();
+}
+
+function oneLineMemoryContent(raw: string): string {
+  return sanitizeMemoryContent(raw);
 }
 
 /**

@@ -3,13 +3,13 @@ import { SELFIE_STYLE_PROMPT, SELFIE_STYLE_REF, buildSelfiePrompt } from "./self
 
 describe("selfie-style", () => {
   it("画风参考图固定为宣传页人物", () => {
-    expect(SELFIE_STYLE_REF).toContain("karen-ref-promo/character-1.jpg");
+    expect(SELFIE_STYLE_REF).toContain("karen-ref-promo/character-2.jpg");
   });
 
   it("场景 prompt 会拼上统一画风和禁手", () => {
     const prompt = buildSelfiePrompt("春天公园长椅自拍，浅色开衫");
     expect(prompt).toContain("春天公园长椅自拍");
-    expect(prompt).toContain("低饱和冷灰蓝色调");
+    expect(prompt).toContain("中蓝色");
     expect(prompt).toContain("不出现手和手臂");
     expect(prompt).toContain(SELFIE_STYLE_PROMPT);
   });

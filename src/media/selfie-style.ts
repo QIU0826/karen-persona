@@ -6,19 +6,19 @@
  * 画风锚点：低饱和冷灰蓝色调、细腻铅笔/墨线 + 淡彩水彩晕染、轻微纸纹、
  * 深色简洁背景、留白多、浅蓝短发、灰蓝眼睛、苍白皮肤、克制的微笑。
  *
- * 参考图：服务器 /workspace/data/karen-ref-promo/character-1.jpg（宣传页主角立绘，
- * 由 promo/assets/character-1.jpg 上传；KAREN_SELFIE_REF 可覆盖）。
+ * 参考图：服务器 /workspace/data/karen-ref-promo/character-2.jpg（宣传页主角立绘，
+ * 由 promo/assets/character-2.jpg 上传；KAREN_SELFIE_REF 可覆盖）。
  * 注意：这里只锁"画风/角色"，不锁衣服和场景；场景由 prompt 决定。
  */
 
 /** 服务器上的画风/角色参考图（宣传页人物；生成新自拍时必须传）。 */
 export const SELFIE_STYLE_REF =
   (process.env.KAREN_SELFIE_REF ?? "").trim() ||
-  "/workspace/data/karen-ref-promo/character-1.jpg";
+  "/workspace/data/karen-ref-promo/character-2.jpg";
 
 /** 统一画风提示词；追加到每条自拍 prompt 后 */
 export const SELFIE_STYLE_PROMPT =
-  "保持参考图的人物与画风：低饱和冷灰蓝色调，细腻铅笔/墨线线条 + 淡彩水彩晕染、轻微纸纹质感；浅蓝/灰蓝短发（细碎发丝）、灰蓝眼睛、苍白皮肤、轻微腮红、克制的微笑；不要厚涂、不要高饱和、不要油光、不要 3D 渲染；背景按场景描述绘制，低饱和、简洁但要有明确的场景环境，不要纯白或纯灰的空白背景，也不要照搬参考图的深色纯色背景；近景自拍构图，胸部以上，不出现手和手臂";
+  "保持参考图的人物与画风：整体低饱和，但不能把发色洗淡——头发保持参考图的中蓝色（约 #4a6fa5），不要白色、银色、浅灰或褪色；细腻铅笔/墨线线条 + 淡彩水彩晕染、轻微纸纹质感；灰蓝眼睛、苍白皮肤、轻微腮红、克制的微笑；不要厚涂、不要高饱和、不要油光、不要 3D 渲染；背景按场景描述绘制，低饱和、简洁但要有明确的场景环境，不要纯白或纯灰的空白背景，也不要照搬参考图的深色纯色背景；近景自拍构图，胸部以上，不出现手和手臂";
 
 /** 把场景描述和统一画风拼成最终自拍 prompt。 */
 export function buildSelfiePrompt(scenePrompt: string): string {

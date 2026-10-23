@@ -68,7 +68,7 @@ describe("场景与 prompt", () => {
       emotionVector: 0.6,
     });
     expect(scene).toContain("咖啡馆");
-    expect(prompt).toContain("低饱和冷灰蓝色调");
+    expect(prompt).toContain("中蓝色");
     expect(prompt).toContain("不出现手和手臂");
     expect(prompt).toContain("嘴角带笑");
     expect(prompt).toContain("胸部以上");
@@ -100,9 +100,9 @@ describe("generateSelfie", () => {
     expect(result.attempts).toBe(1);
     expect(result.bytes?.subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     const call = qwenGenerateFn.mock.calls[0] as unknown as [string, Record<string, unknown>];
-    expect(call[0]).toContain("低饱和冷灰蓝色调");
+    expect(call[0]).toContain("中蓝色");
     expect(call[1]).toMatchObject({ simple: true, steps: 8 });
-    expect(call[1].imagePaths).toContain("/workspace/data/karen-ref-promo/character-1.jpg");
+    expect(call[1].imagePaths).toContain("/workspace/data/karen-ref-promo/character-2.jpg");
   });
 
   it("质检失败换 seed 重试一次；第二次通过", async () => {

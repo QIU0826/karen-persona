@@ -80,6 +80,24 @@ describe("retrieveRelevantMemories：行为契约", () => {
   });
 });
 
+describe("sanitizeMemoryContent：P1-6 记忆注入清洗", () => {
+  it("去掉系统标记、把用户/回复统一成他/她", () => {
+    const text = retriever.sanitizeMemoryContent(
+      "[对话] 用户: 我今天面试 | 回复: 加油  [T3记忆] [stream] 那段聊天",
+    );
+    expect(text).not.toContain("[对话]");
+    expect(text).not.toContain("[T3记忆]");
+    expect(text).not.toContain("[stream]");
+    expect(text).toContain("他：我今天面试");
+    expect(text).toContain("她：加油");
+  });
+
+  it("空内容/正常内容不崩", () => {
+    expect(retriever.sanitizeMemoryContent("")).toBe("");
+    expect(retriever.sanitizeMemoryContent("普通记忆")).toBe("普通记忆");
+  });
+});
+
 describe("buildRagContext：注入格式", () => {
   const memory = (over: Partial<import("./retriever.js").RetrievedMemory>) => ({
     id: 1,
