@@ -70,6 +70,7 @@ function envValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
  */
 export function collectDependencies(env: NodeJS.ProcessEnv = process.env): DependencySpec[] {
   const specs: DependencySpec[] = [];
+  const imageBackend = (envValue(env, "KAREN_IMAGE_BACKEND") ?? "service").toLowerCase();
 
   // TTS：只探当前后端，避免把没启用的服务也算进“降级”。
   const ttsBackend = (envValue(env, "KAREN_TTS_BACKEND") ?? "kokoro").toLowerCase();
@@ -151,7 +152,6 @@ export function collectDependencies(env: NodeJS.ProcessEnv = process.env): Depen
 
   // 生图：只探当前后端。
   if ((envValue(env, "KAREN_IMAGE_GEN") ?? "off").toLowerCase() === "on") {
-    const imageBackend = (envValue(env, "KAREN_IMAGE_BACKEND") ?? "service").toLowerCase();
     if (imageBackend === "z-image" || imageBackend === "zimage") {
       specs.push({
         name: "image-z-image",
@@ -185,6 +185,25 @@ export function collectDependencies(env: NodeJS.ProcessEnv = process.env): Depen
         checkLoaded: true,
       });
     }
+  }
+
+  // 运行时自拍独立于 KAREN_IMAGE_BACKEND（用 Qwen-Image-Edit + cafe 参考图），
+  // 所以即便生图默认走 z-image，也要单独探活自拍服务，避免它挂了没人知道。
+  const selfieOn = (envValue(env, "KAREN_SELFIE_GEN") ?? "on").toLowerCase() !== "off";
+  const selfieUrl = envValue(env, "QWEN_IMAGE_EDIT_URL");
+  if (
+    selfieOn &&
+    selfieUrl &&
+    imageBackend !== "qwen-image-edit" &&
+    imageBackend !== "qwen"
+  ) {
+    specs.push({
+      name: "selfie-qwen-edit",
+      role: "image",
+      label: "Qwen-Image-Edit 自拍",
+      url: trimUrl(selfieUrl, "http://127.0.0.1:19110"),
+      checkLoaded: true,
+    });
   }
 
   return specs.sort(

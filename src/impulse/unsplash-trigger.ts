@@ -365,6 +365,14 @@ export async function trySharePhoto(
   return { imageUrl, caption, source: "unsplash" };
 }
 
+/**
+ * P0-5：运行时异步自拍失败时回退到本地自拍（最近 3 张排除仍生效）。
+ * 与 trySharePhoto 内部分支同一个选择器，避免两套库存逻辑。
+ */
+export function pickFallbackSelfie(state: ConversationState): PhotoShareResult | null {
+  return shareLocalPhoto(state, ["selfie"]);
+}
+
 /** 测试用：重置冷却 */
 export function resetCooldown(personaId?: string): void {
   if (personaId) {

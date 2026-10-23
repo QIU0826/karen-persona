@@ -47,6 +47,8 @@ describe("collectDependencies", () => {
       KAREN_IMAGE_GEN: "on",
       KAREN_IMAGE_BACKEND: "z-image",
       ZIMAGE_URL: "http://127.0.0.1:19111",
+      KAREN_SELFIE_GEN: "on",
+      QWEN_IMAGE_EDIT_URL: "http://127.0.0.1:19110",
     });
 
     expect(specs.map((item) => item.name)).toEqual([
@@ -54,10 +56,16 @@ describe("collectDependencies", () => {
       "asr-qwen-omni",
       "embed-local",
       "image-z-image",
+      "selfie-qwen-edit",
     ]);
     expect(specs[0]?.url).toBe("http://127.0.0.1:19102");
     expect(specs[0]?.checkLoaded).toBe(true);
     expect(specs[3]?.label).toContain("Z-Image");
+    expect(specs[4]).toMatchObject({
+      name: "selfie-qwen-edit",
+      url: "http://127.0.0.1:19110",
+      checkLoaded: true,
+    });
   });
 
   it("全部关闭时返回空清单（say 后端没有网络依赖）", () => {

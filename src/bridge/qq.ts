@@ -130,6 +130,10 @@ import { isWithinTurnDuplicate } from "../persona/anti-repetition.js";
 import { stripOutboundMediaMarkers } from "../persona/outbound-markers.js";
 import { updateUserMessageContent } from "../data/history.js";
 import { shouldSendPhotoCaption } from "../impulse/photo-caption.js";
+import { isCharacterPhotoRequest, pickFallbackSelfie } from "../impulse/unsplash-trigger.js";
+import { replyRefusesPhoto } from "../impulse/photo-refusal.js";
+import { generateSelfie, isSelfieGenerationEnabled, pickSelfieCaption } from "../media/selfie-generator.js";
+import { saveGeneratedImage } from "../media/generated-store.js";
 import {
   DEFAULT_TYPO_RECALL_SETTINGS,
   type TypoRecallSettings,
@@ -1590,6 +1594,8 @@ async function streamPrivateReply(params: {
   logPrefix?: string;
   /** P0-3：整条用语音代替文字（点名要语音/收到语音/低概率）。 */
   voiceMode?: boolean;
+  /** P0-5：本轮自拍由桥接异步生成，跳过管线里的同步发图。 */
+  skipPhoto?: boolean;
 }): Promise<PrivateStreamOutcome> {
   const { state, text, userId, options, images, stickerHint } = params;
   const logPrefix = params.logPrefix ?? "回复";
@@ -1614,7 +1620,12 @@ async function streamPrivateReply(params: {
   const pacing = buildPacing(state);
   let pacedFirstTextSent = false;
 
-  const stream = processMessageStream(state, text, { ...options, images, stickerHint });
+  const stream = processMessageStream(state, text, {
+    ...options,
+    images,
+    stickerHint,
+    ...(params.skipPhoto ? { skipPhoto: true } : {}),
+  });
   for await (const frag of stream) {
     // 中断检测：用户发来新消息 → 丢弃剩余 burst
     if ((userPending.get(userId) ?? 0) > pendingSnapshot) {
@@ -1923,6 +1934,11 @@ const userRecentStickers = new Map<number, string[]>();
 
 /** 上次给某用户发语音的时间（冷却用；进程内即可，重启后最多多发一条） */
 const userLastVoiceAt = new Map<number, number>();
+/** P0-5：运行时自拍防重入 / 冷却 / 配文去重 */
+const selfieInFlight = new Set<number>();
+const userLastSelfieAt = new Map<number, number>();
+const userRecentSelfieCaptions = new Map<number, string[]>();
+const SELFIE_COOLDOWN_MS = 90_000;
 /** 语音能力懒探测：null=未探测；false=本机不可用（之后不再尝试，静默降级为文字） */
 let speechAvailable: boolean | null = null;
 
@@ -2053,6 +2069,101 @@ async function resolveVoiceFirst(
   return { voice: decision.speak, reason: decision.reason };
 }
 
+
+/**
+ * P0-5：用户点名要自拍 → 后台生成 + 质检 + 发送（约 25–45s）。
+ * - 先回一句「等我拍一张」，不阻塞当轮文字；
+ * - 失败/质检不过 → 回退回本地自拍，不承诺落空；
+ * - 同一用户同时只跑一张，90s 冷却。
+ */
+async function sendRequestedSelfie(
+  userId: number,
+  state: ConversationState,
+  userText: string,
+  lastReply: string,
+): Promise<void> {
+  if (replyRefusesPhoto(lastReply)) {
+    log.info("selfie.skipped_refusal", { user_id: userId });
+    return;
+  }
+  if (selfieInFlight.has(userId)) {
+    sendPrivateMsg(userId, "还在拍呢，马上");
+    return;
+  }
+  const now = Date.now();
+  if (now - (userLastSelfieAt.get(userId) ?? 0) < SELFIE_COOLDOWN_MS) {
+    sendPrivateMsg(userId, "刚拍过一张，等我缓缓");
+    return;
+  }
+
+  selfieInFlight.add(userId);
+  try {
+    if (!/拍|自拍|照/.test(lastReply)) {
+      sendPrivateMsg(userId, "等我拍一张");
+    }
+    const weatherRaw = state.weatherPerception?.raw;
+    const result = await generateSelfie({
+      userText,
+      lastReply,
+      hour: new Date().getHours(),
+      emotionVector: state.emotionState.vector,
+      weather: weatherRaw
+        ? { condition: weatherRaw.condition, temperature: weatherRaw.temp }
+        : null,
+    });
+
+    if (result.ok && result.bytes) {
+      const file = saveGeneratedImage(result.bytes);
+      if (file) {
+        const caption = pickSelfieCaption(
+          Math.random,
+          userRecentSelfieCaptions.get(userId) ?? [],
+        );
+        await sendPhotoToUser(userId, { file, caption }, lastReply);
+        userLastSelfieAt.set(userId, now);
+        userRecentSelfieCaptions.set(
+          userId,
+          [...(userRecentSelfieCaptions.get(userId) ?? []), caption].slice(-3),
+        );
+        log.info("selfie.sent", {
+          user_id: userId,
+          attempts: result.attempts,
+          elapsed_ms: result.elapsedMs,
+          bytes: result.bytes.length,
+          scene: result.scene,
+        });
+        return;
+      }
+    }
+
+    log.warn("selfie.failed", {
+      user_id: userId,
+      reason: result.reason ?? "unknown",
+      attempts: result.attempts,
+      elapsed_ms: result.elapsedMs,
+    });
+    const fallback = pickFallbackSelfie(state);
+    if (fallback) {
+      await sendPhotoToUser(
+        userId,
+        {
+          ...(fallback.imageFile ? { file: fallback.imageFile } : {}),
+          ...(fallback.imageUrl ? { url: fallback.imageUrl } : {}),
+          caption: fallback.caption,
+        },
+        lastReply,
+      );
+      userLastSelfieAt.set(userId, now);
+      log.info("selfie.fallback_local", { user_id: userId, source: fallback.source });
+    } else {
+      sendPrivateMsg(userId, "等我下次再拍给你吧");
+    }
+  } catch (err: unknown) {
+    log.warn("selfie.error", { user_id: userId, error: errMessage(err) });
+  } finally {
+    selfieInFlight.delete(userId);
+  }
+}
 
 async function handlePrivateBatch(
   events: PrivateMessageEvent[],
@@ -2285,6 +2396,11 @@ async function handlePrivateBatch(
 
   try {
     const stickerHint = stickerHintFor(ownerForQq(userId), text);
+    // P0-5：点名「自拍/拍张你」时由桥接异步生成，跳过同步发图避免双发。
+    const selfiePlan =
+      isSelfieGenerationEnabled() &&
+      detectMediaRequest(text).photo &&
+      isCharacterPhotoRequest(text);
     // P0-3：先决定这一轮是语音还是文字；voice-first 时流式文字只会被攒起来。
     const voiceMode = await resolveVoiceFirst(userId, state, text, inboundVoice);
     log.info("voice.mode", {
@@ -2300,6 +2416,7 @@ async function handlePrivateBatch(
       images: attachedImages,
       ...(stickerHint ? { stickerHint } : {}),
       voiceMode: voiceMode.voice,
+      ...(selfiePlan ? { skipPhoto: true } : {}),
     });
     void applyImageDescriptions(state, text, pendingImageDescriptions);
 
@@ -2318,6 +2435,18 @@ async function handlePrivateBatch(
         inboundSticker,
         { requested: mediaRequest.sticker && !mediaRequest.voice, contextText: text },
       );
+    }
+
+    // P0-5：自拍异步生成（文字/语音已发出，约 25–45s 后补图；失败回退本地自拍）
+    if (
+      selfiePlan &&
+      outcome.deferredDelayMs === undefined &&
+      !outcome.interrupted &&
+      outcome.sentCount > 0
+    ) {
+      void sendRequestedSelfie(userId, state, text, outcome.sentText).catch((err: unknown) => {
+        log.warn("selfie.spawn_failed", { user_id: userId, error: errMessage(err) });
+      });
     }
   } catch (err: unknown) {
     log.error("reply.failed", { user_id: userId, error: errMessage(err) });
