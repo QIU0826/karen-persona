@@ -20,11 +20,15 @@ export interface DailyLifeEvent {
   kind: DailyLifeKind;
   /** 一句话（≤24 字），像她心里记下来的一笔 */
   text: string;
+  /** P1-2：这条是否已经作为话题讲给用户听过（避免同一天反复讲同一件）。 */
+  told?: boolean;
 }
 
 export interface DailyLifePlan {
   day: string;
   events: DailyLifeEvent[];
+  /** P1-2：她明天想做的事（跨天兑现/回扣用，可为空）。 */
+  tomorrowPlan?: string;
   createdAt: number;
 }
 
@@ -49,6 +53,10 @@ export function buildDailyLifePrompt(input: {
   weekday: number;
   world?: DailyLifeWorld | null;
   weather?: { condition?: string; temperature?: number } | null;
+  /** P1-2：最近 2–3 天已经发生过的事，用来避免每天重播同一组。 */
+  recentDays?: Array<{ day: string; events: DailyLifeEvent[] }>;
+  /** P1-2：昨天她说明天想做的事。 */
+  yesterdayTomorrow?: string;
 }): { system: string; user: string } {
   const world = input.world ?? {};
   const dayNames = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
@@ -57,9 +65,12 @@ export function buildDailyLifePrompt(input: {
   const system = [
     `你在帮角色「${input.herName}」写「她今天真实发生的小事」。`,
     "只输出 JSON，不要解释。",
-    '格式：{"events":[{"hour":10,"kind":"work|friend|goal|cat|weather|small","text":"……"}]}',
+    '格式：{"events":[{"hour":10,"kind":"work|friend|goal|cat|weather|small","text":"……"}],"tomorrow":"明天想做的事"}',
     "要求：",
     `- 恰好 ${DAILY_LIFE_MAX_EVENTS} 条，分布在上午/下午/晚上（hour 用 0–23 整数）；`,
+    `- 额外给 1 条「明天想做的事」tomorrow（≤${DAILY_LIFE_MAX_CHARS} 字，可空字符串）；`,
+    "- 不要重复最近 2–3 天已经出现过的人/事/细节（老周算账、练拉花、猫掉毛不能天天都有）；",
+    "- 如果昨天说好今天要做某件事，可以自然延续/兑现或说明没做成，但不要每天重播同一组；",
     `- text 是一条具体的小事（≤${DAILY_LIFE_MAX_CHARS} 字），像她自己随手记的一笔，不写心情标签、不写总结；`,
     "- 只能使用给到的她的人设/作息/目标/朋友/天气，**不要新增任何人物或地点**；",
     "- 小事要有细节（谁说了什么、店里怎样、猫又干了什么），不要泛泛的「上班很累」；",
@@ -88,6 +99,15 @@ export function buildDailyLifePrompt(input: {
         ? `${input.weather.condition}${Number.isFinite(Number(input.weather.temperature)) ? `，${Math.round(Number(input.weather.temperature))} 度` : ""}`
         : "（不知道）"
     }`,
+    `最近几天她的生活（不要重复）：${
+      (input.recentDays ?? []).length > 0
+        ? (input.recentDays ?? [])
+            .slice(0, 3)
+            .map((entry) => `${entry.day}：${formatDailyLife(entry.events)}`)
+            .join("｜")
+        : "（无记录）"
+    }`,
+    `昨天她说明天想做：${input.yesterdayTomorrow?.trim() || "（无）"}`,
   ].join("\n");
 
   return { system, user };
@@ -123,12 +143,22 @@ export function parseDailyLife(content: string, day: string, now = Date.now()): 
   }
   if (events.length === 0) return null;
   events.sort((a, b) => a.hour - b.hour);
-  return { day, events, createdAt: now };
+  const rawTomorrow = (parsed as { tomorrow?: unknown })?.tomorrow;
+  const tomorrowPlan =
+    typeof rawTomorrow === "string"
+      ? rawTomorrow.replace(/\s+/g, " ").trim().slice(0, DAILY_LIFE_MAX_CHARS)
+      : "";
+  return { day, events, ...(tomorrowPlan ? { tomorrowPlan } : {}), createdAt: now };
 }
 
 /** 序列化/反序列化（存库用）。 */
 export function serializeDailyLife(plan: DailyLifePlan): string {
-  return JSON.stringify({ day: plan.day, events: plan.events, createdAt: plan.createdAt });
+  return JSON.stringify({
+    day: plan.day,
+    events: plan.events,
+    ...(plan.tomorrowPlan ? { tomorrowPlan: plan.tomorrowPlan } : {}),
+    createdAt: plan.createdAt,
+  });
 }
 
 export function deserializeDailyLife(json: string): DailyLifePlan | null {
@@ -144,10 +174,20 @@ export function deserializeDailyLife(json: string): DailyLifePlan | null {
         hour: Number.isFinite(Number(event.hour)) ? Math.min(23, Math.max(0, Math.round(Number(event.hour)))) : 12,
         kind: KINDS.includes(event.kind) ? event.kind : "small",
         text: event.text.slice(0, DAILY_LIFE_MAX_CHARS),
+        ...(event.told === true ? { told: true } : {}),
       }))
       .sort((a, b) => a.hour - b.hour);
     if (events.length === 0) return null;
-    return { day: String(parsed.day ?? ""), events, createdAt: Number(parsed.createdAt ?? Date.now()) };
+    const tomorrowPlan =
+      typeof parsed.tomorrowPlan === "string" && parsed.tomorrowPlan.trim()
+        ? parsed.tomorrowPlan.trim().slice(0, DAILY_LIFE_MAX_CHARS)
+        : undefined;
+    return {
+      day: String(parsed.day ?? ""),
+      events,
+      ...(tomorrowPlan ? { tomorrowPlan } : {}),
+      createdAt: Number(parsed.createdAt ?? Date.now()),
+    };
   } catch {
     return null;
   }
@@ -170,10 +210,50 @@ export function pickLifeEvent(
   random: () => number = Math.random,
 ): DailyLifeEvent | null {
   if (events.length === 0) return null;
-  const past = events.filter((event) => event.hour <= hour);
-  const pool = past.length > 0 ? past : events.slice(0, 1);
+  // P1-2：优先挑还没讲过的那条；全讲过了才允许重复（同一天内也少复读）。
+  const untold = events.filter((event) => event.told !== true);
+  const source = untold.length > 0 ? untold : events;
+  const past = source.filter((event) => event.hour <= hour);
+  const pool = past.length > 0 ? past : source.slice(0, 1);
   const index = Math.min(pool.length - 1, Math.floor(random() * pool.length));
   return pool[index] ?? null;
+}
+
+/**
+ * P1-2：跨天生活上下文（只进 prompt，不发给用户）。
+ * 只写「昨天/前天已发生 + 今天已发生 + 明天想做」，不提前说今天还没发生的事。
+ */
+export function buildLifeHistoryInjection(input: {
+  today: DailyLifeEvent[];
+  recent: Array<{ day: string; events: DailyLifeEvent[]; tomorrowPlan?: string }>;
+  nowHour: number;
+  todayDay?: string;
+  todayTomorrow?: string;
+}): string {
+  const lines: string[] = [];
+  const recent = input.recent.slice(0, 2).reverse();
+  if (recent.length > 0) {
+    lines.push("\n## 她这几天的生活（回忆，不是现在）");
+    for (const entry of recent) {
+      const events = entry.events.slice(0, 3);
+      if (events.length > 0) lines.push(`- ${entry.day}：${formatDailyLife(events)}`);
+      if (entry.tomorrowPlan) lines.push(`  （那天她说明天想：${entry.tomorrowPlan}）`);
+    }
+  }
+
+  const todayPast = input.today.filter((event) => event.hour <= input.nowHour).slice(0, 3);
+  if (todayPast.length > 0 || input.todayTomorrow) {
+    lines.push(`\n## 今天${input.todayDay ? `（${input.todayDay}）` : ""}`);
+    if (todayPast.length > 0) lines.push(`- 已经发生：${formatDailyLife(todayPast)}`);
+    if (input.todayTomorrow) lines.push(`- 明天想做：${input.todayTomorrow}`);
+  }
+
+  if (lines.length === 0) return "";
+  lines.push(
+    "（昨天/前天的事要用过去时，别当成今天；今天还没发生的事不要提前说；同一件事别反复讲。）",
+  );
+  const text = lines.join("\n");
+  return text.length > 520 ? `${text.slice(0, 520)}…` : text;
 }
 
 /** 转成 buildLifeSignals 用的素材句（她主动想分享时可直接用）。 */

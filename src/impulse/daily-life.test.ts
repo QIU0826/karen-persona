@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DAILY_LIFE_MAX_CHARS,
   buildDailyLifePrompt,
+  buildLifeHistoryInjection,
   dailyLifeToSignals,
   deserializeDailyLife,
   formatDailyLife,
@@ -29,11 +30,31 @@ describe("buildDailyLifePrompt（v0.9.6）", () => {
     });
     expect(prompt.system).toContain("恰好 3 条");
     expect(prompt.system).toContain("不要新增任何人物或地点");
+    expect(prompt.system).toContain("不要重复最近 2–3 天");
+    expect(prompt.system).toContain("tomorrow");
     expect(prompt.user).toContain("周三");
     expect(prompt.user).toContain("咖啡店工作");
     expect(prompt.user).toContain("学会拉花");
     expect(prompt.user).toContain("小雨");
     expect(prompt.user).toContain("小雨，18 度");
+  });
+
+  it("带上最近几天与昨天计划，避免每天重播", () => {
+    const prompt = buildDailyLifePrompt({
+      herName: "小雅",
+      day: "2026-10-24",
+      weekday: 6,
+      world: WORLD,
+      recentDays: [
+        { day: "2026-10-23", events: [{ hour: 9, kind: "work", text: "老周说流水又降了" }] },
+        { day: "2026-10-22", events: [{ hour: 15, kind: "goal", text: "练拉花郁金香" }] },
+      ],
+      yesterdayTomorrow: "周末想去海边",
+    });
+    expect(prompt.system).toContain("老周算账");
+    expect(prompt.user).toContain("2026-10-23");
+    expect(prompt.user).toContain("老周说流水又降了");
+    expect(prompt.user).toContain("周末想去海边");
   });
 
   it("没有 world/天气也能构造（不崩）", () => {
@@ -57,6 +78,21 @@ describe("parseDailyLife", () => {
     );
     expect(plan?.events.map((event) => event.hour)).toEqual([9, 15, 20]);
     expect(plan?.events[0]?.kind).toBe("work");
+  });
+
+  it("解析 tomorrow 明天计划（截断/空值兼容）", () => {
+    const plan = parseDailyLife(
+      JSON.stringify({
+        events: [{ hour: 9, kind: "work", text: "早班来了个熟客" }],
+        tomorrow: "  周末去海边走走  ",
+      }),
+      "2026-10-21",
+    );
+    expect(plan?.tomorrowPlan).toBe("周末去海边走走");
+    expect(
+      parseDailyLife(JSON.stringify({ events: [{ hour: 9, kind: "work", text: "x" }], tomorrow: "" }), "2026-10-21")
+        ?.tomorrowPlan,
+    ).toBeUndefined();
   });
 
   it("容错：代码块包裹 / 未知 kind / hour 越界 / 空 text 过滤", () => {
@@ -102,6 +138,18 @@ describe("序列化 / 反序列化", () => {
     expect(restored?.events).toEqual(plan.events);
   });
 
+  it("tomorrow 与 told 一起 roundtrip", () => {
+    const withMeta = {
+      day: "2026-10-21",
+      createdAt: 1700000000000,
+      events: [{ hour: 9, kind: "work" as const, text: "店里来了个熟客", told: true }],
+      tomorrowPlan: "想去海边",
+    };
+    const restored = deserializeDailyLife(serializeDailyLife(withMeta));
+    expect(restored?.tomorrowPlan).toBe("想去海边");
+    expect(restored?.events[0]?.told).toBe(true);
+  });
+
   it("坏数据返回 null，不抛异常", () => {
     expect(deserializeDailyLife("{")).toBeNull();
     expect(deserializeDailyLife(JSON.stringify({ day: "x" }))).toBeNull();
@@ -135,6 +183,35 @@ describe("formatDailyLife / pickLifeEvent / dailyLifeToSignals", () => {
     ];
     expect(pickLifeEvent(same, 12, () => 0)?.text).toBe("A");
     expect(pickLifeEvent(same, 12, () => 0.99)?.text).toBe("B");
+  });
+
+  it("优先挑还没讲过的事件（P1-2）", () => {
+    const withTold: DailyLifeEvent[] = [
+      { hour: 9, kind: "work", text: "已经讲过的", told: true },
+      { hour: 14, kind: "cat", text: "还没讲过的" },
+    ];
+    expect(pickLifeEvent(withTold, 15, () => 0)?.text).toBe("还没讲过的");
+  });
+
+  it("buildLifeHistoryInjection：近两天用过去时 + 今天已发生 + 明天计划", () => {
+    const text = buildLifeHistoryInjection({
+      today: [
+        { hour: 9, kind: "work", text: "早班来了个熟客" },
+        { hour: 20, kind: "goal", text: "晚上练拉花" },
+      ],
+      recent: [{ day: "2026-10-22", events: [{ hour: 15, kind: "goal", text: "练拉花郁金香" }], tomorrowPlan: "周末去海边" }],
+      nowHour: 15,
+      todayDay: "2026-10-23",
+      todayTomorrow: "想去看电影",
+    });
+    expect(text).toContain("回忆，不是现在");
+    expect(text).toContain("2026-10-22");
+    expect(text).toContain("练拉花郁金香");
+    expect(text).toContain("已经发生");
+    expect(text).toContain("早班来了个熟客");
+    expect(text).toContain("想去看电影");
+    expect(text).not.toContain("晚上练拉花");
+    expect(text).toContain("过去时");
   });
 
   it("转成信号句就是事件原文，且长度受控", () => {

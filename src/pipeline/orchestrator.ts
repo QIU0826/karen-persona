@@ -41,6 +41,7 @@ import {
 } from "../impulse/initiative-plan.js";
 import {
   buildDailyLifePrompt,
+  buildLifeHistoryInjection,
   dailyLifeToSignals,
   deserializeDailyLife,
   formatDailyLife,
@@ -48,8 +49,9 @@ import {
   pickLifeEvent,
   serializeDailyLife,
   type DailyLifeEvent,
+  type DailyLifePlan,
 } from "../impulse/daily-life.js";
-import { getDailyLife, saveDailyLife } from "../data/daily-life.js";
+import { getDailyLife, listRecentDailyLife, saveDailyLife } from "../data/daily-life.js";
 import { generateDailyLifeWithLLM } from "../schedule/initiative-llm.js";
 import { buildInitiativeReplyHint } from "../impulse/initiative-reply.js";
 import {
@@ -1265,6 +1267,84 @@ export function readTodayDailyLife(state: ConversationState): DailyLifeEvent[] {
   }
 }
 
+/** 读今天的完整生活计划（含 tomorrowPlan；没有返回 null）。 */
+export function readTodayLifePlan(state: ConversationState): DailyLifePlan | null {
+  try {
+    const db = getVectorDb();
+    const row = getDailyLife(db, state.storagePersona, state.owner, localDayKey(Date.now()));
+    return row ? deserializeDailyLife(row.life_json) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 最近 N 天（不含今天，按天倒序）的生活计划。 */
+function readRecentLifePlans(
+  state: ConversationState,
+  days = 3,
+): Array<{ day: string; events: DailyLifeEvent[]; tomorrowPlan?: string }> {
+  try {
+    const db = getVectorDb();
+    const today = localDayKey(Date.now());
+    return listRecentDailyLife(db, state.storagePersona, state.owner, days + 1)
+      .filter((row) => row.day !== today)
+      .map((row) => {
+        const plan = deserializeDailyLife(row.life_json);
+        if (!plan) return null;
+        return {
+          day: row.day,
+          events: plan.events,
+          ...(plan.tomorrowPlan ? { tomorrowPlan: plan.tomorrowPlan } : {}),
+        };
+      })
+      .filter(
+        (entry): entry is { day: string; events: DailyLifeEvent[]; tomorrowPlan?: string } =>
+          entry !== null,
+      )
+      .slice(0, days);
+  } catch {
+    return [];
+  }
+}
+
+/** P1-2：把某条今天的生活事件标记为「已讲过」（写回 life_json.told）。 */
+function markLifeEventTold(state: ConversationState, text: string): void {
+  try {
+    const db = getVectorDb();
+    const day = localDayKey(Date.now());
+    const row = getDailyLife(db, state.storagePersona, state.owner, day);
+    const plan = row ? deserializeDailyLife(row.life_json) : null;
+    if (!plan) return;
+    const event = plan.events.find((item) => item.text === text);
+    if (!event || event.told) return;
+    event.told = true;
+    saveDailyLife(db, {
+      personaId: state.storagePersona,
+      ownerId: state.owner,
+      day,
+      lifeJson: serializeDailyLife(plan),
+    });
+  } catch {
+    // 生活流标记失败不影响回复
+  }
+}
+
+/** P1-2：她这几天的生活 + 今天已发生 + 明天想做（只进 prompt）。 */
+function getLifeHistoryInjection(state: ConversationState, now = new Date()): string {
+  try {
+    const today = readTodayLifePlan(state);
+    return buildLifeHistoryInjection({
+      today: today?.events ?? [],
+      recent: readRecentLifePlans(state, 3),
+      nowHour: now.getHours(),
+      todayDay: localDayKey(Date.now()),
+      ...(today?.tomorrowPlan ? { todayTomorrow: today.tomorrowPlan } : {}),
+    });
+  } catch {
+    return "";
+  }
+}
+
 /**
  * 确保「她今天的一天」已生成（v0.9.6）。
  * 每天一次小调用；失败下次再试；不阻塞主流程时由调用方 fire-and-forget。
@@ -1278,12 +1358,15 @@ export async function ensureDailyLife(state: ConversationState): Promise<DailyLi
 
     const now = new Date();
     const weatherRaw = state.weatherPerception?.raw;
+    const recent = readRecentLifePlans(state, 3);
     const prompt = buildDailyLifePrompt({
       herName: state.persona.name,
       day,
       weekday: now.getDay() === 0 ? 7 : now.getDay(),
       world: (state.persona as { world?: Parameters<typeof buildDailyLifePrompt>[0]["world"] }).world ?? null,
       weather: weatherRaw ? { condition: weatherRaw.condition, temperature: weatherRaw.temp } : null,
+      recentDays: recent.map((entry) => ({ day: entry.day, events: entry.events })),
+      ...(recent[0]?.tomorrowPlan ? { yesterdayTomorrow: recent[0].tomorrowPlan } : {}),
     });
     const raw = await generateDailyLifeWithLLM(prompt);
     if (!raw) return [];
@@ -1541,6 +1624,7 @@ function buildTalkMoveInjection(
   // v0.9.6：优先用「今天真实发生的小事」；没有才回退静态人设素材
   const todayEvents = readTodayDailyLife(state);
   const pickedToday = pickLifeEvent(todayEvents, now.getHours());
+  if (pickedToday) markLifeEventTold(state, pickedToday.text);
   const todaySignal = pickedToday?.text;
   // v0.9.5：给她一句具体的生活素材（否则 self-disclose 提示只能空泛地"补一句近况"）
   const lifeSignals = buildLifeSignals({
@@ -1857,6 +1941,7 @@ export async function processMessage(
     buildWorkingMemoryInjection(state) +
     buildConsistencyInjection(session.messages) +
     getPromiseInjection(state.owner, state.storagePersona) +
+    getLifeHistoryInjection(state) +
     buildReflectionNote(state) +
     buildRelationshipDimsInjection(state) +
     buildFactConflictInjection(state) +
@@ -2364,6 +2449,7 @@ export async function* processMessageStream(
     buildWorkingMemoryInjection(state) +
     buildConsistencyInjection(session.messages) +
     getPromiseInjection(state.owner, state.storagePersona) +
+    getLifeHistoryInjection(state) +
     buildReflectionNote(state) +
     buildRelationshipDimsInjection(state) +
     buildFactConflictInjection(state) +
@@ -3119,6 +3205,7 @@ export async function processProactive(
     buildWorkingMemoryInjection(state) +
     buildConsistencyInjection(session.messages) +
     getPromiseInjection(state.owner, state.storagePersona) +
+    getLifeHistoryInjection(state) +
     t1ArcContext +
     avoidRepeatNote;
   const messages = buildChatMessages(session, fullSystem);
