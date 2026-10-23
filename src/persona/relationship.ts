@@ -5,7 +5,9 @@
  * - 亲密度不是「聊得越多涨得越快」，而是由**结构性事件**驱动：深度对话、连续多天互动、
  *   主动分享生活细节。绝对不使用关键词检测情绪/讨好程度。
  * - 增长缓慢、有每日上限（默认 +0.1/天），并且全程可解释（每条变化都有 reason）。
- * - 只增不减（M1 保守策略）：缺席不惩罚用户，避免情感陪伴产品里的「冷暴力式」设计。
+ * - 只增不减是默认策略，但 2026-10-23（P1-3）补了**缺席下滑**：连续 ≥2 天不联系会
+ *   小幅降温（上限 -0.2，不做每日惩罚、不羞辱用户），让「几天不理她」和「天天聊」
+ *   在关系上有区别；同时新增事件型里程碑（第一次语音/第一次照片/第一次冲突/和好/认识第 N 天）。
  * - 阈值跨越时记录里程碑，供关系时间线展示（M1-3）。
  */
 import type { MessageComplexity } from "../ai/router.js";
@@ -282,6 +284,106 @@ export function touchInteraction(state: RelationshipState, now: Date = new Date(
 /** 当前已达成的最新里程碑（供 prompt / 时间线使用） */
 export function latestMilestone(state: RelationshipState): RelationshipMilestone | null {
   return state.milestones.length > 0 ? state.milestones[state.milestones.length - 1] : null;
+}
+
+/** 连续未互动天数（按 lastInteractionDay 与今天比较；无法解析返回 0）。 */
+function daysSinceDayKey(day: string, now: Date): number {
+  if (!day) return 0;
+  const [y, m, d] = day.split("-").map(Number);
+  if (![y, m, d].every((n) => Number.isFinite(n))) return 0;
+  const prev = Date.UTC(y, m - 1, d);
+  const current = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.max(0, Math.round((current - prev) / (24 * 60 * 60 * 1000)));
+}
+
+export interface AbsenceDriftResult {
+  state: RelationshipState;
+  delta: number;
+  days: number;
+  reason: string;
+}
+
+/**
+ * P1-3：缺席降温。连续 ≥2 天没互动，亲密度小幅下降：
+ * - 2 天 -0.04、7 天约 -0.14、20 天触顶 -0.2；
+ * - 只在回归后的第一轮结算一次（之后 lastInteractionDay 会被更新，不会重复扣）；
+ * - 不做「冷暴力」：只降温，不阻断回复，也不在聊天里羞辱用户。
+ */
+export function applyAbsenceDrift(
+  state: RelationshipState,
+  now: Date = new Date(),
+): AbsenceDriftResult | null {
+  if (!state.lastInteractionDay) return null;
+  const days = daysSinceDayKey(state.lastInteractionDay, now);
+  if (days < 2) return null;
+  const penalty = Math.min(0.2, Math.round(days * 0.02 * 1000) / 1000);
+  const from = state.closeness;
+  const to = clamp(from - penalty);
+  const delta = Math.round((to - from) * 1000) / 1000;
+  if (delta >= 0) return null;
+  const reason = `很久没联系（${days} 天），关系有点生疏`;
+  const events = [
+    ...state.events,
+    { at: now.getTime(), delta, closeness: to, reason },
+  ].slice(-200);
+  return {
+    state: { ...state, closeness: to, events, lastEvaluatedAt: now.getTime() },
+    delta,
+    days,
+    reason,
+  };
+}
+
+/** P1-3：新增事件型里程碑（幂等）。 */
+export function addRelationshipMilestone(
+  state: RelationshipState,
+  id: string,
+  title: string,
+  now: Date = new Date(),
+): RelationshipState {
+  if (state.milestones.some((milestone) => milestone.id === id)) return state;
+  return {
+    ...state,
+    milestones: [
+      ...state.milestones,
+      { id, at: now.getTime(), title, closeness: state.closeness },
+    ],
+  };
+}
+
+/** P1-3：按认识天数补里程碑（第 7/30/100/365 天）。 */
+export function withTimeMilestones(
+  state: RelationshipState,
+  now: Date = new Date(),
+): RelationshipState {
+  const firstAt = state.events[0]?.at;
+  if (!firstAt) return state;
+  const days = Math.floor((now.getTime() - firstAt) / (24 * 60 * 60 * 1000));
+  let next = state;
+  for (const threshold of [7, 30, 100, 365]) {
+    if (days >= threshold) {
+      next = addRelationshipMilestone(next, `day-${threshold}`, `认识第 ${threshold} 天`, now);
+    }
+  }
+  return next;
+}
+
+/**
+ * P1-3：缺席/冷场的内部提示。只在 ≥2 天没互动时注入，
+ * 让她可以慢热/有点小情绪再回暖，而不是当昨天刚聊过。
+ */
+export function buildAbsenceInjection(
+  state: RelationshipState,
+  now: Date = new Date(),
+): string {
+  const days = daysSinceDayKey(state.lastInteractionDay, now);
+  if (days < 2) return "";
+  const tone = days >= 7 ? "已经一周多没怎么联系" : `${days} 天没怎么好好聊`;
+  return (
+    `\n## 你们有一阵没联系了\n${tone}。` +
+    "你可以比平时慢热一点：先试探/有点小情绪/问他最近怎么了，再慢慢回暖；" +
+    "不要一上来就完全像昨天刚聊过，也不要冷暴力。\n"
+  );
 }
 
 /** 亲密度 → 人类可读标签 */

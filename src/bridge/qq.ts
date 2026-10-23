@@ -45,6 +45,7 @@ import {
   processMessageStream,
   processProactive,
   persistRuntimeState,
+  recordRelationshipMilestone,
   runMemoryJobsIfDue,
   type ConversationState,
   type PipelineResult,
@@ -1666,6 +1667,9 @@ async function streamPrivateReply(params: {
     if (frag.image) {
       await sendPhotoToUser(userId, frag.image, sentText);
       markPromisesDone(state.owner, state.storagePersona, ["photo"]);
+      if (recordRelationshipMilestone(state, "first-photo", "第一次给他发照片")) {
+        log.info("relationship.milestone", { user_id: userId, id: "first-photo" });
+      }
       photoSent = true;
       continue;
     }
@@ -2020,6 +2024,10 @@ async function sendVoiceNote(
     verified: sent.verified,
     promises_done: done,
   });
+  if (recordRelationshipMilestone(state, "first-voice", "第一次给他发语音")) {
+    persistRuntimeState(state);
+    log.info("relationship.milestone", { user_id: userId, id: "first-voice" });
+  }
   return true;
 }
 
@@ -2131,6 +2139,10 @@ async function sendRequestedSelfie(
         );
         await sendPhotoToUser(userId, { file, caption }, lastReply);
         markPromisesDone(state.owner, state.storagePersona, ["photo"]);
+        if (recordRelationshipMilestone(state, "first-photo", "第一次给他发照片")) {
+          persistRuntimeState(state);
+          log.info("relationship.milestone", { user_id: userId, id: "first-photo" });
+        }
         userLastSelfieAt.set(userId, now);
         userRecentSelfieCaptions.set(
           userId,

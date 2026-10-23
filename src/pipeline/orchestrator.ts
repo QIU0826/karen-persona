@@ -231,6 +231,10 @@ import {
 import {
   evaluateRelationshipEvent,
   applyRelationshipEvent,
+  applyAbsenceDrift,
+  addRelationshipMilestone,
+  withTimeMilestones,
+  buildAbsenceInjection,
   touchInteraction,
   closenessLabel,
   createRelationshipState,
@@ -852,6 +856,18 @@ export function persistRuntimeState(state: ConversationState): void {
 }
 
 /** 本轮结束后更新关系（含里程碑日志），返回可打印的日志行 */
+/** P1-3：桥接在「第一次发语音/照片」时记录事件型里程碑（幂等）。 */
+export function recordRelationshipMilestone(
+  state: ConversationState,
+  id: string,
+  title: string,
+): boolean {
+  const next = addRelationshipMilestone(state.relationshipState, id, title);
+  if (next === state.relationshipState) return false;
+  state.relationshipState = next;
+  return true;
+}
+
 export function updateRelationshipAfterTurn(
   state: ConversationState,
   userInput: string,
@@ -860,6 +876,17 @@ export function updateRelationshipAfterTurn(
 ): string[] {
   const messages: string[] = [];
   const now = new Date();
+
+  // P1-3：回来后的第一轮先结算「缺席降温」，再按本轮事件涨/跌。
+  const absence = applyAbsenceDrift(state.relationshipState, now);
+  if (absence) {
+    state.relationshipState = absence.state;
+    state.persona.relationship.closeness = absence.state.closeness;
+    messages.push(
+      `[关系] ${absence.reason}：亲密度 ${(absence.state.closeness - absence.delta).toFixed(2)} → ${absence.state.closeness.toFixed(2)}（${closenessLabel(absence.state.closeness)}）`,
+    );
+  }
+
   const before = state.relationshipState.closeness;
   const beforeMilestones = state.relationshipState.milestones.length;
 
@@ -912,12 +939,30 @@ export function updateRelationshipAfterTurn(
       // 五维失败不影响主流程
     }
 
-    if (state.relationshipState.milestones.length > beforeMilestones) {
-      const milestone = state.relationshipState.milestones[state.relationshipState.milestones.length - 1];
-      messages.push(`[关系] 里程碑：${milestone.title}`);
-    }
   } else {
     state.relationshipState = touchInteraction(state.relationshipState, now);
+  }
+
+  // P1-3：事件型里程碑（第一次冲突/和好）+ 认识天数里程碑。
+  if (evaluation?.conflict) {
+    state.relationshipState = addRelationshipMilestone(
+      state.relationshipState,
+      "first-conflict",
+      "第一次闹别扭",
+      now,
+    );
+  }
+  if (evaluation?.repair) {
+    state.relationshipState = addRelationshipMilestone(
+      state.relationshipState,
+      "first-makeup",
+      "第一次和好",
+      now,
+    );
+  }
+  state.relationshipState = withTimeMilestones(state.relationshipState, now);
+  for (const milestone of state.relationshipState.milestones.slice(beforeMilestones)) {
+    messages.push(`[关系] 里程碑：${milestone.title}`);
   }
 
   // v0.8：反思循环（觉察→否认→承认→整合；承认后才真的改）
@@ -1942,6 +1987,7 @@ export async function processMessage(
     buildConsistencyInjection(session.messages) +
     getPromiseInjection(state.owner, state.storagePersona) +
     getLifeHistoryInjection(state) +
+    buildAbsenceInjection(state.relationshipState) +
     buildReflectionNote(state) +
     buildRelationshipDimsInjection(state) +
     buildFactConflictInjection(state) +
@@ -2450,6 +2496,7 @@ export async function* processMessageStream(
     buildConsistencyInjection(session.messages) +
     getPromiseInjection(state.owner, state.storagePersona) +
     getLifeHistoryInjection(state) +
+    buildAbsenceInjection(state.relationshipState) +
     buildReflectionNote(state) +
     buildRelationshipDimsInjection(state) +
     buildFactConflictInjection(state) +
@@ -3206,6 +3253,7 @@ export async function processProactive(
     buildConsistencyInjection(session.messages) +
     getPromiseInjection(state.owner, state.storagePersona) +
     getLifeHistoryInjection(state) +
+    buildAbsenceInjection(state.relationshipState) +
     t1ArcContext +
     avoidRepeatNote;
   const messages = buildChatMessages(session, fullSystem);

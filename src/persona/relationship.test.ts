@@ -6,11 +6,15 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_DAILY_GAIN,
+  addRelationshipMilestone,
+  applyAbsenceDrift,
   applyRelationshipEvent,
+  buildAbsenceInjection,
   createRelationshipState,
   evaluateRelationshipEvent,
   latestMilestone,
   touchInteraction,
+  withTimeMilestones,
 } from "./relationship.js";
 
 const TODAY = new Date("2026-10-19T21:00:00+08:00");
@@ -154,5 +158,61 @@ describe("touchInteraction", () => {
     const state = { ...createRelationshipState(3), lastInteractionDay: "2026-10-19", interactionStreak: 4 };
     const next = touchInteraction(state, TODAY);
     expect(next.interactionStreak).toBe(4);
+  });
+});
+
+
+describe("P1-3 缺席降温与事件里程碑", () => {
+  it("连续 3 天没联系 → 小幅降温，不再只增不减", () => {
+    const state = { ...createRelationshipState(3), lastInteractionDay: "2026-10-16" };
+    const drift = applyAbsenceDrift(state, new Date("2026-10-19T21:00:00+08:00"));
+    expect(drift).not.toBeNull();
+    expect(drift?.days).toBe(3);
+    expect(drift?.delta).toBeCloseTo(-0.06, 3);
+    expect(drift?.state.closeness).toBeCloseTo(2.94, 2);
+    expect(drift?.reason).toContain("很久没联系");
+  });
+
+  it("不到 2 天/没有互动记录 → 不扣；有下限", () => {
+    const fresh = { ...createRelationshipState(3), lastInteractionDay: "2026-10-18" };
+    expect(applyAbsenceDrift(fresh, new Date("2026-10-19T21:00:00+08:00"))).toBeNull();
+    expect(applyAbsenceDrift(createRelationshipState(3))).toBeNull();
+
+    const low = { ...createRelationshipState(0.01), lastInteractionDay: "2026-10-01" };
+    const drift = applyAbsenceDrift(low, new Date("2026-10-30T21:00:00+08:00"));
+    expect(drift?.state.closeness).toBe(0);
+    expect(drift?.delta).toBe(-0.01);
+  });
+
+  it("事件型里程碑幂等；认识天数里程碑按 7/30/100/365 天补", () => {
+    const base = createRelationshipState(3);
+    const once = addRelationshipMilestone(base, "first-voice", "第一次给他发语音");
+    const twice = addRelationshipMilestone(once, "first-voice", "第一次给他发语音");
+    expect(twice).toBe(once);
+    expect(once.milestones.map((m) => m.id)).toEqual(["first-voice"]);
+
+    const now = new Date("2026-10-19T21:00:00+08:00");
+    const withHistory = {
+      ...base,
+      events: [{ at: now.getTime() - 31 * 24 * 60 * 60 * 1000, delta: 0.1, closeness: 3, reason: "初次" }],
+    };
+    const timed = withTimeMilestones(withHistory, now);
+    expect(timed.milestones.map((m) => m.id)).toEqual(["day-7", "day-30"]);
+    expect(withTimeMilestones(timed, now)).toBe(timed);
+  });
+
+  it("缺席提示只在 ≥2 天时注入", () => {
+    expect(
+      buildAbsenceInjection(
+        { ...createRelationshipState(3), lastInteractionDay: "2026-10-19" },
+        new Date("2026-10-19T21:00:00+08:00"),
+      ),
+    ).toBe("");
+    const text = buildAbsenceInjection(
+      { ...createRelationshipState(3), lastInteractionDay: "2026-10-14" },
+      new Date("2026-10-19T21:00:00+08:00"),
+    );
+    expect(text).toContain("你们有一阵没联系了");
+    expect(text).toContain("不要冷暴力");
   });
 });
