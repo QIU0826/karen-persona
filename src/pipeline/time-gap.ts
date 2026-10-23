@@ -8,6 +8,15 @@ import type { ConversationSession } from "../data/history.js";
 
 const MIN_GAP_MS = 2 * 60 * 60 * 1000;
 
+/** 日常收尾：这类上一轮不适合强行“昨晚你说…” */
+const ROUTINE_END_RE = /^(准备睡|睡了|去睡|睡觉|先睡|晚安|好梦|拜拜|明天见|不聊了|先这样)/;
+/** 值得跨天回扣的情绪/约定/重要事 */
+const IMPORTANT_TOPIC_RE = /(吵架|生气|难过|委屈|对不起|道歉|答应|约好|明天|面试|考试|医院|工作|辞职|喜欢|想你|分手|冷战|担心|害怕|哭|重要|记得)/;
+/** 用户当前话里可能在接旧话题 */
+const CONTINUATION_RE = /(昨晚|昨天|上次|那个|后来|你说|刚说|然后呢|继续|还没)/;
+/** 用户当前话像是在开启新一天 */
+const NEW_DAY_RE = /^(早|早安|早上好|在吗|醒了|我醒了|起床|起了)/;
+
 function formatGap(ms: number): string {
   const hours = ms / (60 * 60 * 1000);
   if (hours < 24) return `${Math.round(hours)} 小时前`;
@@ -45,7 +54,28 @@ export function buildTimeGapNote(
     minute: "2-digit",
     hour12: false,
   });
-  return `\n[时间上下文，仅内部可见] 现在是 ${nowLabel}；上一轮对话在 ${prevLabel}（${formatGap(gap)}）。这是新的一天/新时段。除非他明确接着昨晚的事说，否则先自然接住时间差（问候、问今天安排、接当下），不要继续昨晚的话题，也不要把旧时间点当成现在反问。`;
+  const lastUser = [...session.messages]
+    .reverse()
+    .find((m) => m.role === "user" && m.content !== currentInput);
+  const lastText = lastUser?.content ?? "";
+  const routineEnd = ROUTINE_END_RE.test(lastText);
+  const important = IMPORTANT_TOPIC_RE.test(lastText);
+  const continuation = CONTINUATION_RE.test(currentInput);
+  const newDay = NEW_DAY_RE.test(currentInput.trim());
+
+  const cues: string[] = [];
+  if (routineEnd) cues.push("上一轮最后一句是日常收尾（睡觉/晚安类），不适合强行回扣");
+  if (important) cues.push("上一轮有情绪/约定/重要事，值得轻轻提一句");
+  if (continuation) cues.push("他现在的话像是在接旧话题，先接他的话，必要时呼应昨晚");
+  if (newDay) cues.push("他像是在开启新一天（打招呼/刚醒），可以自然问候今天");
+  if (cues.length === 0) cues.push("他没有明显接旧话题，也没有明显开启新话题，按你此刻的感觉选一种");
+
+  return `\n[时间上下文，仅内部可见] 现在是 ${nowLabel}；上一轮对话在 ${prevLabel}（${formatGap(gap)}）。这是新的一天/新时段。你可以自己选择：
+- 如果上一段有未完成的情绪/约定/重要事，就轻轻提一句，再接今天；
+- 如果只是睡觉/晚安/日常收尾，就直接开启新一天，不必硬提，最多轻描淡写一句；
+- 如果他现在的消息明确在接旧话题，就先接他的话，必要时呼应昨晚。
+判断线索：${cues.join("；")}。
+不要机械地说“昨晚你说要睡”，也不要假装即时回复或把旧时间点当成现在反问。`;
 }
 
 /**
