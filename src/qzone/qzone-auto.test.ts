@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localDateKey, sanitizeQzoneDraft, shouldAttemptAutoPost } from "./qzone-auto.js";
+import { localDateKey, parseQzoneDraftResponse, pickQzoneFriendlyTopic, sanitizeQzoneDraft, shouldAttemptAutoPost } from "./qzone-auto.js";
 
 describe("qzone-auto", () => {
   it("每天最多一次、只在 10–22 点尝试", () => {
@@ -14,5 +14,31 @@ describe("qzone-auto", () => {
   it("清理动态正文里的标记并限长", () => {
     expect(sanitizeQzoneDraft("  今天  [CQ:face,id=1] 有点累  ")).toBe("今天 有点累");
     expect(Array.from(sanitizeQzoneDraft("字".repeat(200))).length).toBe(120);
+  });
+});
+
+describe("Qzone 配图选择", () => {
+  const candidates = [{ path: "/tmp/a.jpg", id: "a", tags: ["cafe"], label: "a" }];
+  it("模型选择照片时带上 path", () => {
+    expect(parseQzoneDraftResponse('{"content":"今天咖啡馆人好多","photo":0}', candidates)).toEqual({
+      content: "今天咖啡馆人好多",
+      photoPath: "/tmp/a.jpg",
+    });
+  });
+
+  it("photo=null 或越界时不配图", () => {
+    expect(parseQzoneDraftResponse('{"content":"今天有点累","photo":null}', candidates)).toEqual({ content: "今天有点累" });
+    expect(parseQzoneDraftResponse('{"content":"今天有点累","photo":3}', candidates)).toEqual({ content: "今天有点累" });
+  });
+
+  it("非 JSON 回退为纯文字", () => {
+    expect(parseQzoneDraftResponse("今天风很大", candidates)).toEqual({ content: "今天风很大" });
+  });
+});
+
+describe("Qzone 热点选择", () => {
+  it("优先生活/娱乐话题，不硬蹭芯片财经", () => {
+    expect(pickQzoneFriendlyTopic([{ title: "芯片人才百万年薪" }, { title: "今日霜降" }])?.title).toBe("今日霜降");
+    expect(pickQzoneFriendlyTopic([{ title: "芯片人才百万年薪" }])).toBeUndefined();
   });
 });
