@@ -81,6 +81,9 @@ import { describeImage, fetchImageAsDataUrl, labelStickerImage } from "../ai/vis
 import { checkMediaUrl } from "../ai/media-url.js";
 import { handleControlCommand } from "../commands/control.js";
 import { exportUserData } from "../data/user-export.js";
+import { publishQzonePost, isQzoneEnabled } from "../qzone/qzone.js";
+import { maybeAutoPublishQzone, localDateKey, type QzoneAutoState } from "../qzone/qzone-auto.js";
+import { dataFile } from "../data/paths.js";
 import { buildFirstContactDisclosure, shouldSendDisclosure } from "../persona/disclosure.js";
 import {
   buildAgeConfirmedText,
@@ -873,6 +876,39 @@ async function main() {
     reportIgnoredNonWhitelisted();
   }, 60000);
 
+  // ── Qzone 自动动态（默认关）──────────────────
+  const qzoneStatePath = dataFile("qzone-state.json");
+  let qzoneAutoState: QzoneAutoState = { lastDate: null };
+  try {
+    const raw = JSON.parse(fs.readFileSync(qzoneStatePath, "utf8")) as QzoneAutoState;
+    qzoneAutoState = { lastDate: raw.lastDate ?? null, ...(raw.lastTid ? { lastTid: raw.lastTid } : {}), ...(raw.lastAt ? { lastAt: raw.lastAt } : {}) };
+  } catch {
+    // 首次/损坏：从空状态开始
+  }
+  let qzonePosting = false;
+
+  const maybeAutoQzone = async (): Promise<void> => {
+    if (process.env.KAREN_QZONE_AUTO !== "on") return;
+    if (!isQzoneEnabled() || qzonePosting) return;
+    if (getConnectionCount() === 0) return;
+    const state = userStates.values().next().value as ConversationState | undefined;
+    if (!state) return;
+    const now = new Date();
+    if (qzoneAutoState.lastDate === localDateKey(now)) return;
+    qzonePosting = true;
+    try {
+      const result = await maybeAutoPublishQzone(state, qzoneAutoState, now);
+      if (result.posted) {
+        qzoneAutoState = result.state;
+        fs.writeFileSync(qzoneStatePath, JSON.stringify(qzoneAutoState, null, 2), "utf8");
+      }
+    } catch (err: unknown) {
+      log.warn("qzone.auto_error", { error: errMessage(err) });
+    } finally {
+      qzonePosting = false;
+    }
+  };
+
   // ── P1: 生活流心跳 ──────────────────────────
 
   // 每 15 分钟检查一次她的生活状态（天气/因果链/情绪/时间节点），
@@ -944,6 +980,8 @@ async function main() {
         log.error("proactive.failed", { user_id: userId, error: errMessage(err) });
       }
     }
+    // Qzone 自动动态：心跳里低频尝试，每天最多一条；默认关。
+    void maybeAutoQzone();
   }, HEARTBEAT_MS);
 
   log.info("proactive.heartbeat_started", { interval_min: HEARTBEAT_MS / 60000 });
@@ -2074,6 +2112,7 @@ async function handlePrivateBatch(
           session: state.session,
           initialCloseness: state.persona.relationship.closeness,
         }),
+      publishQzone: (content) => publishQzonePost({ content }),
     });
     if (!handled) {
       sendPrivateMsg(userId, "看不懂这个指令。/help 看看能做什么。");

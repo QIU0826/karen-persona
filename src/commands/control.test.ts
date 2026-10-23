@@ -234,3 +234,20 @@ describe("/reflect：反思弧线", () => {
     expect(buildReflectText(state)).toContain("改过一次");
   });
 });
+
+describe("handleControlCommand /qzone", () => {
+  it("未启用时提示，不调用 API", async () => {
+    const deps = { reply: vi.fn(), persist: vi.fn(), exportData: vi.fn() };
+    expect(await handleControlCommand("/qzone 测试", makeState() as never, deps)).toBe(true);
+    expect(deps.reply.mock.calls[0][0]).toContain("未启用");
+  });
+
+  it("启用后把正文交给发布回调", async () => {
+    const publishQzone = vi.fn(async () => ({ ok: true, tid: "tid-1" }));
+    const deps = { reply: vi.fn(), persist: vi.fn(), exportData: vi.fn(), publishQzone };
+    expect(await handleControlCommand("/qzone 今天天气不错", makeState() as never, deps)).toBe(true);
+    expect(publishQzone).toHaveBeenCalledWith("今天天气不错");
+    expect(deps.reply.mock.calls[0][0]).toContain("发好了");
+    expect(deps.reply.mock.calls[0][0]).toContain("tid-1");
+  });
+});

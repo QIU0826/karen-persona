@@ -39,6 +39,7 @@
     "image:refine": "tsx scripts/image-refine.ts",
     "image:selfie": "tsx scripts/image-selfie.ts",
     "chat:audit": "tsx scripts/chat-realism-audit.ts",
+    "hot:show": "tsx scripts/hot-topics.ts",
     "image:audit": "tsx scripts/image-audit.ts",
     "media:status": "tsx scripts/media-setup.ts status",
     "media:install": "tsx scripts/media-setup.ts install",

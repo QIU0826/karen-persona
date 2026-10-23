@@ -44,6 +44,8 @@ export interface ControlDeps {
   reply(text: string): void;
   persist(): void;
   exportData(): ExportSummary;
+  /** /qzone：发 QQ 空间动态；未启用时不传 */
+  publishQzone?: (content: string) => Promise<{ ok: boolean; tid?: string; reason?: string }>;
 }
 
 export interface ParsedCommand {
@@ -216,6 +218,7 @@ export function buildHelpText(): string {
     "/reflect: 她的反思弧线（察觉/嘴硬/认了/慢慢改）",
     "/fact: 查看她记得的关于你的事（可确认/否掉）",
     "/life: 她今天真实发生的小事（生活流）",
+    "/qzone 内容: 发一条 QQ 空间动态（需 KAREN_QZONE=on）",
     "/age: 查看年龄确认状态",
     "/help: 这条帮助",
   ].join("\n");
@@ -381,6 +384,24 @@ export async function handleControlCommand(
         return true;
       }
       deps.reply("用法：/fact（列出）｜/fact ok <key>（确认）｜/fact no <key>（否掉）");
+      return true;
+    }
+    case "qzone": {
+      if (!deps.publishQzone) {
+        deps.reply("QQ空间动态未启用：先在 .env 设置 KAREN_QZONE=on。");
+        return true;
+      }
+      const content = text.trim().replace(/^\/qzone\s*/i, "").trim();
+      if (!content) {
+        deps.reply("用法：/qzone 动态正文（可带空格；建议先用自己的号测试）");
+        return true;
+      }
+      const result = await deps.publishQzone(content);
+      deps.reply(
+        result.ok
+          ? `发好了${result.tid ? `（tid: ${result.tid}）` : ""}。`
+          : `没发出去：${result.reason ?? "unknown"}`,
+      );
       return true;
     }
     case "help":
