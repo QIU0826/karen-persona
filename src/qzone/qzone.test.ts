@@ -34,6 +34,18 @@ describe("qzone", () => {
     delete process.env.KAREN_QZONE;
   });
 
+  it("支持图片数组（base64）", async () => {
+    process.env.KAREN_QZONE = "on";
+    const callApi = vi.fn(async () => ({ tid: "img" }));
+    await publishQzonePost({ content: "配图", images: ["base64://abc"], callApi });
+    expect(callApi).toHaveBeenCalledWith(
+      "send_qzone_msg",
+      expect.objectContaining({ images: ["base64://abc"] }),
+      20_000,
+    );
+    delete process.env.KAREN_QZONE;
+  });
+
   it("API 失败返回 ok:false", async () => {
     process.env.KAREN_QZONE = "on";
     const result = await publishQzonePost({
