@@ -10,7 +10,7 @@
 | P1 B 站只读 | ✅ 已完成 | 热门/详情/评论 + BV 解析；29 单测 + 真实 smoke；生产已重启加载 |
 | P2 MOSS-Image 部署 | ✅ shadow 完成 | GPU7 `18114` loaded；50 步 38–40s/张、峰值 28.2GB；4 张真实 PNG；生产默认未切 |
 | P3 数据集/基线 | ✅ 完成 | 30 train / 8 eval，ArcFace train best mean 0.8259 / eval 0.8584 |
-| P3 LoRA 训练 | ✅ 完成（未切生产） | kohya sd-scripts 1200 步/40 epoch，GPU6 约 30min；base→LoRA ArcFace 0.250→0.673（8/8 提升），但低于 Qwen-Edit 跨模型参考 0.858；按质量门槛不切生产 |
+| P3 LoRA v2 | ✅ 完成（未切生产） | 30→59 张角色图、rank32/1500 步；base 0.250 → v1 0.673 → **v2 0.766（ckpt1250）**，但仍低于 Qwen 单参考 0.839（差 0.0725）；MOSS-Edit 0.122；按人物一致性优先，自拍继续 Qwen，MOSS 全部 shadow |
 
 > 关键发现：MOSS-Image-SFT 原生输出偏写实，和宣传页的铅笔/水彩画风不一致；
 > LoRA 把画风/发色拉回宣传页、identity 明显提升，但仍未超过现有 Qwen-Image-Edit，

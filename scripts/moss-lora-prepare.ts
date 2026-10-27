@@ -47,6 +47,19 @@ const IDENTITY_EN =
 const STYLE_EN =
   "soft pencil and watercolor illustration style, low-saturation cool gray-blue palette, " +
   "fine pencil and ink linework with light watercolor wash, subtle paper texture";
+/**
+ * v2 caption profile：降低「风格与身份耦合」。
+ * MOSS 的文本编码器是 Qwen3.5（LLM），不像 CLIP 那样解析 (word:1.2) 权重语法；
+ * 因此用「结构 + 顺序」提升身份词权重：
+ *   - 触发词 + 身份描述放在最前、写得更具体（含体型/固定身份）；
+ *   - 风格描述压缩到最后、只保留 2 个短句，避免压过身份；
+ *   - 明确 "fixed character identity ... must stay the same" 的语义。
+ * v1（默认）保持原样，便于复现旧实验。
+ */
+const IDENTITY_V2_EN =
+  "the fixed character identity, a 24-year-old Chinese woman with shoulder-length medium-blue bob hair (#4a6fa5), " +
+  "gray-blue eyes, pale skin, slim build; her face, hairstyle and hair color must stay exactly the same across images";
+const STYLE_V2_EN = "art style: soft pencil and watercolor illustration, muted cool tones, subtle paper texture";
 
 /** GPU 服务器 / 训练栈默认路径（与 task-23/24 对齐）。 */
 const DEFAULTS = {
@@ -64,6 +77,12 @@ const DEFAULTS = {
   evalHeight: "912",
   evalSteps: "50",
   resolution: "1024",
+  // v2 起可覆盖：rank/alpha、输出名前缀、远端数据集目录（容器内路径自动推导）
+  networkDim: "16",
+  networkAlpha: "1",
+  outputName: "karen_style_moss_v1",
+  containerDatasetDir: "",
+  captionProfile: "v1",
 } as const;
 
 // ── 场景 / 服装 / 角度 / 光线 中→英映射 ───────────────
@@ -127,6 +146,8 @@ const OUTFIT_EN: Record<string, string> = {
   浅粉针织开衫: "a light pink knit cardigan",
   藏青色大衣: "a navy coat",
   宽松米白衬衫: "a loose off-white shirt",
+  深绿色针织衫: "a dark green knit sweater",
+  米白色粗针织毛衣: "an off-white chunky knit sweater",
 };
 
 const ANGLE_EN: Record<string, string> = {
@@ -136,6 +157,10 @@ const ANGLE_EN: Record<string, string> = {
   lookBack: "looking back over her shoulder at the camera",
   profile: "side profile, face clearly visible",
   lowAngle: "low-angle shot, looking up at her",
+  // v2 新增取景：半身 / 四分之三身 / 全身
+  halfBody: "half-body shot from the waist up, face and upper body clearly visible",
+  threeQuarterBody: "three-quarter body shot with knees visible, showing both top and bottom outfits",
+  fullBody: "full-body shot from head to toe, standing naturally, some space above her head",
 };
 
 const LIGHT_EN: Record<string, string> = {
@@ -202,6 +227,11 @@ interface CliOptions {
   evalSteps: string;
   resolution: string;
   trigger: string;
+  networkDim: string;
+  networkAlpha: string;
+  outputName: string;
+  containerDatasetDir: string;
+  captionProfile: string;
 }
 
 function parseCli(argv: string[]): CliOptions {
@@ -226,6 +256,11 @@ function parseCli(argv: string[]): CliOptions {
     evalSteps: DEFAULTS.evalSteps,
     resolution: DEFAULTS.resolution,
     trigger: TRIGGER_WORD,
+    networkDim: DEFAULTS.networkDim,
+    networkAlpha: DEFAULTS.networkAlpha,
+    outputName: DEFAULTS.outputName,
+    containerDatasetDir: DEFAULTS.containerDatasetDir,
+    captionProfile: DEFAULTS.captionProfile,
   };
   const map: Record<string, keyof CliOptions> = {
     "--raw-root": "rawRoot",
@@ -245,6 +280,11 @@ function parseCli(argv: string[]): CliOptions {
     "--eval-steps": "evalSteps",
     "--resolution": "resolution",
     "--trigger": "trigger",
+    "--network-dim": "networkDim",
+    "--network-alpha": "networkAlpha",
+    "--output-name": "outputName",
+    "--container-dataset-dir": "containerDatasetDir",
+    "--caption-profile": "captionProfile",
   };
   const flags: Record<string, keyof CliOptions> = {
     "--keep": "keep",
@@ -322,14 +362,15 @@ function buildCaption(item: RawItem, opts: CliOptions, untranslated: Set<string>
   const angle = translate(ANGLE_EN, meta.angle, untranslated, "angle");
   const light = translate(LIGHT_EN, meta.light, untranslated, "light");
 
+  const isV2 = opts.captionProfile === "v2";
   const parts = [
     opts.trigger,
-    IDENTITY_EN,
+    isV2 ? IDENTITY_V2_EN : IDENTITY_EN,
     scene ?? "a quiet everyday scene",
     outfit ? `wearing ${outfit}` : null,
     angle,
     light,
-    STYLE_EN,
+    isV2 ? STYLE_V2_EN : STYLE_EN,
     "clean background with a clear scene atmosphere, single person, no text, no watermark, no border",
   ].filter(Boolean);
   return parts.join(", ").replace(/\s+/g, " ").trim();
@@ -407,7 +448,7 @@ caption_dropout_rate = 0.05
 enable_bucket = true
 
 [[datasets.subsets]]
-image_dir = "${CONTAINER_STACK}/datasets/karen-lora/train"
+image_dir = "${opts.containerDatasetDir}/train"
 num_repeats = 1
 caption_extension = ".txt"
 `;
@@ -432,12 +473,12 @@ function commonTrainArgs(opts: CliOptions, outputName: string, maxSteps: string)
     `    --text_encoder="${CONTAINER_STACK}/models/MOSS-Image-SFT/text_encoder/model-00001-of-00004.safetensors" \\`,
     `    --vae="${CONTAINER_STACK}/models/MOSS-Image-SFT/vae/diffusion_pytorch_model.safetensors" \\`,
     `    --tokenizer_cache_dir="${CONTAINER_STACK}/models/MOSS-Image-SFT/tokenizer" \\`,
-    `    --dataset_config="${CONTAINER_STACK}/datasets/karen-lora/dataset_train.toml" \\`,
+    `    --dataset_config="${opts.containerDatasetDir}/dataset_train.toml" \\`,
     `    --output_dir="${CONTAINER_STACK}/models/karen-moss-lora" \\`,
     `    --output_name="${outputName}" \\`,
     "    --save_model_as=safetensors \\",
     "    --network_module=networks.lora_generic \\",
-    "    --network_dim=16 \\",
+    `    --network_dim=${opts.networkDim} --network_alpha=${opts.networkAlpha} \\`,
     "    --network_train_unet_only \\",
     "    --learning_rate=1e-4 \\",
     "    --optimizer_type=AdamW \\",
@@ -456,10 +497,10 @@ function commonTrainArgs(opts: CliOptions, outputName: string, maxSteps: string)
 
 function buildRunScript(opts: CliOptions, mode: "smoke" | "full"): string {
   const isSmoke = mode === "smoke";
-  const outputName = isSmoke ? "karen_style_moss_smoke" : "karen_style_moss_v1";
+  const outputName = isSmoke ? `${opts.outputName}_smoke` : opts.outputName;
   const maxSteps = isSmoke ? opts.smokeSteps : opts.fullSteps;
   return `#!/usr/bin/env bash
-# ${isSmoke ? "Smoke 训练（20–50 步，验证 loss / LoRA 保存）" : "完整训练（默认 1000 步 ≈ 25 张图 × 40 epoch）"}
+# ${isSmoke ? "Smoke 训练（20–50 步，验证 loss / LoRA 保存）" : `完整训练（${opts.fullSteps} 步，每 ${opts.saveEvery} 步存 checkpoint 供挑选）`}
 # 由 scripts/moss-lora-prepare.ts 生成；GPU 默认 6（GPU7 留给 MOSS 推理服务）。
 # 用法：bash run_${mode}.sh
 set -euo pipefail
@@ -526,8 +567,15 @@ function rsyncFile(opts: CliOptions, localFile: string, remoteSub: string): { ok
 
 async function main(): Promise<void> {
   const opts = parseCli(process.argv.slice(2));
+  // 容器内数据集目录：/workspace/datasets/<远端目录 basename>（默认 karen-lora；v2 用 karen-lora-v2）
+  if (!opts.containerDatasetDir) {
+    const base = path.basename(opts.remoteDir.replace(/\/+$/, ""));
+    opts.containerDatasetDir = `${CONTAINER_STACK}/datasets/${base}`;
+  }
   const startedAt = new Date();
   console.log("[prepare] raw:", opts.rawRoot);
+  console.log("[prepare] network:", `dim=${opts.networkDim} alpha=${opts.networkAlpha}`, "output:", opts.outputName);
+  console.log("[prepare] container dataset dir:", opts.containerDatasetDir);
   console.log("[prepare] remote:", `${opts.sshTarget}:${opts.remoteDir}`, opts.skipUpload ? "(skip-upload)" : "");
 
   const train = await collectSplit("train", opts);

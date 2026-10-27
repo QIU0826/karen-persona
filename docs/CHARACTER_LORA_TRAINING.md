@@ -1,7 +1,8 @@
 # Karen 角色 identity LoRA 训练（MOSS-Image × kohya sd-scripts）
 
 > 任务：P3 / task-25 —— 用 MOSS-Image-SFT 训练 Karen 角色 identity LoRA，验证一致性是否优于/接近现有基线。
-> 状态：**已完成** —— smoke 通过 → 1200 步全量训练（30.5 min）→ base vs LoRA 同 prompt/seed 出图 + ArcFace 评测。核心结果：LoRA 把 eval identity best cosine 从 base **0.250 → 0.673**（+0.423），人工看脸型/发色/画风已明显回归 Karen；但仍低于 task-24 Qwen-Image-Edit 数据集的 0.858（跨模型、生成方式不同，不可直接比）。**未切换生产**。
+> 状态：**v1 已完成；v2（rank32 + 半身/全身扩充）已完成** —— v2 best ckpt=step1250、multiplier 1.0，eval best mean **0.7664**（v1 0.6731 / base 0.2503）；仍低于 Qwen 单参考 0.8389（差 0.072>0.05）→ **暂不替换自拍，继续 Qwen，MOSS 仅保留 shadow**（详见 §9）。
+> v1 记录：smoke 通过 → 1200 步全量训练（30.5 min）→ base vs LoRA 同 prompt/seed 出图 + ArcFace 评测。核心结果：LoRA 把 eval identity best cosine 从 base **0.250 → 0.673**（+0.423），人工看脸型/发色/画风已明显回归 Karen；但仍低于 task-24 Qwen-Image-Edit 数据集的 0.858（跨模型、生成方式不同，不可直接比）。**未切换生产**。
 > 约束：训练与数据全部放 GPU 服务器 `/mnt/data0`；不 commit、不改生产默认、不切 `KAREN_SELFIE_BACKEND`。
 > 相关：[docs/MOSS_IMAGE.md](MOSS_IMAGE.md)（P2 推理服务）、[docs/CHARACTER_LORA.md](CHARACTER_LORA.md)（task-24 数据集与 ArcFace 基线）、`scripts/moss-lora-prepare.ts`、`scripts/moss-lora-eval.py`。
 
@@ -380,3 +381,200 @@ TOML:       /workspace/datasets/karen-lora/dataset_train.toml
 推理:       moss_image_minimal_inference.py（--lora_weight <safetensors>，50 步，832×912）
 评测:       ArcFace buffalo_l CPU，refs 9 张，best/mean/primary + base→LoRA Δ
 ```
+
+---
+
+## 9. 训练后接入：merge 到 diffusers 推理服务（task-26 实测，2026-10-27）
+
+> 目的：把本文件训练的 kohya LoRA 用到 GPU6 的「人物专用」MOSS 服务（18116），供自拍 shadow。
+> 结论：**merge 实现正确（与离线 kohya 等价）**；**merged v1 identity 仍明显低于现有 Qwen-Image-Edit**，
+> 因此自拍生产继续用 Qwen，`KAREN_SELFIE_BACKEND=moss-t2i` 仅 shadow。详细数据见
+> [docs/MOSS_IMAGE.md §9](MOSS_IMAGE.md)。
+
+### 9.1 合并实现与校验
+
+- 脚本：`deploy/gpu-server/moss-image/merge_lora.py`（kohya `lora_unet_*` → diffusers `MOSSImageTransformer`，
+  CPU merge 约 88s，产物 `models/MOSS-Image-SFT-karen-lora/`）。
+- 映射：目标 module 的 `.`→`_` 反查 kohya module 名（避免 `ffn_down`/`ffn_up_gate` 被错误拆分）。
+- 统计：**252/252 命中、0 缺失、0 形状不匹配、252 个权重变化、0 NaN/Inf**；
+  `max|ΔW|=0.001794` @ `layers.41.proj.ffn_up_gate`；`rope.bands` 1.8e-4 为 bf16 重序列化。
+- 缩放：`scale = alpha/rank = 1/16`（rank16/alpha1）× multiplier 1.0；与 sd-scripts
+  `library/lora_utils.py` 的 `scale = alpha / dim` 与同款 key 匹配规则一致。
+
+### 9.2 直接 A/B：merged 服务 vs 离线 kohya（同 prompt/seed/分辨率）
+
+| 场景 | merged vs 离线 LoRA mean_abs（0–255） |
+|---|---|
+| cafe | 1.134 |
+| home | 1.653 |
+| night | 0.965 |
+| rain | 14.048 |
+| sea | 0.757 |
+
+4/5 差异 <2（基本同一张图）；rain 偏高是 diffusers vs sd-scripts 采样数值路径差异，不是 merge 错误。
+
+### 9.3 identity 对比（同一批 5 个自拍 prompt，refs=character-1/2/3）
+
+| 组 | best mean | std | min–max |
+|---|---|---|---|
+| merged 服务（diffusers） | **0.4029** | 0.0866 | 0.2594–0.5001 |
+| 离线 kohya LoRA（sd-scripts） | **0.3931** | 0.0821 | 0.2625–0.4998 |
+| 离线 kohya base（无 LoRA） | 0.1612 | 0.0567 | 0.0943–0.2655 |
+| Qwen-Image-Edit 缓存自拍（同场景，非严格同条件） | **0.6563** | 0.0804 | 0.5702–0.7846 |
+
+- base→LoRA **+0.2317**；merged ≈ 离线 kohya（Δ+0.0098）→ merge 生效且正确；
+- Qwen 仍高 **+0.2534**；guard：merged **3/5** vs Qwen **5/5**；视觉上 merged 更幼/anime，Qwen 更贴近宣传页画风。
+
+### 9.4 与 §5 的 0.6731 为什么不矛盾
+
+§5 是「8 个未见 eval 场景 / 832×912 / 9 张 refs（含缓存自拍）」；本次是「5 个自拍 prompt / 832×1216 / 3 张立绘 refs」。
+用同一 refs3 复算 §5 的离线 eval 图：LoRA **0.4566** / base **0.1491**，与训练结论方向一致。
+→ 绝对分数随 refs/prompt 变化；判断 LoRA 是否有效要看同条件 A/B。
+
+### 9.5 产物与用法（shadow）
+
+| 项 | 路径/命令 |
+|---|---|
+| merged 模型 | `/mnt/data0/lwh/karen-stack/models/MOSS-Image-SFT-karen-lora/` |
+| 服务 | `bash deploy/gpu-server/moss-image/char-start.sh`（GPU6，127.0.0.1:18116；`/health` loaded=true） |
+| 基准/样张 | `bash deploy/gpu-server/moss-image/char-benchmark.sh`；图在 `/mnt/data0/lwh/karen-stack/moss-image/char-bench/` |
+| Node 接入 | `KAREN_SELFIE_BACKEND=moss-t2i` + `MOSS_CHARACTER_URL`（默认 19116）；默认仍 qwen |
+
+### 9.6 结论与后续
+
+- **不替换自拍生产**：Qwen identity/guard/风格仍更强；merged v1 仅 shadow（失败自动回退 Qwen→图库）。
+- 若要把 MOSS 自拍提上来：优先 (1) 补 15–30 张半身/全身/侧身/多光线训练数据（当前偏幼/近景），
+  (2) multiplier 1.25/1.5 扫描，(3) 严格同条件 Qwen 基线（18110 空闲后），(4) 8-step 蒸馏降低 39s 延迟；
+- **Plan B（sd-scripts `MossImage` 动态 LoRA 持久化服务）暂不需要**：merge 已与离线 kohya 等价；
+  将来要做多 LoRA/multiplier 动态切换再评估。
+
+
+---
+
+## 9. v2 实验（rank32 + 半身/全身数据扩充 + Qwen 对照）
+
+> 动机：v1（rank16、1200 步、全头肩近景数据）identity 已大幅提升但**偏幼圆、近景偏多**；用户明确「人物一致性/更像同一张脸优先，现有 Qwen 更强」。v2 目标：补 半身/四分之三身/全身/低角度/侧脸/不同服装，rank 32、1500 步，并与 Qwen-Image-Edit 同 prompt 基线正面对比。
+> 写作用域内产物：本节 + `scripts/moss-lora-prepare.ts`（新增 `--caption-profile v2` / `--network-dim/alpha` / `--output-name` / `--container-dataset-dir`）+ `scripts/moss-lora-eval.py`（新增 `--multiplier`、多目录逐对 Δ）。数据/LoRA 只放 `data/character-lora/v2/` 与 `/mnt/data0`。
+
+### 9.1 数据扩充与清洗
+
+- 生成器：Qwen-Image-Edit-2511（服务器 18110），`simple=false`（**关键**：服务默认 simple=true 会追加「胸部以上近景」并把画面裁到 72%，这正是 task-24 数据近景偏多的原因），参考 character-1+character-2，10 步，输出 832×1280。
+- 候选矩阵 32 张：半身 8 / 四分之三身 8 / 全身 8 / 低角度 4 / 侧脸 4；prompt 强化「中蓝 #4a6fa5，不能银白/白/浅灰/浅蓝/青绿/褪色」并复用身份/画风描述；负向词含发色漂移 + 手部畸形。
+- 串行 + 500/超时退避重试（15/20s，最多 2 次额外尝试）。原批次 27/32 成功、5 个 500；抓到的服务端错误体为：
+  `{"detail":"edit failed: index 11 is out of bounds for dimension 0 with size 11"}`（多参考图 pipeline 内部索引越界，非 OOM；换 seed 重试即成功）。
+- 质检：ArcFace best-ref cosine + 逐张 contact sheet 人工目检；剔除 噪点图 3 张、伪影 1 张、脸太小 1 张、发色过浅 1 张、身份过淡 1 张，并对被剔除项全部重新生成。
+- **最终：新增 29 张 + 原 30 张 = train 59 张；eval 8 张不变**（train/eval 场景分离）。记录：`data/character-lora/v2/qc-v2.json`。
+
+### 9.2 Caption profile v2（降低风格-身份耦合）
+
+MOSS 的文本编码器是 Qwen3.5（LLM），sd-scripts 的 `(word:1.2)` CLIP 权重语法对它不生效；因此用**结构 + 顺序**给身份词加权：
+
+```text
+karen_style, the fixed character identity, a 24-year-old Chinese woman with shoulder-length
+medium-blue bob hair (#4a6fa5), gray-blue eyes, pale skin, slim build; her face, hairstyle and
+hair color must stay exactly the same across images, <scene>, wearing <outfit>, <framing>,
+<light>, art style: soft pencil and watercolor illustration, muted cool tones, subtle paper texture,
+clean background..., single person, no text/watermark/border
+```
+
+- 身份描述放最前、写具体（含 `fixed character identity` / `must stay exactly the same` / slim build）；
+- 风格压缩到最后一句（去掉 fine linework/paper texture 等长串细节），避免压过身份；
+- v1 caption profile 保留默认（`--caption-profile v1`），可复现旧实验。
+
+### 9.3 v2 训练
+
+```bash
+# 本机：准备并上传（59 train / 8 eval，rank32/alpha32，1500 步）
+.runtime/node22/bin/node node_modules/tsx/dist/cli.mjs scripts/moss-lora-prepare.ts \
+  --raw-root data/character-lora/v2/raw --caption-profile v2 \
+  --network-dim 32 --network-alpha 32 --full-steps 1500 --save-every 250 \
+  --output-name karen_style_moss_v2 \
+  --remote-dir /mnt/data0/lwh/karen-stack/datasets/karen-lora-v2
+# 服务器：smoke → full（GPU6，podman 容器 + venv）
+bash /mnt/data0/lwh/karen-stack/datasets/karen-lora-v2/run_smoke.sh
+nohup setsid bash /mnt/data0/lwh/karen-stack/datasets/karen-lora-v2/run_full.sh \
+  > /mnt/data0/lwh/karen-stack/training/logs/v2-full-<ts>.log 2>&1 &
+```
+
+| 指标 | smoke（40 步） | full（1500 步） |
+|---|---|---|
+| loss | 0.439→0.445 平稳 | sample mean **0.4275** / min 0.331 / max 0.461（3000 采样，无发散）；末尾 `avr_loss=0.429` |
+| 速度 | 1.49–1.52 s/it | **1.50 s/it** |
+| 耗时 | 训练 60s；含首次缓存 wall 133s | **37:23**（1500 步；含加载/缓存复用） |
+| 显存 | GPU6 整卡峰值 56.1GB（同卡他人约 40GB，训练自身约 +16GB） | 同量级（无 OOM） |
+| 产物 | `karen_style_moss_v2_smoke.safetensors` | `karen_style_moss_v2(-step00000250/500/750/1000/1250/1500).safetensors`；final 297,370,320 B（rank32） |
+| metadata | — | dim32 / alpha32 / bf16 / AdamW / steps=1500 / epoch=26 / 59 images / 756 keys 且无 `lora_te_*` |
+
+### 9.4 评测设计（四组同 prompt/seed）
+
+| 组 | 来源 | 说明 |
+|---|---|---|
+| base | `/mnt/data0/.../datasets/karen-lora/eval-out/base` | MOSS-Image-SFT 无 LoRA（task-25 已生成） |
+| v1 | `/mnt/data0/.../datasets/karen-lora/eval-out/lora` | v1 LoRA（rank16/1200 步，task-25 已生成） |
+| v2 | `datasets/karen-lora-v2/eval-out/v2` | v2 LoRA（rank32/1500 步，multiplier 1.0） |
+| v2-m115 | `datasets/karen-lora-v2/eval-out/v2-m115` | v2 + multiplier 1.15 |
+| Qwen（同 prompt 上限） | `datasets/karen-lora-v2/eval-out/qwen-en` | Qwen-Image-Edit，同 8 条 v1 eval-prompts + 同 seed，参考 character-2 + 自拍 |
+| Qwen 参考组（中文原 prompt） | `.../eval-out/qwen`、`.../qwen-1ref` | task-24 原始 prompt 条件，用来校准「Qwen 真实上限」（跨 prompt，仅参考） |
+
+- 所有 MOSS 组与 Qwen 同 prompt 组都用 `datasets/karen-lora/eval-prompts.txt`（8 条未见场景，同 seed）；
+- 指标：ArcFace best/mean/primary、检出脸数、逐图 base→v1→v2 Δ、contact sheet、人工看脸/发色/风格/手；
+- 判据（按最新优先级）：v2 以「接近 Qwen 同 prompt 基线」为准；若 best mean 差 >0.05，结论为「MOSS 暂不替换自拍，继续 Qwen，MOSS 仅保留 shadow」。
+
+### 9.5 评测结果（实测，2026-10-27）
+
+**四组同 prompt/seed（8 条未见场景 eval-prompts，832×912，50 步）ArcFace（vs 9 张参考图，取最像）：**
+
+| 组 | best mean | std | min | max | primary mean | 检出脸 |
+|---|---|---|---|---|---|---|
+| base（MOSS 无 LoRA） | 0.2503 | 0.1031 | 0.0939 | 0.4344 | 0.0851 | 8/8 |
+| v1（rank16/1200 步） | 0.6731 | 0.1119 | 0.5403 | 0.8337 | 0.4397 | 8/8 |
+| **v2 best（rank32/1500 步，ckpt1250，multiplier 1.0）** | **0.7664** | **0.0342** | **0.7314** | **0.8505** | 0.5096 | 8/8 |
+| v2 ckpt1250 + multiplier 1.15 | 0.7639 | 0.0675 | 0.6303 | 0.849 | 0.5152 | 8/8 |
+| v2 ckpt1500（对照） | 0.7250 | 0.0585 | 0.6183 | 0.8196 | 0.4749 | 8/8 |
+| Qwen 双参考（character-2 + 自拍，中文原 prompt） | 0.7463 | 0.0955 | 0.616 | 0.9008 | 0.5657 | 8/8 |
+| **Qwen 单参考（character-2，task-24 同款，中文原 prompt）** | **0.8389** | 0.0877 | 0.6334 | 0.9057 | 0.6706 | 7/8* |
+| task-24 原基线（Qwen-1ref 原始数据集图） | 0.8584 | 0.046 | 0.7557 | 0.9057 | — | 8/8 |
+
+\* Qwen 单参考组 1 张生成失败（噪点图，无脸），已排除在均值外；该组还包含 1 张发色过浅图（0.6334），因此 0.8389 仍略低于原基线 0.8584。
+
+**逐组 Δ（同 prompt/同 seed 配对，best cosine）：**
+
+| 对比 | mean Δ | std | min | max |
+|---|---|---|---|---|
+| base → v1 | +0.4228 | 0.0841 | +0.3193 | +0.5790 |
+| v1 → v2（ckpt1250） | **+0.0933** | 0.1094 | -0.0833 | +0.2224 |
+| v2 → v2-m115 | **-0.0025** | 0.0519 | -0.1134 | +0.0664 |
+
+**checkpoint 选择：**
+
+| ckpt | 2 条探针 mean | 全 8 条 mean | 结论 |
+|---|---|---|---|
+| step1000 | 0.7492 | — | |
+| step1250 | 0.7566 | **0.7664**（std 0.0342） | ✅ 采用 |
+| step1500 | 0.719（同 2 条） | 0.7250（std 0.0585） | 过训迹象，弃用 |
+
+**人工目检（contact sheets）：**
+- v2 8/8 都是稳定的「齐肩 bob + 齐刘海 + 中蓝发色 + 灰蓝眼 + 水彩铅笔」Karen 脸；8 张全检出发色未漂白、无文字/水印/多余人脸；
+- 相比 v1：v2 的跨场景一致性明显更稳（std 0.112→0.034，min 0.54→0.73），近景偏「幼圆」的问题改善有限但构图更接近参考立绘；
+- 与 Qwen 单参考组相比：Qwen 更「成熟/精细」、单张最高分更高（0.87–0.91），但 Qwen 双参考配置会漂移出长发/银蓝发（其 std 0.096），稳定性反而低于 v2；
+- multiplier 1.15 无收益（mean -0.0025，且 seed 8 掉到 0.63）→ 推荐 multiplier **1.0**。
+
+**结论（按最新优先级）：**
+- v2 相对 v1 显著提升（mean +0.093、最差图 min +0.19、稳定性翻倍），是当前 MOSS-Image 下最好的 identity LoRA：推荐 **ckpt `karen_style_moss_v2-step00001250.safetensors` + multiplier 1.0**。
+- 但 v2 best mean 0.7664 与 **Qwen 单参考 0.8389 差 0.0725 > 0.05**，未达到「接近最强 Qwen」的门槛 → **自拍/人物图暂不替换 Qwen，继续 Qwen 产出；MOSS v2 仅保留 shadow / 离线高质量候选**，不为替换而替换。
+- 备注：若只与 Qwen 双参考（0.7463）比，v2 略高（+0.020）且稳定得多，可作为「多参考 Qwen 的更稳候选」记录，但不改变上面结论。
+
+### 9.6 v2 产物清单
+
+| 类型 | 路径 |
+|---|---|
+| v2 数据集（本机，gitignore） | `data/character-lora/v2/raw/{train,eval}`（59/8）、`candidates/`（32 张候选）、`qc-v2.json`（接受/拒绝与原因） |
+| v2 数据集（服务器） | `/mnt/data0/lwh/karen-stack/datasets/karen-lora-v2/`（train 59 / eval 8 / TOML / eval-prompts / run_*.sh / moss-lora-eval.py） |
+| v2 LoRA（best） | `/mnt/data0/lwh/karen-stack/models/karen-moss-lora/karen_style_moss_v2-step00001250.safetensors`（rank32，multiplier 1.0） |
+| v2 LoRA（final / 对照） | `.../karen_style_moss_v2.safetensors`（1500 步）、`..._step00000250/500/750/1000/1500.safetensors`、`..._smoke.safetensors` |
+| v2 eval 图 | `datasets/karen-lora-v2/eval-out/{v2-c1250,v2-c1250-m115,v2,v2-m115}/01…08-*.png` |
+| Qwen 对照图 | `.../eval-out/{qwen,qwen-1ref,qwen-en}/`（中文原 prompt 2ref/1ref；英文同 prompt 组因服务 500 未完成） |
+| v2 评测报告/contact sheet | `datasets/karen-lora-v2/eval-report-final/{report.md,metrics.json,contact-{base,v1,v2,v2-m115}.jpg}` |
+| checkpoint 抽选 | `.../eval-report-c1250/`（1250 vs 1500 全 8 条）、`.../eval-report-triage/`（1000/1250 探针） |
+| Qwen 参考组报告 | `.../eval-report-qwen-ref/`（qwen_zh_2ref vs qwen_zh_1ref）、`.../eval-report-qwen-only/`、`.../eval-report-qwen1ref/` |
+| 训练/生成日志 | `/mnt/data0/lwh/karen-stack/training/logs/{v2-smoke-*,v2-full-*,v2-gen-*,qwen*-*}.log` |

@@ -132,7 +132,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
         "--no_metadata",
     ]
     if args.lora:
-        cmd += ["--lora_weight", str(Path(args.lora).expanduser()), "--lora_multiplier", "1.0"]
+        cmd += [
+            "--lora_weight",
+            str(Path(args.lora).expanduser()),
+            "--lora_multiplier",
+            str(float(args.multiplier)),
+        ]
     if args.limit:
         # 用截断后的临时 prompt 文件，保证分批检查 checkpoint 时只跑前 N 条
         limited = out_dir / "_prompts_limited.txt"
@@ -158,7 +163,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         limited.write_text("\n".join(lines) + "\n", encoding="utf-8")
         cmd[cmd.index(str(prompts))] = str(limited)
 
-    log(f"label={args.label} lora={args.lora or '(base)'}")
+    log(f"label={args.label} lora={args.lora or '(base)'} multiplier={args.multiplier}")
     log("run: " + " ".join(cmd))
     if args.dry_run:
         log("--dry-run: 只打印命令，不加载模型")
@@ -458,11 +463,11 @@ def cmd_metrics(args: argparse.Namespace) -> int:
             f"best mean={best['mean']} std={best['std']} min={best['min']} max={best['max']}"
         )
 
-    # base → lora 逐图对比（按 index 配对）
-    pair_rows: list[dict[str, Any]] = []
+    # 相邻目录逐图对比（按 index 配对）：base→v1、v1→v2 ... 都算 Δ
     labels = [label for label, _ in labelled_dirs]
-    if len(labels) == 2:
-        a, b = labels[0], labels[1]
+    pair_sections: list[dict[str, Any]] = []
+    for a, b in zip(labels, labels[1:]):
+        pair_rows: list[dict[str, Any]] = []
         map_a = {r["index"]: r for r in dir_results[a]["rows"]}
         for row_b in dir_results[b]["rows"]:
             row_a = map_a.get(row_b["index"])
@@ -477,8 +482,8 @@ def cmd_metrics(args: argparse.Namespace) -> int:
                     "delta": round(row_b["best_cosine"] - row_a["best_cosine"], 4),
                 }
             )
-    deltas = [r["delta"] for r in pair_rows]
-    delta_stats = stat_block(deltas)
+        deltas = [r["delta"] for r in pair_rows]
+        pair_sections.append({"from": a, "to": b, "rows": pair_rows, "delta": stat_block(deltas)})
 
     # 与 task-24 baseline 对照（跨模型，仅作参考）
     baseline = read_json(Path(args.baseline_json)) if args.baseline_json else None
@@ -523,7 +528,7 @@ def cmd_metrics(args: argparse.Namespace) -> int:
             }
             for label in dir_results
         },
-        "pairwise": {"pairs": pair_rows, "delta": delta_stats},
+        "pairwise": pair_sections,
         "baseline_reference": {
             "path": args.baseline_json,
             "note": "task-24 的 baseline 是 Qwen-Image-Edit 生成图 vs 参考图的最像 cosine，不是 MOSS base；只能作为量级参考。",
@@ -557,20 +562,22 @@ def cmd_metrics(args: argparse.Namespace) -> int:
             f"> task-24 基线（Qwen-Image-Edit 生成图 vs 参考图，跨模型参考量级）：eval best mean={b.get('mean')}、"
             f"std={b.get('std')}、min={b.get('min')}、max={b.get('max')}。**不是同模型对比**。"
         )
-    if pair_rows:
+    for section in pair_sections:
+        a, b, rows_pair, dstat = section["from"], section["to"], section["rows"], section["delta"]
+        if not rows_pair:
+            continue
         lines.append("")
-        lines.append("## 同 prompt / 同 seed 的 base → LoRA 提升\n")
-        lines.append("| # | seed | base best | lora best | Δ |")
+        lines.append(f"## 同 prompt / 同 seed 的 {a} → {b} 提升\n")
+        lines.append(f"| # | seed | {a} best | {b} best | Δ |")
         lines.append("|---|---|---|---|---|")
-        for row in pair_rows:
-            a, b = labels[0], labels[1]
+        for row in rows_pair:
             lines.append(
                 f"| {row['index']} | {row['seed']} | {row[f'{a}_best']} | {row[f'{b}_best']} | {row['delta']:+.4f} |"
             )
         lines.append("")
         lines.append(
-            f"Δ 统计：n={delta_stats['count']}，mean={delta_stats['mean']}，std={delta_stats['std']}，"
-            f"min={delta_stats['min']}，max={delta_stats['max']}"
+            f"Δ 统计：n={dstat['count']}，mean={dstat['mean']}，std={dstat['std']}，"
+            f"min={dstat['min']}，max={dstat['max']}"
         )
     lines.append("")
     lines.append("## 产物\n")
@@ -600,6 +607,7 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--out", required=True)
     gen.add_argument("--label", default="base")
     gen.add_argument("--lora", default=None, help="LoRA safetensors 路径；不传 = base")
+    gen.add_argument("--multiplier", type=float, default=1.0, help="LoRA multiplier（=minimal inference 的 --lora_multiplier）")
     gen.add_argument("--limit", type=int, default=0, help="只跑前 N 条（checkpoint 粗筛用）")
     gen.add_argument("--clean", action="store_true", help="清空输出目录里旧 png")
     gen.add_argument("--dry-run", action="store_true", help="只校验路径并打印推理命令")
