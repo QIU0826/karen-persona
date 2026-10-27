@@ -13,7 +13,22 @@
 # 可通过 KAREN_GPU_SSH_HOST 覆盖 SSH 别名（默认 `karen-gpu`，定义在 ~/.ssh/config）。
 set -euo pipefail
 
-HOST="${KAREN_GPU_SSH_HOST:-karen-gpu}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ENV_FILE="$ROOT/.env"
+
+# 只读取本项目 .env 里的 SSH 相关键（不 source 整个文件，避免执行任意内容）。
+read_env() {
+  if [ -f "$ENV_FILE" ]; then
+    grep -E "^$1=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- \
+      | sed -e 's/^["'\'']//' -e 's/["'\'']$//'
+  fi
+}
+
+HOST="${KAREN_GPU_SSH_HOST:-$(read_env KAREN_GPU_SSH_HOST)}"
+HOST="${HOST:-karen-gpu}"
+PORT="${KAREN_GPU_SSH_PORT:-$(read_env KAREN_GPU_SSH_PORT)}"
+KEY="${KAREN_GPU_SSH_KEY:-$(read_env KAREN_GPU_SSH_KEY)}"
+PROXY="${KAREN_GPU_SSH_PROXY:-$(read_env KAREN_GPU_SSH_PROXY)}"
 
 pairs=(
   "19102:127.0.0.1:18102" # VoxCPM2
@@ -31,6 +46,15 @@ args=(
   -o ServerAliveInterval=30
   -o ServerAliveCountMax=3
 )
+if [ -n "$KEY" ]; then
+  args+=(-i "$KEY" -o IdentitiesOnly=yes)
+fi
+if [ -n "$PORT" ]; then
+  args+=(-p "$PORT")
+fi
+if [ "$PROXY" = "none" ]; then
+  args+=(-o ProxyCommand=none)
+fi
 for pair in "${pairs[@]}"; do
   args+=(-L "127.0.0.1:${pair}")
 done
