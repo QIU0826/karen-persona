@@ -14,9 +14,19 @@
  * MOSS-Edit 分支（P2，默认关闭）：`KAREN_SELFIE_BACKEND=moss-edit` 时改调
  * MOSS 服务的 `/edit`；当前部署的 MOSS-Image-SFT 只有文生图分支、`/edit` 返回 501，
  * 因此这条路会失败并回退本地自拍，等 Moss-Image-Edit 部署后再切。
+ *
+ * MOSS-t2i 分支（P3，默认关闭，shadow）：`KAREN_SELFIE_BACKEND=moss-t2i` 时调用
+ * GPU6 的「人物专用」MOSS 服务 18116（MOSS-Image-SFT + Karen identity LoRA merged），
+ * prompt 固定触发词 `karen_style` + 中蓝发色/铅笔水彩画风；失败或 guard 不过会先回退
+ * Qwen-Image-Edit，再失败才由调用方回退本地自拍。实测 identity 仍弱于 Qwen（见
+ * docs/MOSS_IMAGE.md「人物 LoRA」），**不切生产默认**。
  */
 import { auditImage, type ImageAudit } from "../ai/image-guard.js";
-import { editMossImage, type MossImageResult } from "../ai/moss-image.js";
+import {
+  editMossImage,
+  generateMossCharacterImage,
+  type MossImageResult,
+} from "../ai/moss-image.js";
 import {
   generateQwenImageEdit,
   type QwenImageEditResult,
@@ -40,6 +50,7 @@ export type SelfieFailureReason =
   | "disabled"
   | "qwen_failed"
   | "moss_failed"
+  | "moss_t2i_failed"
   | "too_large"
   | "guard_unavailable"
   | "guard_rejected";
@@ -53,12 +64,18 @@ export interface SelfieGenerationResult {
   elapsedMs: number;
   audit?: ImageAudit | null;
   reason?: SelfieFailureReason;
+  /** 实际出图的后端（fallback 后可区分） */
+  backend?: SelfieBackend;
+  /** moss-t2i 失败后由 Qwen 兜底成功时为 true */
+  fallbackUsed?: boolean;
 }
 
 export interface SelfieGenerationDeps {
   qwenGenerateFn?: typeof generateQwenImageEdit;
   /** MOSS-Edit 分支（KAREN_SELFIE_BACKEND=moss-edit）用的生成函数 */
   mossEditGenerateFn?: typeof editMossImage;
+  /** MOSS-t2i 分支（KAREN_SELFIE_BACKEND=moss-t2i）用的人物 LoRA 生成函数 */
+  mossCharacterGenerateFn?: typeof generateMossCharacterImage;
   auditFn?: (
     png: Buffer,
     ctx: { context: string; prompt?: string; requireNoHands?: boolean; expectCharacter?: boolean },
@@ -68,28 +85,36 @@ export interface SelfieGenerationDeps {
 
 type AuditFn = NonNullable<SelfieGenerationDeps["auditFn"]>;
 
-/** 自拍生成后端：默认 qwen（保持现状）；moss-edit 需显式开启。 */
-export type SelfieBackend = "qwen" | "moss-edit";
+/** 自拍生成后端：默认 qwen（保持现状）；moss-edit / moss-t2i 需显式开启。 */
+export type SelfieBackend = "qwen" | "moss-edit" | "moss-t2i";
 
 export function selfieBackend(env: NodeJS.ProcessEnv = process.env): SelfieBackend {
-  return (env.KAREN_SELFIE_BACKEND ?? "").trim().toLowerCase() === "moss-edit"
-    ? "moss-edit"
-    : "qwen";
+  const raw = (env.KAREN_SELFIE_BACKEND ?? "").trim().toLowerCase();
+  if (raw === "moss-edit") return "moss-edit";
+  if (raw === "moss-t2i" || raw === "moss-t2i-shadow" || raw === "moss-character") {
+    return "moss-t2i";
+  }
+  return "qwen";
 }
 
 /** 是否启用运行时自拍：默认开；`KAREN_SELFIE_GEN=off` 或没配对应后端地址时关。 */
 export function isSelfieGenerationEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   if ((env.KAREN_SELFIE_GEN ?? "on").trim().toLowerCase() === "off") return false;
-  if (selfieBackend(env) === "moss-edit") {
-    // 显式 opt-in 即视为启用；地址未配时用客户端默认 19115，失败会回退图库。
+  const backend = selfieBackend(env);
+  if (backend === "moss-edit" || backend === "moss-t2i") {
+    // 显式 opt-in 即视为启用；地址未配时用客户端默认 19115/19116，失败会回退。
     return true;
   }
   return Boolean((env.QWEN_IMAGE_EDIT_URL ?? "").trim());
 }
 
+function hasQwenBackend(env: NodeJS.ProcessEnv): boolean {
+  return Boolean((env.QWEN_IMAGE_EDIT_URL ?? "").trim());
+}
+
 function stepsFromEnv(env: NodeJS.ProcessEnv, backend: SelfieBackend = "qwen"): number {
   const raw = Number(env.KAREN_SELFIE_STEPS);
-  if (backend === "moss-edit") {
+  if (backend === "moss-edit" || backend === "moss-t2i") {
     // MOSS 官方默认 50 步；未显式配置时用 50，显式配置时收敛到 [10, 100]
     if (!Number.isFinite(raw)) return 50;
     return Math.max(10, Math.min(100, Math.round(raw)));
@@ -129,6 +154,121 @@ export function buildSelfiePromptForRequest(input: SelfieRequestInput): {
 
 const CAPTIONS = ["拍好了，刚拍的", "喏，刚拍的", "这张还行吧", "给你拍了一张", "刚拍的，光线还不错"];
 
+// ── MOSS 人物 LoRA 自拍 prompt（与 identity LoRA 训练 caption 对齐）────────────
+//
+// 训练数据（docs/CHARACTER_LORA_TRAINING.md §3.2）每张 caption 都以固定的
+// `karen_style` + 身份短语 + 铅笔水彩画风短语开头；这里逐字复用这些锚点，
+// 场景只换「场景/服装/光线」三段，避免触发词过期导致身份漂移。
+
+/** identity LoRA 固定触发词（训练 caption 第 1 个 token） */
+export const MOSS_CHARACTER_TRIGGER = "karen_style";
+
+const MOSS_CHARACTER_IDENTITY =
+  `${MOSS_CHARACTER_TRIGGER}, a 24-year-old Chinese woman with shoulder-length medium-blue bob hair (#4a6fa5), ` +
+  "gray-blue eyes, pale skin";
+const MOSS_CHARACTER_STYLE =
+  "soft pencil and watercolor illustration style, low-saturation cool gray-blue palette, " +
+  "fine pencil and ink linework with light watercolor wash, subtle paper texture, " +
+  "clean background with a clear scene atmosphere, single person, no text, no watermark, no border";
+const MOSS_CHARACTER_SELFIE = "close-up selfie, head and shoulders, facing the camera, no hands";
+
+interface MossSceneClause {
+  scene: string;
+  outfit: string;
+  light: string;
+}
+
+/** inferSelfieScene 的中文场景 → 训练集里出现过的英文场景/服装/光线短语 */
+const MOSS_SCENE_CLAUSES: Array<[RegExp, MossSceneClause]> = [
+  [
+    /雨/,
+    {
+      scene: "by the window on a rainy day, raindrops on the glass",
+      outfit: "wearing an oatmeal knit cardigan",
+      light: "cool diffused light on a rainy day",
+    },
+  ],
+  [
+    /海边|沙滩|海浪/,
+    {
+      scene: "the seaside at dusk, an orange sky over calm water",
+      outfit: "wearing a light linen dress",
+      light: "warm orange sunset side light",
+    },
+  ],
+  [
+    /公园|花|春天/,
+    {
+      scene: "a park bench in early spring, budding trees and fresh green grass",
+      outfit: "wearing a beige trench coat",
+      light: "dappled light through leaves",
+    },
+  ],
+  [
+    /夜|街|霓虹|路灯/,
+    {
+      scene: "a city street at night, neon signs and wet pavement reflecting the lights",
+      outfit: "wearing a long black coat",
+      light: "mixed cool neon light and warm sign light",
+    },
+  ],
+  [
+    /家|沙发|窝在|卧室|床上/,
+    {
+      scene: "a cozy living-room sofa at home",
+      outfit: "wearing a dark gray knit long-sleeve top",
+      light: "soft warm indoor lamp light",
+    },
+  ],
+  [
+    /店|咖啡|吧台|上班|窗边/,
+    {
+      scene: "sitting by a window seat in a cafe, a coffee cup on the table",
+      outfit: "wearing a light denim jacket",
+      light: "warm afternoon light",
+    },
+  ],
+];
+
+/**
+ * 构造发给「人物专用 MOSS 服务」（merged identity LoRA）的自拍 prompt。
+ * 与训练 caption 保持同一触发词/身份/画风锚点；场景只从句表里选。
+ */
+export function buildMossCharacterSelfiePrompt(input: SelfieRequestInput): {
+  prompt: string;
+  scene: string;
+} {
+  const scene = inferSelfieScene(input);
+  const clause =
+    MOSS_SCENE_CLAUSES.find(([pattern]) => pattern.test(scene))?.[1] ?? {
+      scene: "a quiet indoor corner",
+      outfit: "wearing a light knit cardigan",
+      light: "soft natural light",
+    };
+  const emotion = input.emotionVector ?? 0;
+  const mood =
+    emotion > 0.3
+      ? "a slight smile, relaxed expression"
+      : emotion < -0.2
+        ? "a calm expression, a little tired"
+        : "a natural expression, looking at the camera";
+  const weather = input.weather?.condition ? `, ${input.weather.condition}` : "";
+  const prompt = [
+    MOSS_CHARACTER_IDENTITY,
+    clause.scene + weather,
+    clause.outfit,
+    clause.light,
+    mood,
+    MOSS_CHARACTER_SELFIE,
+    MOSS_CHARACTER_STYLE,
+  ].join(", ");
+  return { prompt, scene };
+}
+
+/** Qwen-Image-Edit 自拍的负面提示词（仅用于 MOSS-t2i 的 negative branch） */
+const MOSS_CHARACTER_NEGATIVE =
+  "text, watermark, logo, multiple people, extra fingers, deformed hands, bad anatomy, blurry";
+
 /** 挑一句配文，尽量不与最近用过的重复。 */
 export function pickSelfieCaption(random: () => number = Math.random, recent: string[] = []): string {
   const fresh = CAPTIONS.filter((caption) => !recent.includes(caption));
@@ -146,36 +286,32 @@ function isPng(buffer: Buffer): boolean {
   );
 }
 
-/**
- * 生成一张自拍。失败返回 ok:false + reason，由调用方回退本地自拍。
- * 质检失败会换 seed 重试一次（第一步 8 步实测 22s；两步合计约 45–60s）。
- */
-export async function generateSelfie(
-  input: SelfieRequestInput,
-  deps: SelfieGenerationDeps = {},
-): Promise<SelfieGenerationResult> {
-  const env = deps.env ?? process.env;
-  const { prompt, scene } = buildSelfiePromptForRequest(input);
-  const startedAt = Date.now();
-  if (!isSelfieGenerationEnabled(env)) {
-    return { ok: false, prompt, scene, attempts: 0, elapsedMs: 0, reason: "disabled" };
-  }
+interface BackendAttemptOutcome {
+  ok: boolean;
+  bytes?: Buffer;
+  attempts: number;
+  reason?: SelfieFailureReason;
+  audit?: ImageAudit | null;
+}
 
-  const backend = selfieBackend(env);
+/**
+ * 单个后端的 2 次尝试（生成 + guard；失败换 seed 重试一次）。
+ * 失败一律返回 ok:false（不抛异常），由调用方决定是否换下一个后端。
+ */
+async function runBackendAttempts(
+  backend: SelfieBackend,
+  prompt: string,
+  context: string,
+  steps: number,
+  deps: SelfieGenerationDeps,
+): Promise<BackendAttemptOutcome> {
   const qwenGenerate = deps.qwenGenerateFn ?? generateQwenImageEdit;
   const mossEditGenerate = deps.mossEditGenerateFn ?? editMossImage;
+  const mossCharacterGenerate = deps.mossCharacterGenerateFn ?? generateMossCharacterImage;
   const audit: AuditFn = deps.auditFn ?? auditImage;
-  const steps = stepsFromEnv(env, backend);
-  const context = [
-    input.userText,
-    input.lastReply,
-    `场景：${scene}`,
-    `当前约 ${input.hour} 点`,
-  ]
-    .filter(Boolean)
-    .join(" / ");
-
-  let lastReason: SelfieFailureReason = backend === "moss-edit" ? "moss_failed" : "qwen_failed";
+  const failureReason: SelfieFailureReason =
+    backend === "moss-edit" ? "moss_failed" : backend === "moss-t2i" ? "moss_t2i_failed" : "qwen_failed";
+  let lastReason: SelfieFailureReason = failureReason;
   let lastAudit: ImageAudit | null = null;
 
   for (let attempt = 1; attempt <= 2; attempt++) {
@@ -185,6 +321,15 @@ export async function generateSelfie(
         generated = await mossEditGenerate(prompt, [SELFIE_STYLE_REF], {
           steps,
           seed: Math.floor(Math.random() * 1_000_000),
+          timeoutMs: 300_000,
+        });
+      } else if (backend === "moss-t2i") {
+        generated = await mossCharacterGenerate(prompt, {
+          width: 832,
+          height: 1216,
+          steps,
+          seed: Math.floor(Math.random() * 1_000_000),
+          negativePrompt: MOSS_CHARACTER_NEGATIVE,
           timeoutMs: 300_000,
         });
       } else {
@@ -204,7 +349,7 @@ export async function generateSelfie(
       });
     }
     if (!generated || !isPng(generated.png)) {
-      lastReason = backend === "moss-edit" ? "moss_failed" : "qwen_failed";
+      lastReason = failureReason;
       continue;
     }
     if (generated.png.length > 8 * 1024 * 1024) {
@@ -226,6 +371,7 @@ export async function generateSelfie(
     if (!auditResult.pass) {
       lastReason = "guard_rejected";
       log.warn("selfie.guard_rejected", {
+        backend,
         attempt,
         issues: auditResult.issues.slice(0, 3),
         reason: auditResult.reason.slice(0, 80),
@@ -233,22 +379,84 @@ export async function generateSelfie(
       continue;
     }
 
-    return {
-      ok: true,
-      bytes: generated.png,
-      prompt,
-      scene,
-      attempts: attempt,
-      elapsedMs: Date.now() - startedAt,
-      audit: auditResult,
-    };
+    return { ok: true, bytes: generated.png, attempts: attempt, audit: auditResult };
+  }
+
+  return { ok: false, attempts: 2, reason: lastReason, audit: lastAudit };
+}
+
+/**
+ * 生成一张自拍。失败返回 ok:false + reason，由调用方回退本地自拍。
+ * 质检失败会换 seed 重试一次（第一步 8 步实测 22s；两步合计约 45–60s）。
+ *
+ * 后端链：
+ * - 默认 qwen：Qwen-Image-Edit（现状）；
+ * - `KAREN_SELFIE_BACKEND=moss-edit`：MOSS `/edit`（当前 501，占位）；
+ * - `KAREN_SELFIE_BACKEND=moss-t2i`：先人物 LoRA MOSS，失败/guard 不过时若配置了
+ *   `QWEN_IMAGE_EDIT_URL` 再用 Qwen-Image-Edit 兜底（`fallbackUsed=true`）。
+ */
+export async function generateSelfie(
+  input: SelfieRequestInput,
+  deps: SelfieGenerationDeps = {},
+): Promise<SelfieGenerationResult> {
+  const env = deps.env ?? process.env;
+  const startedAt = Date.now();
+  const qwenPrompt = buildSelfiePromptForRequest(input);
+  const mossPrompt = buildMossCharacterSelfiePrompt(input);
+  const prompts: Record<SelfieBackend, string> = {
+    qwen: qwenPrompt.prompt,
+    "moss-edit": qwenPrompt.prompt,
+    "moss-t2i": mossPrompt.prompt,
+  };
+  const scene = qwenPrompt.scene;
+
+  if (!isSelfieGenerationEnabled(env)) {
+    return { ok: false, prompt: prompts[selfieBackend(env)], scene, attempts: 0, elapsedMs: 0, reason: "disabled" };
+  }
+
+  const primary = selfieBackend(env);
+  const chain: SelfieBackend[] =
+    primary === "moss-t2i" && hasQwenBackend(env) ? ["moss-t2i", "qwen"] : [primary];
+  const context = [
+    input.userText,
+    input.lastReply,
+    `场景：${scene}`,
+    `当前约 ${input.hour} 点`,
+    "她是 24 岁蓝发短发少女，要求同一个人、铅笔水彩风格",
+  ]
+    .filter(Boolean)
+    .join(" / ");
+
+  let totalAttempts = 0;
+  let lastAudit: ImageAudit | null = null;
+  let lastReason: SelfieFailureReason =
+    primary === "moss-edit" ? "moss_failed" : primary === "moss-t2i" ? "moss_t2i_failed" : "qwen_failed";
+
+  for (const backend of chain) {
+    const outcome = await runBackendAttempts(backend, prompts[backend], context, stepsFromEnv(env, backend), deps);
+    totalAttempts += outcome.attempts;
+    lastAudit = outcome.audit ?? lastAudit;
+    if (outcome.ok && outcome.bytes) {
+      return {
+        ok: true,
+        bytes: outcome.bytes,
+        prompt: prompts[backend],
+        scene,
+        attempts: totalAttempts,
+        elapsedMs: Date.now() - startedAt,
+        audit: outcome.audit ?? null,
+        backend,
+        fallbackUsed: backend !== primary,
+      };
+    }
+    lastReason = outcome.reason ?? lastReason;
   }
 
   return {
     ok: false,
-    prompt,
+    prompt: prompts[primary],
     scene,
-    attempts: 2,
+    attempts: totalAttempts,
     elapsedMs: Date.now() - startedAt,
     audit: lastAudit,
     reason: lastReason,

@@ -216,12 +216,22 @@ export function collectDependencies(env: NodeJS.ProcessEnv = process.env): Depen
       url: trimUrl(envValue(env, "MOSS_IMAGE_EDIT_URL"), "http://127.0.0.1:19115"),
       checkLoaded: true,
     });
+  } else if (selfieOn && (selfieBackend === "moss-t2i" || selfieBackend === "moss-t2i-shadow" || selfieBackend === "moss-character")) {
+    // GPU6 人物专用服务（MOSS-Image-SFT + Karen identity LoRA merged，18116/19116）
+    specs.push({
+      name: "selfie-moss-character",
+      role: "image",
+      label: "MOSS 人物 LoRA 自拍",
+      url: trimUrl(envValue(env, "MOSS_CHARACTER_URL"), "http://127.0.0.1:19116"),
+      checkLoaded: true,
+    });
   }
   const selfieUrl = envValue(env, "QWEN_IMAGE_EDIT_URL");
   if (
     selfieOn &&
     selfieUrl &&
     selfieBackend !== "moss-edit" &&
+    selfieBackend !== "moss-t2i" &&
     imageBackend !== "qwen-image-edit" &&
     imageBackend !== "qwen"
   ) {

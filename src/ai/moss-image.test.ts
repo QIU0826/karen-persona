@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_MOSS_CHARACTER_URL,
   DEFAULT_MOSS_IMAGE_EDIT_URL,
   DEFAULT_MOSS_IMAGE_URL,
   MOSS_DEFAULT_SKIP_LAYERS,
   editMossImage,
+  generateMossCharacterImage,
   generateMossImage,
+  isMossCharacterEnabled,
   isMossImageEditEnabled,
   isMossImageEnabled,
+  mossCharacterBaseUrl,
   mossEditSelfieBackend,
   mossImageBaseUrl,
   mossImageEditBaseUrl,
@@ -79,6 +83,19 @@ describe("moss-image 配置", () => {
     expect(mossTimeoutMs({ MOSS_IMAGE_TIMEOUT_MS: "9999999" })).toBe(600_000);
     expect(mossTimeoutMs({ MOSS_IMAGE_TIMEOUT_MS: "45000" }, 60_000)).toBe(60_000);
     expect(mossTimeoutMs({ MOSS_IMAGE_TIMEOUT_MS: "abc" })).toBe(300_000);
+  });
+
+  it("人物 LoRA 服务（moss-t2i）需显式开启；默认 qwen 不受影响", () => {
+    expect(DEFAULT_MOSS_CHARACTER_URL).toBe("http://127.0.0.1:19116");
+    expect(isMossCharacterEnabled({})).toBe(false);
+    expect(isMossCharacterEnabled({ KAREN_SELFIE_BACKEND: "qwen" })).toBe(false);
+    expect(isMossCharacterEnabled({ KAREN_SELFIE_BACKEND: "moss-t2i" })).toBe(true);
+    expect(isMossCharacterEnabled({ KAREN_SELFIE_BACKEND: "MOSS-T2I-SHADOW" })).toBe(true);
+    expect(isMossCharacterEnabled({ MOSS_CHARACTER_URL: "http://127.0.0.1:19116" })).toBe(true);
+    expect(mossCharacterBaseUrl({})).toBe("http://127.0.0.1:19116");
+    expect(mossCharacterBaseUrl({ MOSS_CHARACTER_URL: "http://10.0.0.9:9000/" })).toBe(
+      "http://10.0.0.9:9000",
+    );
   });
 });
 
@@ -158,6 +175,52 @@ describe("generateMossImage", () => {
   it("空 prompt 不发请求", async () => {
     const fetchFn = vi.fn() as unknown as typeof fetch;
     await expect(generateMossImage("   ", { fetchFn })).resolves.toBeNull();
+    expect((fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+  });
+});
+
+describe("generateMossCharacterImage", () => {
+  it("成功返回 PNG；默认提交到人物服务 19116，带触发词/负向词", async () => {
+    const fetchFn = vi.fn(async () => pngResponse()) as unknown as typeof fetch;
+    const prompt = "karen_style, a 24-year-old Chinese woman with shoulder-length medium-blue bob hair";
+    const result = await generateMossCharacterImage(prompt, {
+      fetchFn,
+      negativePrompt: "text, watermark",
+      seed: 4242,
+    });
+    expect(result?.png.equals(PNG)).toBe(true);
+    const url = String((fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]);
+    const init = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit;
+    expect(url).toBe("http://127.0.0.1:19116/generate");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      prompt,
+      width: 832,
+      height: 1216,
+      steps: 50,
+      seed: 4242,
+      negative_prompt: "text, watermark",
+      uncond_skip_layers: [...MOSS_DEFAULT_SKIP_LAYERS],
+    });
+  });
+
+  it("失败/超时/非 PNG 都返回 null（由 selfie 回退 Qwen/图库）", async () => {
+    const fail = vi.fn(async () => jsonResponse({ detail: "generate failed" }, 500)) as unknown as typeof fetch;
+    await expect(generateMossCharacterImage("karen_style", { fetchFn: fail })).resolves.toBeNull();
+
+    const thrown = vi.fn(async () => {
+      const err = new Error("timeout");
+      err.name = "TimeoutError";
+      throw err;
+    }) as unknown as typeof fetch;
+    await expect(generateMossCharacterImage("karen_style", { fetchFn: thrown })).resolves.toBeNull();
+
+    const notPng = vi.fn(async () => new Response("busy")) as unknown as typeof fetch;
+    await expect(generateMossCharacterImage("karen_style", { fetchFn: notPng })).resolves.toBeNull();
+  });
+
+  it("空 prompt 不发请求", async () => {
+    const fetchFn = vi.fn() as unknown as typeof fetch;
+    await expect(generateMossCharacterImage("  ", { fetchFn })).resolves.toBeNull();
     expect((fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
   });
 });

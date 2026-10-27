@@ -17,6 +17,11 @@ const log = createLogger("image.moss");
 
 export const DEFAULT_MOSS_IMAGE_URL = "http://127.0.0.1:19114";
 export const DEFAULT_MOSS_IMAGE_EDIT_URL = "http://127.0.0.1:19115";
+/**
+ * 人物专用服务（GPU6 18116）：MOSS-Image-SFT + Karen identity LoRA（merged）。
+ * 场景图仍走 Z-Image，本服务只给自拍/人物用；默认 shadow。
+ */
+export const DEFAULT_MOSS_CHARACTER_URL = "http://127.0.0.1:19116";
 /** MOSS 官方默认：50 步、guidance 3.0、负分支跳过第 22 层 */
 export const MOSS_DEFAULT_STEPS = 50;
 export const MOSS_DEFAULT_GUIDANCE = 3.0;
@@ -108,6 +113,23 @@ export function mossImageEditBaseUrl(env: NodeJS.ProcessEnv = process.env): stri
   ).replace(/\/+$/, "");
 }
 
+/** 人物 LoRA 自拍后端（`KAREN_SELFIE_BACKEND=moss-t2i`）是否启用；默认关。 */
+export function isMossCharacterEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const backend = (env.KAREN_SELFIE_BACKEND ?? "").trim().toLowerCase();
+  return (
+    backend === "moss-t2i" ||
+    backend === "moss-t2i-shadow" ||
+    Boolean((env.MOSS_CHARACTER_URL ?? "").trim())
+  );
+}
+
+/** 人物专用服务 base URL（env `MOSS_CHARACTER_URL`，默认隧道 19116）。 */
+export function mossCharacterBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return (
+    (env.MOSS_CHARACTER_URL ?? DEFAULT_MOSS_CHARACTER_URL).trim() || DEFAULT_MOSS_CHARACTER_URL
+  ).replace(/\/+$/, "");
+}
+
 /** 把任意宽高收敛到 MOSS 合法区间：16 的倍数、[256, 1536]。 */
 export function normalizeMossSize(
   width: number,
@@ -171,16 +193,17 @@ function headerResult(res: Response, png: Buffer, startedAt: number): MossImageR
 }
 
 /**
- * 调远程 MOSS-Image 生成一张图；任何失败返回 null（不抛异常）。
+ * 调远程 MOSS 文生图服务（`/generate`）；任何失败返回 null（不抛异常）。
  * 默认 50 步 / guidance 3 / uncond_skip_layers=[22]，与官方默认一致。
  */
-export async function generateMossImage(
+async function requestMossGenerate(
+  baseUrl: string,
   prompt: string,
-  opts: MossImageOptions = {},
+  opts: MossImageOptions,
+  logEvent: string,
 ): Promise<MossImageResult | null> {
   const text = (prompt ?? "").trim();
   if (!text) return null;
-  const baseUrl = (opts.baseUrl ?? mossImageBaseUrl()).replace(/\/+$/, "");
   const size = normalizeMossSize(opts.width ?? 832, opts.height ?? 1216);
   const timeoutMs = clampTimeout(opts.timeoutMs);
   const fetchFn = opts.fetchFn ?? fetch;
@@ -205,21 +228,50 @@ export async function generateMossImage(
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {
-      log.warn("image.moss_failed", { status: res.status, stage: "generate" });
+      log.warn(logEvent, { status: res.status, stage: "generate" });
       return null;
     }
     const png = Buffer.from(await res.arrayBuffer());
     if (!isPng(png)) {
-      log.warn("image.moss_failed", { reason: "invalid_png", bytes: png.length });
+      log.warn(logEvent, { reason: "invalid_png", bytes: png.length });
       return null;
     }
     return headerResult(res, png, startedAt);
   } catch (err: unknown) {
-    log.warn("image.moss_failed", {
+    log.warn(logEvent, {
       reason: err instanceof Error ? err.name : "unknown",
     });
     return null;
   }
+}
+
+/** 调基础 MOSS 服务（GPU7 18114）：场景/通用文生图。 */
+export async function generateMossImage(
+  prompt: string,
+  opts: MossImageOptions = {},
+): Promise<MossImageResult | null> {
+  return requestMossGenerate(
+    (opts.baseUrl ?? mossImageBaseUrl()).replace(/\/+$/, ""),
+    prompt,
+    opts,
+    "image.moss_failed",
+  );
+}
+
+/**
+ * 调「人物专用」MOSS 服务（GPU6 18116，merged Karen identity LoRA）。
+ * prompt 需自带触发词 `karen_style` 与身份/画风描述（由 selfie-generator 组装）。
+ */
+export async function generateMossCharacterImage(
+  prompt: string,
+  opts: MossImageOptions = {},
+): Promise<MossImageResult | null> {
+  return requestMossGenerate(
+    (opts.baseUrl ?? mossCharacterBaseUrl()).replace(/\/+$/, ""),
+    prompt,
+    opts,
+    "image.moss_character_failed",
+  );
 }
 
 /**

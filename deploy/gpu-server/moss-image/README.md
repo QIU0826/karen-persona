@@ -176,3 +176,43 @@ curl -s -X POST http://127.0.0.1:18114/generate \
 - **显存**：50 步 + 9B 文本编码器，单卡占用高；与 GPU7 上其它任务共存时需要确认余量。
 - **许可**：MOSS-Image-SFT 权重/代码 Apache-2.0；`Moss-Image-Edit` 是 GPLv3，若接入只通过 HTTP 服务调用，不复制代码。
 - **根分区**：任何缓存/训练数据/bench 图都不能落在 `/`。
+
+## 8. 人物专用服务（GPU6 18116，MOSS + Karen identity LoRA merged，task-26）
+
+> 与上面的基础服务（GPU7 18114）**完全隔离**：独立容器名、独立模型目录、独立端口，本目录脚本不改动 GPU7。
+> 仅供自拍 shadow：生产默认仍 Qwen-Image-Edit；merged v1 identity 弱于 Qwen（结论见 [docs/MOSS_IMAGE.md §9](../../../docs/MOSS_IMAGE.md)）。
+
+### 8.1 合并 LoRA（方案 A，已实测）
+
+```bash
+# 服务器（CPU merge，约 88s；产物 9.5GB + 软链 base 大组件）
+podman run --rm -v /mnt/data0/lwh/karen-stack:/workspace \
+  --entrypoint /workspace/moss-image/venv/bin/python localhost/karen-qwen-image-edit:0.1 \
+  /workspace/moss-image/merge_lora.py \
+  --base-model-dir /workspace/models/MOSS-Image-SFT \
+  --lora /workspace/models/karen-moss-lora/karen_style_moss_v1.safetensors \
+  --out-dir /workspace/models/MOSS-Image-SFT-karen-lora --multiplier 1.0
+```
+
+- 实测：252/252 modules 命中、0 缺失、0 形状不匹配、252 个权重变化、0 NaN/Inf；scale=alpha/rank=1/16
+  与 sd-scripts `library/lora_utils.py` 一致；产物 `merge-report.json` 记录 max|ΔW| 等。
+- 产物目录：`/mnt/data0/lwh/karen-stack/models/MOSS-Image-SFT-karen-lora/`（`transformer/` 为 merged，
+  `text_encoder/tokenizer/vae` 软链到 base）。
+
+### 8.2 启停与基准
+
+```bash
+bash deploy/gpu-server/moss-image/char-start.sh    # karen-moss-character / GPU6 / 127.0.0.1:18116
+curl -s http://127.0.0.1:18116/health               # loaded=true, model=...-karen-lora
+bash deploy/gpu-server/moss-image/char-benchmark.sh # 5 个自拍 prompt（MOSS）+ contact sheet
+bash deploy/gpu-server/moss-image/char-stop.sh
+```
+
+- 实测：load 9.4–10.0s；torch 常驻 25.35GB；单张峰值 28.09GB；5 张 832×1216/50 步 **38.39–38.50s/张**。
+- 样张：`/mnt/data0/lwh/karen-stack/moss-image/char-bench/moss/`；
+  identity/guard 对比图：`char-bench/identity-final/`（merged / offline_lora / offline_base / qwen 四组 contact sheet）。
+- 对照（同 5 prompt，refs=character-1/2/3）：merged 服务 **0.4029**、离线 kohya LoRA **0.3931**
+  （同 prompt/seed 像素差 mean_abs≈0.8–1.7/255，rain 14.0）、离线 base **0.1612**、Qwen 缓存自拍 **0.6563**；
+  guard：merged 3/5 vs Qwen 5/5。
+- 回退：`char-stop.sh` + 不设 `KAREN_SELFIE_BACKEND=moss-t2i`；merged 模型保留在 data0，GPU7 服务不受影响。
+

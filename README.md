@@ -13,7 +13,7 @@
 >
 >
 > **v0.9.32 进行中（2026-10-27）**：自拍画风统一切到宣传页人物（character-2 参考 + 5 张缓存重生成）；承诺账本、她的一天跨天闭环、关系缺席降温与事件里程碑、主动消息低频语音/照片、跨天一致性回放、长期记忆审计均已落地。下一阶段：B 站只读世界 + MOSS-Image 部署与人物一致性微调（见 [下一阶段路线](docs/ROADMAP_NEXT.md)）。
-> 仓库实测状态（2026-10-27）：`npm run typecheck` 0 错误；`npm test` **152 个测试文件 / 1683 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 59.21%）。**干净 checkout + 真实 `npm ci` 已复验**（v0.2.1 时）：122 个依赖约 40s 安装、typecheck 0 错误、doctor 在缺 config/.env 时给出可执行的修复指引；v0.3.0 新增 `silk-wasm`（纯 wasm，无原生构建）。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**；另用「本地模拟用户 + 真实 DeepSeek」跑过 30 轮长跑（记忆 6/6、复读对 0、错误 0、平均延迟 2047ms、成本 ¥0.147），见 [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md)。
+> 仓库实测状态（2026-10-27）：`npm run typecheck` 0 错误；`npm test` **152 个测试文件 / 1687 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 59.21%）。**干净 checkout + 真实 `npm ci` 已复验**（v0.2.1 时）：122 个依赖约 40s 安装、typecheck 0 错误、doctor 在缺 config/.env 时给出可执行的修复指引；v0.3.0 新增 `silk-wasm`（纯 wasm，无原生构建）。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**；另用「本地模拟用户 + 真实 DeepSeek」跑过 30 轮长跑（记忆 6/6、复读对 0、错误 0、平均延迟 2047ms、成本 ¥0.147），见 [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md)。
 
 ---
 
@@ -198,7 +198,7 @@ npm run dev
 | 被点名要多媒体时真的会给 | ✅ | 识别「拍张照片看看」「发个表情包」「发条语音听听」：要照片时跳过概率判定（亲密度/冷却仍生效）并按他提到的场景挑图（晚霞→晚霞、雪→雪、店→咖啡），要表情/语音时提高概率并跳过冷却，同时给模型内部提示避免「嘴上说改天、其实没发」 |
 | **运行时自拍生成（v0.9.32）** | ✅ | 点「自拍 / 拍张你」→ 先回一句，约 25–45s 后台用 Qwen-Image-Edit-2511 + 宣传页人物参考图生成（实测 30s/张；参考图 `promo/assets/character-2.jpg`，提示词锁中蓝发色 + 低饱和铅笔/水彩画风），过 image-guard（角色/手/穿模）才发；质检失败换 seed 重试一次，仍失败回退本地自拍；同一用户 90s 冷却，来源见日志 `selfie.sent`；5 张缓存自拍已重生成（promo 画风） |
 | **MOSS-Image 部署（v0.9.32，shadow）** | 🚧 | GPU7 已跑通 MOSS-Image-SFT（27.23GB，50 步 832×1216/1024² 约 38–40s/张，峰值显存 28.2GB）；Node 客户端/健康探活/隧道 19114 已接，**生产默认不切换**，显式 `KAREN_IMAGE_BACKEND=moss-image` 才走；参考图编辑接口 501 待 Moss-Image-Edit；当前实测风格偏写实、人物一致性需 LoRA 微调，详见 [docs/MOSS_IMAGE.md](docs/MOSS_IMAGE.md) |
-| **Karen identity LoRA（v0.9.32，实验）** | 🚧 | kohya sd-scripts + MOSS-Image-SFT 在 GPU6 训练 1200 步（30 张清洗后角色图）；同 prompt base→LoRA ArcFace **0.250→0.673（8/8 提升）**，中蓝发色/铅笔水彩风格回归；但低于 Qwen-Image-Edit 跨模型参考 0.858，**未切生产**。LoRA 在服务器 `data0/.../karen-moss-lora/`；服务端动态加载/merge 与 rank32+半身数据迭代待做，详见 [docs/CHARACTER_LORA_TRAINING.md](docs/CHARACTER_LORA_TRAINING.md) |
+| **Karen identity LoRA（v0.9.32，实验）** | 🚧 | kohya sd-scripts + MOSS-Image-SFT 在 GPU6 训练 1200 步（30 张清洗后角色图）；同 prompt base→LoRA ArcFace **0.250→0.673（8/8 提升）**，中蓝发色/铅笔水彩风格回归；但低于 Qwen-Image-Edit 跨模型参考 0.858，**未切生产**。已 merge 成 diffusers 模型并在 GPU6 18116 起 shadow 人物服务（5 张自拍 38–40s/张，guard 3/5；同条件 Qwen 0.656 vs MOSS 0.403），自拍继续 Qwen，`KAREN_SELFIE_BACKEND=moss-t2i` 默认关；rank32+半身数据 v2 训练中。详见 [docs/CHARACTER_LORA_TRAINING.md](docs/CHARACTER_LORA_TRAINING.md)、[docs/MOSS_IMAGE.md](docs/MOSS_IMAGE.md) |
 | **B 站只读世界（v0.9.32）** | ✅ | 热门/详情/评论 + BV/链接解析，全部 GET、**无 cookie / 无登录 / 不发评论弹幕点赞**；每 90 分钟最多注入 2 条「她今天刷到的」，每日上限 3；`KAREN_BILIBILI=off` 可关，`npm run bilibili:smoke` 真实冒烟；端点限制见 [docs/BILIBILI.md](docs/BILIBILI.md) |
 
 ### 记忆与数据
