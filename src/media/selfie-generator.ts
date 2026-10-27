@@ -10,8 +10,13 @@
  *
  * 实测（GPU2，simple，8 步）：一张 960×783 约 22.6s；默认用 10 步。
  * 调用方必须异步发（约 25–40s），不能阻塞当轮文字回复。
+ *
+ * MOSS-Edit 分支（P2，默认关闭）：`KAREN_SELFIE_BACKEND=moss-edit` 时改调
+ * MOSS 服务的 `/edit`；当前部署的 MOSS-Image-SFT 只有文生图分支、`/edit` 返回 501，
+ * 因此这条路会失败并回退本地自拍，等 Moss-Image-Edit 部署后再切。
  */
 import { auditImage, type ImageAudit } from "../ai/image-guard.js";
+import { editMossImage, type MossImageResult } from "../ai/moss-image.js";
 import {
   generateQwenImageEdit,
   type QwenImageEditResult,
@@ -34,6 +39,7 @@ export interface SelfieRequestInput {
 export type SelfieFailureReason =
   | "disabled"
   | "qwen_failed"
+  | "moss_failed"
   | "too_large"
   | "guard_unavailable"
   | "guard_rejected";
@@ -51,6 +57,8 @@ export interface SelfieGenerationResult {
 
 export interface SelfieGenerationDeps {
   qwenGenerateFn?: typeof generateQwenImageEdit;
+  /** MOSS-Edit 分支（KAREN_SELFIE_BACKEND=moss-edit）用的生成函数 */
+  mossEditGenerateFn?: typeof editMossImage;
   auditFn?: (
     png: Buffer,
     ctx: { context: string; prompt?: string; requireNoHands?: boolean; expectCharacter?: boolean },
@@ -60,14 +68,32 @@ export interface SelfieGenerationDeps {
 
 type AuditFn = NonNullable<SelfieGenerationDeps["auditFn"]>;
 
-/** 是否启用运行时自拍：默认开；`KAREN_SELFIE_GEN=off` 或没配 Qwen-Image-Edit 地址时关。 */
+/** 自拍生成后端：默认 qwen（保持现状）；moss-edit 需显式开启。 */
+export type SelfieBackend = "qwen" | "moss-edit";
+
+export function selfieBackend(env: NodeJS.ProcessEnv = process.env): SelfieBackend {
+  return (env.KAREN_SELFIE_BACKEND ?? "").trim().toLowerCase() === "moss-edit"
+    ? "moss-edit"
+    : "qwen";
+}
+
+/** 是否启用运行时自拍：默认开；`KAREN_SELFIE_GEN=off` 或没配对应后端地址时关。 */
 export function isSelfieGenerationEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   if ((env.KAREN_SELFIE_GEN ?? "on").trim().toLowerCase() === "off") return false;
+  if (selfieBackend(env) === "moss-edit") {
+    // 显式 opt-in 即视为启用；地址未配时用客户端默认 19115，失败会回退图库。
+    return true;
+  }
   return Boolean((env.QWEN_IMAGE_EDIT_URL ?? "").trim());
 }
 
-function stepsFromEnv(env: NodeJS.ProcessEnv): number {
+function stepsFromEnv(env: NodeJS.ProcessEnv, backend: SelfieBackend = "qwen"): number {
   const raw = Number(env.KAREN_SELFIE_STEPS);
+  if (backend === "moss-edit") {
+    // MOSS 官方默认 50 步；未显式配置时用 50，显式配置时收敛到 [10, 100]
+    if (!Number.isFinite(raw)) return 50;
+    return Math.max(10, Math.min(100, Math.round(raw)));
+  }
   if (!Number.isFinite(raw)) return 10;
   return Math.max(6, Math.min(20, Math.round(raw)));
 }
@@ -135,9 +161,11 @@ export async function generateSelfie(
     return { ok: false, prompt, scene, attempts: 0, elapsedMs: 0, reason: "disabled" };
   }
 
+  const backend = selfieBackend(env);
   const qwenGenerate = deps.qwenGenerateFn ?? generateQwenImageEdit;
+  const mossEditGenerate = deps.mossEditGenerateFn ?? editMossImage;
   const audit: AuditFn = deps.auditFn ?? auditImage;
-  const steps = stepsFromEnv(env);
+  const steps = stepsFromEnv(env, backend);
   const context = [
     input.userText,
     input.lastReply,
@@ -147,27 +175,36 @@ export async function generateSelfie(
     .filter(Boolean)
     .join(" / ");
 
-  let lastReason: SelfieFailureReason = "qwen_failed";
+  let lastReason: SelfieFailureReason = backend === "moss-edit" ? "moss_failed" : "qwen_failed";
   let lastAudit: ImageAudit | null = null;
 
   for (let attempt = 1; attempt <= 2; attempt++) {
-    let generated: QwenImageEditResult | null = null;
+    let generated: QwenImageEditResult | MossImageResult | null = null;
     try {
-      generated = await qwenGenerate(prompt, {
-        simple: true,
-        imagePaths: [SELFIE_STYLE_REF],
-        steps,
-        seed: Math.floor(Math.random() * 1_000_000),
-        timeoutMs: 150_000,
-      });
+      if (backend === "moss-edit") {
+        generated = await mossEditGenerate(prompt, [SELFIE_STYLE_REF], {
+          steps,
+          seed: Math.floor(Math.random() * 1_000_000),
+          timeoutMs: 300_000,
+        });
+      } else {
+        generated = await qwenGenerate(prompt, {
+          simple: true,
+          imagePaths: [SELFIE_STYLE_REF],
+          steps,
+          seed: Math.floor(Math.random() * 1_000_000),
+          timeoutMs: 150_000,
+        });
+      }
     } catch (err) {
-      log.warn("selfie.qwen_error", {
+      log.warn("selfie.generate_error", {
+        backend,
         attempt,
         error: err instanceof Error ? err.name : "unknown",
       });
     }
     if (!generated || !isPng(generated.png)) {
-      lastReason = "qwen_failed";
+      lastReason = backend === "moss-edit" ? "moss_failed" : "qwen_failed";
       continue;
     }
     if (generated.png.length > 8 * 1024 * 1024) {

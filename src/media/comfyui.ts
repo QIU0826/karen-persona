@@ -14,6 +14,7 @@
  */
 
 import { auditImage } from "../ai/image-guard.js";
+import { generateMossImage } from "../ai/moss-image.js";
 import { generateQwenImageEdit } from "../ai/qwen-image-edit.js";
 import { generateZImage } from "../ai/z-image.js";
 
@@ -39,11 +40,19 @@ export function comfyBaseUrl(): string {
  * 为什么默认 service：ComfyUI 要从 GitHub 克隆源码，本机实测只有 ~17KB/s，不可行；
  * 而 PyPI（2MB/s）与 diffusers 都很快，所以自己起一个极简 HTTP 服务更实际。
  */
-export function imageBackend(): "service" | "comfyui" | "qwen-image-edit" | "z-image" {
+export function imageBackend():
+  | "service"
+  | "comfyui"
+  | "qwen-image-edit"
+  | "z-image"
+  | "moss-image" {
   const backend = (process.env.KAREN_IMAGE_BACKEND ?? "service").toLowerCase();
   if (backend === "comfyui") return "comfyui";
   if (backend === "qwen-image-edit" || backend === "qwen") return "qwen-image-edit";
   if (backend === "z-image" || backend === "zimage") return "z-image";
+  if (backend === "moss-image" || backend === "moss" || backend === "moss-image-sft") {
+    return "moss-image";
+  }
   return "service";
 }
 
@@ -263,11 +272,13 @@ export interface GenerateDeps {
   qwenGenerateFn?: typeof generateQwenImageEdit;
   /** 测试注入：Z-Image 生成 */
   zImageGenerateFn?: typeof generateZImage;
+  /** 测试注入：MOSS-Image 生成 */
+  mossGenerateFn?: typeof generateMossImage;
 }
 
 /**
  * 统一图片质检闸门：
- * - qwen-image-edit 后端强制检查（requireNoHands）；
+ * - qwen-image-edit / z-image / moss-image 后端强制检查（场景图 requireNoHands=false）；
  * - 其他后端在 KAREN_IMAGE_GUARD=on 时检查；
  * - 检查不可用或不合格一律 ok:false，调用方回退图库。
  */
@@ -279,7 +290,9 @@ async function guardGenerated(
   expectCharacter: boolean,
 ): Promise<GenerateResult> {
   if (!result.ok || !result.bytes) return result;
-  const forced = imageBackend() === "qwen-image-edit" || imageBackend() === "z-image";
+  const backend = imageBackend();
+  const forced =
+    backend === "qwen-image-edit" || backend === "z-image" || backend === "moss-image";
   if (!forced && (process.env.KAREN_IMAGE_GUARD ?? "off").toLowerCase() !== "on") return result;
   const audit = await (deps.auditFn ?? auditImage)(result.bytes, {
     context: options.context ?? options.prompt,
@@ -305,6 +318,32 @@ async function generateViaZImage(
     timeoutMs: 120_000,
   });
   if (!generated) return { ok: false, reason: "z_image_failed" };
+  if (generated.png.length > MAX_GENERATED_BYTES) {
+    return { ok: false, reason: "too_large", elapsedMs: Date.now() - startedAt };
+  }
+  return guardGenerated(
+    { ok: true, bytes: generated.png, elapsedMs: Date.now() - startedAt },
+    options,
+    deps,
+    false,
+    false,
+  );
+}
+
+async function generateViaMoss(
+  options: ComfyWorkflowOptions,
+  deps: GenerateDeps,
+): Promise<GenerateResult> {
+  const startedAt = Date.now();
+  const generated = await (deps.mossGenerateFn ?? generateMossImage)(options.prompt, {
+    width: options.width ?? 832,
+    height: options.height ?? 1216,
+    // MOSS 官方默认 50 步；调用方显式给 >1 的步数时才覆盖
+    steps: Math.max(1, Math.min(100, options.steps && options.steps > 1 ? options.steps : 50)),
+    seed: options.seed ?? Math.floor(Math.random() * 1_000_000),
+    timeoutMs: 300_000,
+  });
+  if (!generated) return { ok: false, reason: "moss_failed" };
   if (generated.png.length > MAX_GENERATED_BYTES) {
     return { ok: false, reason: "too_large", elapsedMs: Date.now() - startedAt };
   }
@@ -357,6 +396,9 @@ export async function generateImage(
   }
   if (imageBackend() === "z-image") {
     return generateViaZImage(options, deps);
+  }
+  if (imageBackend() === "moss-image") {
+    return generateViaMoss(options, deps);
   }
   if (imageBackend() === "service") {
     return guardGenerated(await generateViaService(options, fetchImpl, timeoutMs), options, deps, false, false);

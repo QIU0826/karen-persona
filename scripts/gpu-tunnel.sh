@@ -8,6 +8,8 @@
 #   18111 Z-Image          -> 本机 19111
 #   18112 SenseVoice       -> 本机 19112
 #   18113 Qwen-Omni        -> 本机 19113
+#   18114 MOSS-Image       -> 本机 19114
+#   18115 MOSS-Image-Edit  -> 本机 19115（当前部署的 SFT 只开 /generate，/edit 待 Edit 模型）
 #
 # 用法：bash scripts/gpu-tunnel.sh
 # 可通过 KAREN_GPU_SSH_HOST 覆盖 SSH 别名（默认 `karen-gpu`，定义在 ~/.ssh/config）。
@@ -36,6 +38,8 @@ pairs=(
   "19111:127.0.0.1:18111" # Z-Image
   "19112:127.0.0.1:18112" # SenseVoice
   "19113:127.0.0.1:18113" # Qwen-Omni
+  "19114:127.0.0.1:18114" # MOSS-Image（/generate /health）
+  "19115:127.0.0.1:18115" # MOSS-Image-Edit（/edit /health，SFT 阶段 501）
 )
 
 args=(

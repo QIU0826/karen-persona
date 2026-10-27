@@ -172,6 +172,18 @@ export function collectDependencies(env: NodeJS.ProcessEnv = process.env): Depen
         url: trimUrl(envValue(env, "QWEN_IMAGE_EDIT_URL"), "http://127.0.0.1:19110"),
         checkLoaded: true,
       });
+    } else if (
+      imageBackend === "moss-image" ||
+      imageBackend === "moss" ||
+      imageBackend === "moss-image-sft"
+    ) {
+      specs.push({
+        name: "image-moss-image",
+        role: "image",
+        label: "MOSS-Image 生图",
+        url: trimUrl(envValue(env, "MOSS_IMAGE_URL"), "http://127.0.0.1:19114"),
+        checkLoaded: true,
+      });
     } else if (imageBackend === "comfyui") {
       specs.push({
         name: "image-comfyui",
@@ -193,11 +205,23 @@ export function collectDependencies(env: NodeJS.ProcessEnv = process.env): Depen
 
   // 运行时自拍独立于 KAREN_IMAGE_BACKEND（用 Qwen-Image-Edit + cafe 参考图），
   // 所以即便生图默认走 z-image，也要单独探活自拍服务，避免它挂了没人知道。
+  // MOSS-Edit 分支（KAREN_SELFIE_BACKEND=moss-edit）则探 18115。
   const selfieOn = (envValue(env, "KAREN_SELFIE_GEN") ?? "on").toLowerCase() !== "off";
+  const selfieBackend = (envValue(env, "KAREN_SELFIE_BACKEND") ?? "qwen").toLowerCase();
+  if (selfieOn && selfieBackend === "moss-edit") {
+    specs.push({
+      name: "selfie-moss-edit",
+      role: "image",
+      label: "MOSS-Image 自拍编辑",
+      url: trimUrl(envValue(env, "MOSS_IMAGE_EDIT_URL"), "http://127.0.0.1:19115"),
+      checkLoaded: true,
+    });
+  }
   const selfieUrl = envValue(env, "QWEN_IMAGE_EDIT_URL");
   if (
     selfieOn &&
     selfieUrl &&
+    selfieBackend !== "moss-edit" &&
     imageBackend !== "qwen-image-edit" &&
     imageBackend !== "qwen"
   ) {
