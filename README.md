@@ -11,7 +11,27 @@
 >
 > **v0.9.31 已发布**（2026-10-22）：GitHub `main` 分支 + tag。**语音换成 IndexTTS-2.5，晚间再切 VoxCPM2（GPU2，48kHz）**：IndexTTS 的 8 维情绪向量保留回退；Vox 全链路实测 **5.28s 音频 / 3.24s 端到端**；参考音仍用你视频里的 8.3s。同时本机生图复验：SDXL-Turbo 热态 **2.6s/张**，`image:smoke` 全过。v0.9.30 是语音按文字线索选情绪；v0.9.29 是 CosyVoice instruct2。历史：v0.3.1 修掉 15 轮真实验证暴露的两个 P0（编造「怎么认识的」、多媒体内容错位）与情绪承接/嘲讽话术/图片复用等 P1-P2。
 >
-> 仓库实测状态（2026-10-22）：`npm run typecheck` 0 错误；`npm test` **128 个测试文件 / 1486 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 59.21%）。**干净 checkout + 真实 `npm ci` 已复验**（v0.2.1 时）：122 个依赖约 40s 安装、typecheck 0 错误、doctor 在缺 config/.env 时给出可执行的修复指引；v0.3.0 新增 `silk-wasm`（纯 wasm，无原生构建）。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**；另用「本地模拟用户 + 真实 DeepSeek」跑过 30 轮长跑（记忆 6/6、复读对 0、错误 0、平均延迟 2047ms、成本 ¥0.147），见 [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md)。
+>
+> **v0.9.32 进行中（2026-10-27）**：自拍画风统一切到宣传页人物（character-2 参考 + 5 张缓存重生成）；承诺账本、她的一天跨天闭环、关系缺席降温与事件里程碑、主动消息低频语音/照片、跨天一致性回放、长期记忆审计均已落地。下一阶段：B 站只读世界 + MOSS-Image 部署与人物一致性微调（见 [下一阶段路线](docs/ROADMAP_NEXT.md)）。
+> 仓库实测状态（2026-10-27）：`npm run typecheck` 0 错误；`npm test` **150 个测试文件 / 1642 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 59.21%）。**干净 checkout + 真实 `npm ci` 已复验**（v0.2.1 时）：122 个依赖约 40s 安装、typecheck 0 错误、doctor 在缺 config/.env 时给出可执行的修复指引；v0.3.0 新增 `silk-wasm`（纯 wasm，无原生构建）。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**；另用「本地模拟用户 + 真实 DeepSeek」跑过 30 轮长跑（记忆 6/6、复读对 0、错误 0、平均延迟 2047ms、成本 ¥0.147），见 [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md)。
+
+---
+
+## 宣传页
+
+> 一页讲清楚她是谁：住在 QQ 里、有自己的生活/情绪/记忆的 AI 虚拟人。页面是单文件静态 HTML，无外部依赖。
+
+<div align="center">
+  <a href="promo/index.html">
+    <img src="promo/screenshots/hero.png" width="720" alt="KAREN 宣传页首屏" />
+  </a>
+</div>
+
+| 她的日常 | 主动性 |
+| --- | --- |
+| ![她的日常](promo/screenshots/daily.png) | ![主动消息](promo/screenshots/proactive.png) |
+
+本地预览：`open promo/index.html`；或 `python3 -m http.server 8000` 后打开 `http://127.0.0.1:8000/promo/`。
 
 ---
 
@@ -176,7 +196,7 @@ npm run dev
 | 打字节奏 / 打错字撤回 | ✅ | 每轮最多 4 条文字气泡（超出合并）、当轮去重、气泡间隔按字数模拟打字（约 80–120ms/字）；低概率（默认 4%）先发错字、约 1.5s 后撤回、再发正确版（OneBot `delete_msg`，只允许撤回本进程 15s 内的消息）；会话/记忆只记正确原文；`typo_recall_*` 可关 |
 | 相识不编造 | ✅ | 用户问「我们怎么认识的」而无任何依据（人设背景/用户事实/记忆都没有）时，确定性守卫会删掉编造的具体场景（吧台/下雨/借伞/每周来…），整条都在编就换成一句含糊的真人式回应；有依据时正常回忆 |
 | 被点名要多媒体时真的会给 | ✅ | 识别「拍张照片看看」「发个表情包」「发条语音听听」：要照片时跳过概率判定（亲密度/冷却仍生效）并按他提到的场景挑图（晚霞→晚霞、雪→雪、店→咖啡），要表情/语音时提高概率并跳过冷却，同时给模型内部提示避免「嘴上说改天、其实没发」 |
-| **运行时自拍生成（v0.9.32）** | ✅ | 点「自拍 / 拍张你」→ 先回一句，约 25–45s 后台用 Qwen-Image-Edit-2511 + 宣传页人物参考图生成（实测 30s/张；参考图 `promo/assets/character-2.jpg`，提示词锁中蓝发色 + 低饱和铅笔/水彩画风），过 image-guard（角色/手/穿模）才发；质检失败换 seed 重试一次，仍失败回退本地自拍；同一用户 90s 冷却，来源见日志 `selfie.sent`；5 张旧画风缓存自拍待重生成 |
+| **运行时自拍生成（v0.9.32）** | ✅ | 点「自拍 / 拍张你」→ 先回一句，约 25–45s 后台用 Qwen-Image-Edit-2511 + 宣传页人物参考图生成（实测 30s/张；参考图 `promo/assets/character-2.jpg`，提示词锁中蓝发色 + 低饱和铅笔/水彩画风），过 image-guard（角色/手/穿模）才发；质检失败换 seed 重试一次，仍失败回退本地自拍；同一用户 90s 冷却，来源见日志 `selfie.sent`；5 张缓存自拍已重生成（promo 画风） |
 
 ### 记忆与数据
 
