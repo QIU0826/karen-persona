@@ -1,0 +1,10 @@
+moss	01-cafe	FAIL
+moss	02-home	FAIL
+moss	03-night	FAIL
+moss	04-rain	FAIL
+moss	05-seaside	FAIL
+qwen	01-cafe	FAIL
+qwen	02-home	PASS
+qwen	03-night	FAIL
+qwen	04-rain	PASS
+qwen	05-seaside	PASS
