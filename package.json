@@ -78,7 +78,8 @@
     "anchor:audit": "tsx scripts/anchor-audit.ts",
     "promises": "tsx scripts/promises.ts",
     "memory:audit": "tsx scripts/memory-audit.ts",
-    "consistency:eval": "tsx scripts/consistency-eval.ts"
+    "consistency:eval": "tsx scripts/consistency-eval.ts",
+    "bilibili:smoke": "tsx scripts/bilibili-smoke.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",

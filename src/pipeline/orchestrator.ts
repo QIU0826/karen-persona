@@ -125,6 +125,15 @@ import {
 } from "../persona/anti-repetition.js";
 import { mockWeather, fetchWeather, perceiveWeather, clearWeatherCache, type WeatherPerception } from "../world/weather.js";
 import { getTrendingTopicsAsync, matchTrendingTopics, buildTrendingContext } from "../world/trending-fetcher.js";
+import {
+  formatBilibiliDigestContext,
+  formatBilibiliShareContext,
+  getBilibiliDigest,
+  loadBilibiliConfig,
+  lookupBilibiliShare,
+  rankBilibiliForPersona,
+  takeDailyDigestItems,
+} from "../world/bilibili.js";
 import { deriveStance } from "../world/stance.js";
 import { perceiveTime, buildMomentTag } from "../world/time-awareness.js";
 import { renderExpression } from "../impulse/renderer.js";
@@ -403,6 +412,57 @@ function buildTurnMediaContext(
     previousUserImage: hasRecentUserImage(state.session, userInput),
     stickerHint: opts.stickerHint,
   });
+}
+
+// ── B 站只读内容源（P1）────────────────────────
+
+/** 每个 owner 上次注入「她今天刷到的」的时间（进程内即可，重启最多再提一次） */
+const lastBilibiliInjectAt = new Map<string, number>();
+/** 两次「她刷到的」注入的最小间隔（缓存 TTL 30–60 分钟 + 注入节奏，避免每轮都提） */
+const BILIBILI_INJECT_MIN_GAP_MS = 90 * 60 * 1000;
+/** 单次最多注入几条（每日总量由 KAREN_BILIBILI_DAILY_MAX 控制） */
+const BILIBILI_MAX_PER_INJECT = 2;
+
+/**
+ * 构造 B 站上下文片段（失败静默回退空串，绝不阻塞聊天）。
+ * - 对方发来 BV/链接：解析标题/简介/热评并注入（不受注入节奏限制）；
+ * - 否则每 90 分钟最多注入一次「她今天刷到的」，每天最多 N 条；
+ * - 只读、无 cookie（见 src/world/bilibili.ts）。
+ */
+async function buildBilibiliContext(
+  owner: string,
+  userInput: string,
+  personaKeywords: string[],
+  log: (line: string) => void,
+): Promise<string> {
+  try {
+    const config = loadBilibiliConfig();
+    if (!config.enabled) return "";
+
+    // 对方分享：消息里没有 BV/链接时 lookup 内部零网络请求
+    const shared = await lookupBilibiliShare(userInput);
+    if (shared) {
+      lastBilibiliInjectAt.set(owner, Date.now());
+      log(`[B站] 解析对方分享: ${shared.title.slice(0, 20)}`);
+      return formatBilibiliShareContext(shared);
+    }
+
+    // 她今天刷到的：控制注入节奏 + 每日条数，避免复读同一批
+    const now = Date.now();
+    if (now - (lastBilibiliInjectAt.get(owner) ?? 0) < BILIBILI_INJECT_MIN_GAP_MS) return "";
+    const digest = await getBilibiliDigest();
+    if (!digest) return "";
+    const perInject = Math.min(BILIBILI_MAX_PER_INJECT, config.dailyMax);
+    const ranked = rankBilibiliForPersona(digest.items, personaKeywords, Math.max(perInject * 3, perInject));
+    const picked = takeDailyDigestItems(ranked, perInject, now);
+    if (picked.length === 0) return "";
+    lastBilibiliInjectAt.set(owner, now);
+    log(`[B站] 注入她今天刷到的 ${picked.length} 条`);
+    return formatBilibiliDigestContext(picked);
+  } catch (error) {
+    log(`[B站] 跳过: ${error instanceof Error ? error.message : String(error)}`);
+    return "";
+  }
 }
 
 // ── 初始化 ────────────────────────────────────
@@ -1962,6 +2022,13 @@ export async function processMessage(
     }
   }
 
+  // B 站只读（P1）：对方分享的视频优先；否则按节奏注入「她今天刷到的」
+  const biliKeywords = [
+    ...(persona.identity.lifeStory.career?.split(/[,，、\s]+/) ?? []),
+    ...(config.tags ?? []),
+  ];
+  const bilibiliContext = await buildBilibiliContext(state.owner, userInput, biliKeywords, (line) => logs.push(line));
+
   // 结构化标签 + 风格参考 + RAG + 热点作为额外上下文
   const conflictNote = buildConflictNote(state);
   const crisisNote = crisis ? crisisSafetyNote() : "";
@@ -1979,6 +2046,7 @@ export async function processMessage(
   const fullSystem =
     systemPrompt +
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
+    bilibiliContext +
     conflictNote +
     crisisNote +
     t1ArcContext +
@@ -2460,6 +2528,13 @@ export async function* processMessageStream(
     if (trendingContext) state.lastTrendingInject = streamNowTs;
   }
 
+  // B 站只读（P1，与非流式对齐）
+  const streamBiliKeywords = [
+    ...(persona.identity.lifeStory.career?.split(/[,，、\s]+/) ?? []),
+    ...(config.tags ?? []),
+  ];
+  const bilibiliContext = await buildBilibiliContext(state.owner, userInput, streamBiliKeywords, (line) => console.log(`  ${line}`));
+
   const memories = await retrieveWithLlmBoost(userInput, 8, {
     onLog: (line) => console.log(`  ${line}`),
   });
@@ -2488,6 +2563,7 @@ export async function* processMessageStream(
   const fullSystem =
     systemPrompt +
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
+    bilibiliContext +
     buildConflictNote(state) +
     (crisis ? crisisSafetyNote() : "") +
     t1ArcContext +
