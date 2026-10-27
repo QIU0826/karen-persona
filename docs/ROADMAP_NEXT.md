@@ -3,6 +3,18 @@
 > 状态：2026-10-27 立项；与 README 的 v0.9.32 状态对应。
 > 原则：先只读、先灰度、每步可回退；模型权重、训练数据、cookie/token 一律不进 git。
 
+## 0. 当前状态（2026-10-27 晚）
+
+| 阶段 | 状态 | 证据 |
+| --- | --- | --- |
+| P1 B 站只读 | ✅ 已完成 | 热门/详情/评论 + BV 解析；29 单测 + 真实 smoke；生产已重启加载 |
+| P2 MOSS-Image 部署 | ✅ shadow 完成 | GPU7 `18114` loaded；50 步 38–40s/张、峰值 28.2GB；4 张真实 PNG；生产默认未切 |
+| P3 数据集/基线 | ✅ 完成 | 30 train / 8 eval，ArcFace train best mean 0.8259 / eval 0.8584 |
+| P3 LoRA 训练 | 🚧 进行中 | kohya sd-scripts，1200 步/40 epoch，GPU6 后台训练；完成后做 base vs LoRA A/B |
+
+> 关键发现：MOSS-Image-SFT 原生输出偏写实，和宣传页的铅笔/水彩画风不一致；
+> 因此不能直接替换，需要 identity/style LoRA 后再评估切换。
+
 ## 0. 目标
 
 1. **B 站只读接入**：让 Karen 有“今天刷到的东西”可聊，不登录、不评论、不点赞。
