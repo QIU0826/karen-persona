@@ -225,6 +225,15 @@ export function collectDependencies(env: NodeJS.ProcessEnv = process.env): Depen
       url: trimUrl(envValue(env, "MOSS_CHARACTER_URL"), "http://127.0.0.1:19116"),
       checkLoaded: true,
     });
+  } else if (selfieOn && (selfieBackend === "moss-hybrid" || selfieBackend === "moss-hybrid-shadow" || selfieBackend === "hybrid")) {
+    // GPU 服务端 hybrid wrapper（MOSS v2 生成 + Qwen 修脸，18118/19118）
+    specs.push({
+      name: "selfie-moss-hybrid",
+      role: "image",
+      label: "MOSS+Qwen 混合自拍",
+      url: trimUrl(envValue(env, "MOSS_HYBRID_URL"), "http://127.0.0.1:19118"),
+      checkLoaded: true,
+    });
   }
   const selfieUrl = envValue(env, "QWEN_IMAGE_EDIT_URL");
   if (
@@ -232,6 +241,7 @@ export function collectDependencies(env: NodeJS.ProcessEnv = process.env): Depen
     selfieUrl &&
     selfieBackend !== "moss-edit" &&
     selfieBackend !== "moss-t2i" &&
+    selfieBackend !== "moss-hybrid" &&
     imageBackend !== "qwen-image-edit" &&
     imageBackend !== "qwen"
   ) {

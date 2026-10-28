@@ -11,6 +11,7 @@
 #   18114 MOSS-Image       -> 本机 19114
 #   18115 MOSS-Image-Edit  -> 本机 19115（当前部署的 SFT 只开 /generate，/edit 待 Edit 模型）
 #   18116 MOSS-Character   -> 本机 19116（GPU6 人物专用：MOSS-Image-SFT + Karen identity LoRA）
+#   18118 MOSS-Hybrid      -> 本机 19118（MOSS v2 生成 + Qwen 修脸 wrapper，task-29 shadow）
 #
 # 用法：bash scripts/gpu-tunnel.sh
 # 可通过 KAREN_GPU_SSH_HOST 覆盖 SSH 别名（默认 `karen-gpu`，定义在 ~/.ssh/config）。
@@ -42,6 +43,7 @@ pairs=(
   "19114:127.0.0.1:18114" # MOSS-Image（/generate /health）
   "19115:127.0.0.1:18115" # MOSS-Image-Edit（/edit /health，SFT 阶段 501）
   "19116:127.0.0.1:18116" # MOSS-Character（GPU6 人物 LoRA /generate /health）
+  "19118:127.0.0.1:18118" # MOSS-Hybrid（MOSS v2 + Qwen 修脸 wrapper /selfie /health）
 )
 
 args=(

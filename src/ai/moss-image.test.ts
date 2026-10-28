@@ -1,17 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_MOSS_CHARACTER_URL,
+  DEFAULT_MOSS_HYBRID_URL,
   DEFAULT_MOSS_IMAGE_EDIT_URL,
   DEFAULT_MOSS_IMAGE_URL,
   MOSS_DEFAULT_SKIP_LAYERS,
   editMossImage,
   generateMossCharacterImage,
+  generateMossHybridImage,
   generateMossImage,
   isMossCharacterEnabled,
+  isMossHybridEnabled,
   isMossImageEditEnabled,
   isMossImageEnabled,
   mossCharacterBaseUrl,
   mossEditSelfieBackend,
+  mossHybridBaseUrl,
   mossImageBaseUrl,
   mossImageEditBaseUrl,
   mossTimeoutMs,
@@ -222,6 +226,65 @@ describe("generateMossCharacterImage", () => {
     const fetchFn = vi.fn() as unknown as typeof fetch;
     await expect(generateMossCharacterImage("  ", { fetchFn })).resolves.toBeNull();
     expect((fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+  });
+});
+
+describe("moss-hybrid wrapper 客户端", () => {
+  function hybridPngResponse(): Response {
+    return new Response(PNG, {
+      status: 200,
+      headers: {
+        "x-image-width": "832",
+        "x-image-height": "1280",
+        "x-total-ms": "110405",
+        "x-moss-ms": "39342",
+        "x-fix-ms": "71061",
+        "x-qwen-attempts": "1",
+      },
+    });
+  }
+
+  it("默认关；KAREN_SELFIE_BACKEND=moss-hybrid 或显式 URL 才启用", () => {
+    expect(DEFAULT_MOSS_HYBRID_URL).toBe("http://127.0.0.1:19118");
+    expect(isMossHybridEnabled({})).toBe(false);
+    expect(isMossHybridEnabled({ KAREN_SELFIE_BACKEND: "qwen" })).toBe(false);
+    expect(isMossHybridEnabled({ KAREN_SELFIE_BACKEND: "moss-hybrid" })).toBe(true);
+    expect(isMossHybridEnabled({ KAREN_SELFIE_BACKEND: "MOSS-HYBRID-SHADOW" })).toBe(true);
+    expect(isMossHybridEnabled({ MOSS_HYBRID_URL: "http://127.0.0.1:19118" })).toBe(true);
+    expect(mossHybridBaseUrl({})).toBe("http://127.0.0.1:19118");
+    expect(mossHybridBaseUrl({ MOSS_HYBRID_URL: "http://10.0.0.5:9000/" })).toBe("http://10.0.0.5:9000");
+  });
+
+  it("成功返回 PNG + 两段耗时响应头", async () => {
+    const fetchFn = vi.fn(async () => hybridPngResponse()) as unknown as typeof fetch;
+    const result = await generateMossHybridImage("咖啡馆窗边自拍", { fetchFn, fixSteps: 15, seed: 4242 });
+    expect(result?.png.equals(PNG)).toBe(true);
+    expect(result?.serverElapsedMs).toBe(110405);
+    expect(result?.mossMs).toBe(39342);
+    expect(result?.fixMs).toBe(71061);
+    const url = String((fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]);
+    const init = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit;
+    expect(url).toBe("http://127.0.0.1:19118/selfie");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      prompt: "咖啡馆窗边自拍",
+      width: 832,
+      height: 1216,
+      seed: 4242,
+      fix_steps: 15,
+    });
+  });
+
+  it("失败/超时/非 PNG 返回 null（selfie 回退 Qwen/图库）", async () => {
+    const fail = vi.fn(async () => jsonResponse({ detail: "busy" }, 503)) as unknown as typeof fetch;
+    await expect(generateMossHybridImage("自拍", { fetchFn: fail })).resolves.toBeNull();
+    const thrown = vi.fn(async () => {
+      const err = new Error("timeout");
+      err.name = "TimeoutError";
+      throw err;
+    }) as unknown as typeof fetch;
+    await expect(generateMossHybridImage("自拍", { fetchFn: thrown })).resolves.toBeNull();
+    const notPng = vi.fn(async () => new Response("busy")) as unknown as typeof fetch;
+    await expect(generateMossHybridImage("自拍", { fetchFn: notPng })).resolves.toBeNull();
   });
 });
 

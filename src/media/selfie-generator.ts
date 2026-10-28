@@ -20,11 +20,17 @@
  * prompt 固定触发词 `karen_style` + 中蓝发色/铅笔水彩画风；失败或 guard 不过会先回退
  * Qwen-Image-Edit，再失败才由调用方回退本地自拍。实测 identity 仍弱于 Qwen（见
  * docs/MOSS_IMAGE.md「人物 LoRA」），**不切生产默认**。
+ *
+ * MOSS-hybrid 分支（P3，默认关闭，shadow）：`KAREN_SELFIE_BACKEND=moss-hybrid` 时调
+ * GPU 服务端 wrapper 18118（MOSS v2 生成 base → Qwen-Image-Edit 修脸），失败/guard 不过
+ * 回退 Qwen-Image-Edit，再回退本地自拍。实测总延迟约 110s（MOSS ~40s + Qwen ~71s），
+ * identity 与 MOSS v2 单跑基本一致（修脸增量 ~+0.003），**不切生产默认**。
  */
 import { auditImage, type ImageAudit } from "../ai/image-guard.js";
 import {
   editMossImage,
   generateMossCharacterImage,
+  generateMossHybridImage,
   type MossImageResult,
 } from "../ai/moss-image.js";
 import {
@@ -51,6 +57,7 @@ export type SelfieFailureReason =
   | "qwen_failed"
   | "moss_failed"
   | "moss_t2i_failed"
+  | "moss_hybrid_failed"
   | "too_large"
   | "guard_unavailable"
   | "guard_rejected";
@@ -76,6 +83,8 @@ export interface SelfieGenerationDeps {
   mossEditGenerateFn?: typeof editMossImage;
   /** MOSS-t2i 分支（KAREN_SELFIE_BACKEND=moss-t2i）用的人物 LoRA 生成函数 */
   mossCharacterGenerateFn?: typeof generateMossCharacterImage;
+  /** MOSS-hybrid 分支（KAREN_SELFIE_BACKEND=moss-hybrid）用的 wrapper 生成函数 */
+  mossHybridGenerateFn?: typeof generateMossHybridImage;
   auditFn?: (
     png: Buffer,
     ctx: { context: string; prompt?: string; requireNoHands?: boolean; expectCharacter?: boolean },
@@ -85,14 +94,17 @@ export interface SelfieGenerationDeps {
 
 type AuditFn = NonNullable<SelfieGenerationDeps["auditFn"]>;
 
-/** 自拍生成后端：默认 qwen（保持现状）；moss-edit / moss-t2i 需显式开启。 */
-export type SelfieBackend = "qwen" | "moss-edit" | "moss-t2i";
+/** 自拍生成后端：默认 qwen（保持现状）；moss-edit / moss-t2i / moss-hybrid 需显式开启。 */
+export type SelfieBackend = "qwen" | "moss-edit" | "moss-t2i" | "moss-hybrid";
 
 export function selfieBackend(env: NodeJS.ProcessEnv = process.env): SelfieBackend {
   const raw = (env.KAREN_SELFIE_BACKEND ?? "").trim().toLowerCase();
   if (raw === "moss-edit") return "moss-edit";
   if (raw === "moss-t2i" || raw === "moss-t2i-shadow" || raw === "moss-character") {
     return "moss-t2i";
+  }
+  if (raw === "moss-hybrid" || raw === "moss-hybrid-shadow" || raw === "hybrid") {
+    return "moss-hybrid";
   }
   return "qwen";
 }
@@ -101,8 +113,8 @@ export function selfieBackend(env: NodeJS.ProcessEnv = process.env): SelfieBacke
 export function isSelfieGenerationEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   if ((env.KAREN_SELFIE_GEN ?? "on").trim().toLowerCase() === "off") return false;
   const backend = selfieBackend(env);
-  if (backend === "moss-edit" || backend === "moss-t2i") {
-    // 显式 opt-in 即视为启用；地址未配时用客户端默认 19115/19116，失败会回退。
+  if (backend === "moss-edit" || backend === "moss-t2i" || backend === "moss-hybrid") {
+    // 显式 opt-in 即视为启用；地址未配时用客户端默认 19115/19116/19118，失败会回退。
     return true;
   }
   return Boolean((env.QWEN_IMAGE_EDIT_URL ?? "").trim());
@@ -114,6 +126,11 @@ function hasQwenBackend(env: NodeJS.ProcessEnv): boolean {
 
 function stepsFromEnv(env: NodeJS.ProcessEnv, backend: SelfieBackend = "qwen"): number {
   const raw = Number(env.KAREN_SELFIE_STEPS);
+  if (backend === "moss-hybrid") {
+    // hybrid wrapper：这是 Qwen 修脸步数（默认 15，收敛 [8, 30]）；MOSS 段固定 50 步
+    if (!Number.isFinite(raw)) return 15;
+    return Math.max(8, Math.min(30, Math.round(raw)));
+  }
   if (backend === "moss-edit" || backend === "moss-t2i") {
     // MOSS 官方默认 50 步；未显式配置时用 50，显式配置时收敛到 [10, 100]
     if (!Number.isFinite(raw)) return 50;
@@ -308,9 +325,16 @@ async function runBackendAttempts(
   const qwenGenerate = deps.qwenGenerateFn ?? generateQwenImageEdit;
   const mossEditGenerate = deps.mossEditGenerateFn ?? editMossImage;
   const mossCharacterGenerate = deps.mossCharacterGenerateFn ?? generateMossCharacterImage;
+  const mossHybridGenerate = deps.mossHybridGenerateFn ?? generateMossHybridImage;
   const audit: AuditFn = deps.auditFn ?? auditImage;
   const failureReason: SelfieFailureReason =
-    backend === "moss-edit" ? "moss_failed" : backend === "moss-t2i" ? "moss_t2i_failed" : "qwen_failed";
+    backend === "moss-edit"
+      ? "moss_failed"
+      : backend === "moss-t2i"
+        ? "moss_t2i_failed"
+        : backend === "moss-hybrid"
+          ? "moss_hybrid_failed"
+          : "qwen_failed";
   let lastReason: SelfieFailureReason = failureReason;
   let lastAudit: ImageAudit | null = null;
 
@@ -331,6 +355,14 @@ async function runBackendAttempts(
           seed: Math.floor(Math.random() * 1_000_000),
           negativePrompt: MOSS_CHARACTER_NEGATIVE,
           timeoutMs: 300_000,
+        });
+      } else if (backend === "moss-hybrid") {
+        generated = await mossHybridGenerate(prompt, {
+          width: 832,
+          height: 1216,
+          fixSteps: steps,
+          seed: Math.floor(Math.random() * 1_000_000),
+          timeoutMs: 360_000,
         });
       } else {
         generated = await qwenGenerate(prompt, {
@@ -393,7 +425,9 @@ async function runBackendAttempts(
  * - 默认 qwen：Qwen-Image-Edit（现状）；
  * - `KAREN_SELFIE_BACKEND=moss-edit`：MOSS `/edit`（当前 501，占位）；
  * - `KAREN_SELFIE_BACKEND=moss-t2i`：先人物 LoRA MOSS，失败/guard 不过时若配置了
- *   `QWEN_IMAGE_EDIT_URL` 再用 Qwen-Image-Edit 兜底（`fallbackUsed=true`）。
+ *   `QWEN_IMAGE_EDIT_URL` 再用 Qwen-Image-Edit 兜底（`fallbackUsed=true`）；
+ * - `KAREN_SELFIE_BACKEND=moss-hybrid`：先 hybrid wrapper（MOSS 生成 + Qwen 修脸），
+ *   失败同样回退 Qwen（`fallbackUsed=true`）。
  */
 export async function generateSelfie(
   input: SelfieRequestInput,
@@ -407,6 +441,7 @@ export async function generateSelfie(
     qwen: qwenPrompt.prompt,
     "moss-edit": qwenPrompt.prompt,
     "moss-t2i": mossPrompt.prompt,
+    "moss-hybrid": mossPrompt.prompt,
   };
   const scene = qwenPrompt.scene;
 
@@ -416,7 +451,9 @@ export async function generateSelfie(
 
   const primary = selfieBackend(env);
   const chain: SelfieBackend[] =
-    primary === "moss-t2i" && hasQwenBackend(env) ? ["moss-t2i", "qwen"] : [primary];
+    (primary === "moss-t2i" || primary === "moss-hybrid") && hasQwenBackend(env)
+      ? [primary, "qwen"]
+      : [primary];
   const context = [
     input.userText,
     input.lastReply,
@@ -430,7 +467,13 @@ export async function generateSelfie(
   let totalAttempts = 0;
   let lastAudit: ImageAudit | null = null;
   let lastReason: SelfieFailureReason =
-    primary === "moss-edit" ? "moss_failed" : primary === "moss-t2i" ? "moss_t2i_failed" : "qwen_failed";
+    primary === "moss-edit"
+      ? "moss_failed"
+      : primary === "moss-t2i"
+        ? "moss_t2i_failed"
+        : primary === "moss-hybrid"
+          ? "moss_hybrid_failed"
+          : "qwen_failed";
 
   for (const backend of chain) {
     const outcome = await runBackendAttempts(backend, prompts[backend], context, stepsFromEnv(env, backend), deps);

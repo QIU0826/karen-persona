@@ -22,6 +22,11 @@ export const DEFAULT_MOSS_IMAGE_EDIT_URL = "http://127.0.0.1:19115";
  * 场景图仍走 Z-Image，本服务只给自拍/人物用；默认 shadow。
  */
 export const DEFAULT_MOSS_CHARACTER_URL = "http://127.0.0.1:19116";
+/**
+ * Hybrid 自拍 wrapper（GPU 服务端 18118，Mac 隧道 19118）：
+ * MOSS v2 生成 base → Qwen-Image-Edit 修脸 → PNG。默认 shadow。
+ */
+export const DEFAULT_MOSS_HYBRID_URL = "http://127.0.0.1:19118";
 /** MOSS 官方默认：50 步、guidance 3.0、负分支跳过第 22 层 */
 export const MOSS_DEFAULT_STEPS = 50;
 export const MOSS_DEFAULT_GUIDANCE = 3.0;
@@ -79,6 +84,22 @@ export interface MossImageResult {
   gpuPeakGb?: number;
   steps?: number;
   seed?: number;
+  /** hybrid wrapper：MOSS 生成段耗时（X-Moss-Ms） */
+  mossMs?: number;
+  /** hybrid wrapper：Qwen 修脸段耗时（X-Fix-Ms） */
+  fixMs?: number;
+}
+
+/** hybrid wrapper 请求选项（POST `/selfie`） */
+export interface MossHybridOptions {
+  baseUrl?: string;
+  width?: number;
+  height?: number;
+  seed?: number;
+  /** Qwen 修脸步数（wrapper 内收敛 8–30，默认 15） */
+  fixSteps?: number;
+  timeoutMs?: number;
+  fetchFn?: typeof fetch;
 }
 
 export function isMossImageEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -127,6 +148,24 @@ export function isMossCharacterEnabled(env: NodeJS.ProcessEnv = process.env): bo
 export function mossCharacterBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   return (
     (env.MOSS_CHARACTER_URL ?? DEFAULT_MOSS_CHARACTER_URL).trim() || DEFAULT_MOSS_CHARACTER_URL
+  ).replace(/\/+$/, "");
+}
+
+/** Hybrid 自拍 wrapper（`KAREN_SELFIE_BACKEND=moss-hybrid`）是否启用；默认关。 */
+export function isMossHybridEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const backend = (env.KAREN_SELFIE_BACKEND ?? "").trim().toLowerCase();
+  return (
+    backend === "moss-hybrid" ||
+    backend === "moss-hybrid-shadow" ||
+    backend === "hybrid" ||
+    Boolean((env.MOSS_HYBRID_URL ?? "").trim())
+  );
+}
+
+/** Hybrid wrapper base URL（env `MOSS_HYBRID_URL`，默认隧道 19118）。 */
+export function mossHybridBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return (
+    ((env.MOSS_HYBRID_URL ?? DEFAULT_MOSS_HYBRID_URL).trim() || DEFAULT_MOSS_HYBRID_URL)
   ).replace(/\/+$/, "");
 }
 
@@ -275,11 +314,66 @@ export async function generateMossCharacterImage(
 }
 
 /**
+ * 调 hybrid wrapper（18118/19118）：MOSS v2 生成 base → Qwen-Image-Edit 修脸 → PNG。
+ * 失败/超时返回 null；调用方按 selfie 后端链回退 Qwen → 图库。
+ */
+export async function generateMossHybridImage(
+  prompt: string,
+  opts: MossHybridOptions = {},
+): Promise<MossImageResult | null> {
+  const text = (prompt ?? "").trim();
+  if (!text) return null;
+  const baseUrl = (opts.baseUrl ?? mossHybridBaseUrl()).replace(/\/+$/, "");
+  const size = normalizeMossSize(opts.width ?? 832, opts.height ?? 1216);
+  const timeoutMs = clampTimeout(opts.timeoutMs ?? 240_000);
+  const fetchFn = opts.fetchFn ?? fetch;
+  const seed = opts.seed ?? Math.floor(Math.random() * 1_000_000);
+  const startedAt = Date.now();
+  try {
+    const res = await fetchFn(`${baseUrl}/selfie`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: text,
+        width: size.width,
+        height: size.height,
+        seed,
+        ...(opts.fixSteps !== undefined ? { fix_steps: opts.fixSteps } : {}),
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) {
+      log.warn("image.moss_hybrid_failed", { status: res.status, stage: "selfie" });
+      return null;
+    }
+    const png = Buffer.from(await res.arrayBuffer());
+    if (!isPng(png)) {
+      log.warn("image.moss_hybrid_failed", { reason: "invalid_png", bytes: png.length });
+      return null;
+    }
+    const result = headerResult(res, png, startedAt);
+    const total = parsePositiveInt(res.headers.get("x-total-ms"));
+    const moss = parsePositiveInt(res.headers.get("x-moss-ms"));
+    const fix = parsePositiveInt(res.headers.get("x-fix-ms"));
+    return {
+      ...result,
+      ...(total !== undefined ? { serverElapsedMs: total } : {}),
+      ...(moss !== undefined ? { mossMs: moss } : {}),
+      ...(fix !== undefined ? { fixMs: fix } : {}),
+    };
+  } catch (err: unknown) {
+    log.warn("image.moss_hybrid_failed", {
+      reason: err instanceof Error ? err.name : "unknown",
+    });
+    return null;
+  }
+}
+
+/**
  * 调 MOSS 参考图编辑（服务端 /edit）。
  * 注意：当前部署的 MOSS-Image-SFT 只有文生图分支，/edit 返回 501；
  * 本函数先按协议实现，服务端升级到 Moss-Image-Edit 后无需改客户端即可用。
- */
-export async function editMossImage(
+ */export async function editMossImage(
   prompt: string,
   imagePaths: string[],
   opts: MossImageEditOptions = {},
