@@ -359,6 +359,18 @@ export function buildChannelNote(channel: ProactiveChannel, lifeDescription = ""
 }
 
 /** 供 /why 与日志渲染 */
+/**
+ * 到点的「主动计划」是否允许绕过 decideProactive 的 skip。
+ *
+ * v0.8.14 原本允许计划由头绕过所有 skip，是为了避免「明确想说的话被随机概率吞掉」；
+ * 但真机 2026-10-28 发现它会连「已经主动 N 条没被回」「今日上限」「间隔/免打扰/对方刚说完」
+ * 这类硬治理一起绕过，导致用户不回时同一话题连续追发。
+ * 因此只保留概率性 skip 可绕过；所有硬性治理一律生效。
+ */
+export function canPlannedTopicBypassSkip(decision: ProactiveDecision): boolean {
+  return decision.action === "skip" && decision.reason === "probability_miss";
+}
+
 export function formatProactiveDecision(d: ProactiveDecision): string {
   return d.action === "send"
     ? `发送 · ${CHANNEL_LABEL[d.channel]}`

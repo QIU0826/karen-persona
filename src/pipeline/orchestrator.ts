@@ -157,6 +157,7 @@ import {
   CHANNEL_LABEL,
   DEFAULT_PROACTIVE_CHANNELS,
   buildChannelNote,
+  canPlannedTopicBypassSkip,
   decideProactive,
   formatProactiveDecision,
   type ProactiveChannel,
@@ -349,6 +350,8 @@ export interface ConversationState {
   lastProactiveSentAt: number;
   /** 当天主动消息计数 */
   proactiveCountToday: number;
+  /** 对方上次回话后，她已经主动发过几条还没被回（持久化，重启不清零） */
+  proactiveSinceReply: number;
   /** 主动消息计数所属日期（YYYY-MM-DD，本地时区） */
   proactiveDay: string;
   /** M1-2: 关系状态（亲密度/事件/里程碑），持久化于 persona-state */
@@ -568,6 +571,7 @@ export async function initConversation(
     weatherFetchedAt,
     lastProactiveSentAt: counters?.lastProactiveSentAt ?? 0,
     proactiveCountToday: counters?.proactiveCountToday ?? 0,
+    proactiveSinceReply: counters?.proactiveSinceReply ?? 0,
     proactiveDay: counters?.proactiveDay ?? "",
     relationshipState,
     lastGate: persisted?.lastGate ?? null,
@@ -897,6 +901,7 @@ export function persistRuntimeState(state: ConversationState): void {
         consecutiveSilences: state.consecutiveSilences,
         lastProactiveSentAt: state.lastProactiveSentAt,
         proactiveCountToday: state.proactiveCountToday,
+        proactiveSinceReply: state.proactiveSinceReply,
         proactiveDay: state.proactiveDay,
         lastHeartbeatAt: state.lastHeartbeatAt,
         lastTrendingInject: state.lastTrendingInject,
@@ -3151,10 +3156,19 @@ export async function processProactive(
     : null;
   const window = proactiveWindowFor(state.owner);
   const { lastUserAt, lastHerAt } = lastMessageTimes(session);
-  // 对方来新消息 → "连推"计数清零
-  if (lastUserAt !== null && (window.lastUserAtSeen === null || lastUserAt > window.lastUserAtSeen)) {
-    window.lastUserAtSeen = lastUserAt;
-    window.sentSinceUserReply = 0;
+  // 对方来新消息 → "连推"计数清零（持久化计数也清零，避免重启后重新开始追发）
+  if (lastUserAt !== null) {
+    if (window.lastUserAtSeen === null) {
+      // 进程重启后第一次评估：不清零持久化计数；只有确认用户是在上次主动之后回复的才清零
+      window.lastUserAtSeen = lastUserAt;
+      if (state.lastProactiveSentAt > 0 && lastUserAt > state.lastProactiveSentAt) {
+        state.proactiveSinceReply = 0;
+      }
+    } else if (lastUserAt > window.lastUserAtSeen) {
+      window.lastUserAtSeen = lastUserAt;
+      window.sentSinceUserReply = 0;
+      state.proactiveSinceReply = 0;
+    }
   }
   const decision = decideProactive({
     now: now.getTime(),
@@ -3171,7 +3185,7 @@ export async function processProactive(
     silenceReviveSent: silenceState.restartSent,
     hasLifeCandidate: lifeTop !== null,
     lifePriority: lifeTop?.priority ?? 0,
-    unansweredProactive: window.sentSinceUserReply,
+    unansweredProactive: Math.max(window.sentSinceUserReply, state.proactiveSinceReply),
     paused: state.proactivePaused,
     channels: resolveProactiveChannels(config),
   });
@@ -3185,7 +3199,12 @@ export async function processProactive(
     return { sent: false, logs, decision };
   }
   if (decision.action === "skip" && planCandidate) {
-    logs.push(`[主动] 计划由头优先：忽略链路判定（${decision.detail}）`);
+    // 只允许计划绕过「概率没中」；硬治理（未回连推/日上限/间隔/免打扰/对方刚说完）不允许绕过。
+    if (!canPlannedTopicBypassSkip(decision)) {
+      logs.push(`[主动] 计划由头被硬性治理拦截（${decision.reason}）：${decision.detail}`);
+      return { sent: false, logs, decision };
+    }
+    logs.push(`[主动] 计划由头优先：忽略概率判定（${decision.detail}）`);
   }
 
   // 统一成"触发候选"形状，下游（日志/门控/生成/渲染）继续复用
@@ -3372,6 +3391,7 @@ export async function processProactive(
   state.lastProactiveSentAt = now.getTime();
   state.proactiveCountToday += 1;
   window.sentSinceUserReply += 1;
+  state.proactiveSinceReply = Math.max(state.proactiveSinceReply, window.sentSinceUserReply);
   // v0.8：计划的由头用完标记（当天不再重复）+ 记一条主动统计（供回复率校准）
   try {
     if (planItem) {

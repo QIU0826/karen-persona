@@ -38,6 +38,7 @@ export interface PersistedCounters {
   consecutiveSilences: number;
   lastProactiveSentAt: number;
   proactiveCountToday: number;
+  proactiveSinceReply: number;
   proactiveDay: string;
   lastHeartbeatAt: number;
   lastTrendingInject: number;
@@ -116,6 +117,7 @@ export function createPersistedPersonaState(personaId: string, initialCloseness 
       consecutiveSilences: 0,
       lastProactiveSentAt: 0,
       proactiveCountToday: 0,
+      proactiveSinceReply: 0,
       proactiveDay: "",
       lastHeartbeatAt: 0,
       lastTrendingInject: 0,
@@ -212,6 +214,7 @@ function normalize(raw: unknown, personaId: string, initialCloseness: number): P
     consecutiveSilences: Math.max(0, num(countersRaw.consecutiveSilences, 0)),
     lastProactiveSentAt: num(countersRaw.lastProactiveSentAt, 0),
     proactiveCountToday: Math.max(0, num(countersRaw.proactiveCountToday, 0)),
+    proactiveSinceReply: Math.max(0, num(countersRaw.proactiveSinceReply, 0)),
     proactiveDay: str(countersRaw.proactiveDay, "") ?? "",
     lastHeartbeatAt: num(countersRaw.lastHeartbeatAt, 0),
     lastTrendingInject: num(countersRaw.lastTrendingInject, 0),

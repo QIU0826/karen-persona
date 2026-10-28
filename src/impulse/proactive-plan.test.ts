@@ -7,6 +7,7 @@ import {
   FOLLOW_UP_MIN_MS,
   OPEN_TOPIC_MIN_MS,
   buildChannelNote,
+  canPlannedTopicBypassSkip,
   decideProactive,
   formatProactiveDecision,
   type ProactiveChannels,
@@ -304,5 +305,24 @@ describe("buildChannelNote：说话姿态", () => {
   it("生活流：带上具体事件", () => {
     expect(buildChannelNote("life_share", "外面下雪了")).toContain("外面下雪了");
     expect(buildChannelNote("life_share")).toContain("想到对方");
+  });
+});
+
+
+describe("canPlannedTopicBypassSkip：计划只绕过概率，不绕过硬治理", () => {
+  it("只有 probability_miss 允许计划由头绕过", () => {
+    expect(
+      canPlannedTopicBypassSkip({ action: "skip", reason: "probability_miss", detail: "" }),
+    ).toBe(true);
+  });
+
+  it("unanswered_wait / daily_cap / min_gap / paused / in_conversation 都不允许绕过", () => {
+    for (const reason of ["unanswered_wait", "daily_cap", "min_gap", "paused", "in_conversation"] as const) {
+      expect(
+        canPlannedTopicBypassSkip({ action: "skip", reason, detail: "" }),
+        reason,
+      ).toBe(false);
+    }
+    expect(canPlannedTopicBypassSkip({ action: "send", channel: "life_share", detail: "" })).toBe(false);
   });
 });
