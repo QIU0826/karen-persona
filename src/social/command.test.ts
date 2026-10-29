@@ -43,6 +43,7 @@ function deps(over: Partial<SocialCommandDeps> = {}): SocialCommandDeps {
     approve: vi.fn(async () => ({ ok: true, action: action({ status: "sent" }), result: { ok: true, platform: "bilibili" as const, action: "comment" as const, externalId: "rpid1" }, reason: "已发送" })),
     reject: vi.fn(() => ({ ok: true, reason: "已拒绝" })),
     undo: vi.fn(async () => ({ ok: true, action: action({ status: "undone" }), reason: "已撤销" })),
+    postDynamic: vi.fn(async () => ({ ok: true, action: action({ action: "dynamic", status: "sent" }), result: { ok: true, platform: "bilibili" as const, action: "dynamic" as const, externalId: "dyn1" }, reason: "已发送" })),
     pending: vi.fn(() => [action()]),
     runTick: vi.fn(async () => ({
       ran: true, mode: "approve" as const, reason: "等待主人审批", dryRun: true, logs: ["policy=approval_required"],
@@ -85,6 +86,14 @@ describe("social command", () => {
     expect(await handleSocialCommand("/social reject 7", d)).toContain("已拒绝");
     expect(await handleSocialCommand("/social undo 7", d)).toContain("已撤销");
     expect(await handleSocialCommand("/social approve x", d)).toContain("用法");
+  });
+
+  it("/social post 发手动动态", async () => {
+    const d = deps();
+    const text = await handleSocialCommand("/social post 今天店里很安静", d);
+    expect(text).toContain("已发送");
+    expect(text).toContain("dyn1");
+    expect(d.postDynamic).toHaveBeenCalledWith("今天店里很安静");
   });
 
   it("run 返回 tick 结果", async () => {

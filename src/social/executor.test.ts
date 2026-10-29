@@ -63,6 +63,16 @@ describe("social executor", () => {
     expect(a.deleteComment).toHaveBeenCalledOnce();
   });
 
+  it("手动发动态走安全校验/审计", async () => {
+    const { postDynamicManual } = await import("./executor.js");
+    const a = auth({ postDynamic: vi.fn(async () => ({ ok: true, platform: "bilibili" as const, action: "dynamic" as const, externalId: "dyn-1", undoable: true })) });
+    const out = await postDynamicManual("今天店里很安静", config, { auth: a, owner: "qq:1" });
+    expect(out.ok).toBe(true);
+    expect(out.action?.status).toBe("sent");
+    expect(out.action?.action).toBe("dynamic");
+    expect(a.postDynamic).toHaveBeenCalledWith("今天店里很安静");
+  });
+
   it("风控失败写 failed 并开 circuit", async () => {
     const store = await import("./store.js");
     const { approveAndExecuteAction } = await import("./executor.js");

@@ -51,9 +51,10 @@ src/social/
 - `src/social/store.ts`：动作状态机、审批 TTL、审计、预算、同目标去重、fingerprint（不存 Cookie）；
 - `src/social/policy.ts` / `safety.ts`：硬上限、静默、风控冷却、审批、13 类内容安全、注入、评论相关性；
 - `src/social/runner.ts`：一次 tick 一个动作；observe/approve/auto；
-- `/social` 命令：status/on/off/mode/pending/approve/reject/undo/run；
+- `/social` 命令：status/on/off/mode/pending/approve/reject/undo/run/post；
+- 聊天 prompt 注入「她最近在网上」≤200 字（评论/动态，不泄露私聊）；
 - bridge 心跳接入：只有显式 `KAREN_SOCIAL` 或 `/social on` 才跑，默认不自动动；
-- 测试：全仓 164 文件 / 1878 用例通过；写客户端 48 例、policy/safety 90 例、store 19 例；
+- 测试：全仓 164 文件 / 1880 用例通过；写客户端 48 例、policy/safety 90 例、store 19 例；
 - 只读冒烟：`npm run social:smoke`（校验 Cookie/登录/读流/草稿安全，不写）。
 
 ## 上线顺序

@@ -134,6 +134,8 @@ import {
   rankBilibiliForPersona,
   takeDailyDigestItems,
 } from "../world/bilibili.js";
+import { buildSocialContext } from "../social/context.js";
+import { listRecent } from "../social/store.js";
 import { deriveStance } from "../world/stance.js";
 import { perceiveTime, buildMomentTag } from "../world/time-awareness.js";
 import { renderExpression } from "../impulse/renderer.js";
@@ -421,6 +423,15 @@ function buildTurnMediaContext(
 
 /** 每个 owner 上次注入「她今天刷到的」的时间（进程内即可，重启最多再提一次） */
 const lastBilibiliInjectAt = new Map<string, number>();
+/** 她最近发过的 B 站评论/动态，压成 ≤200 字；失败静默。 */
+function buildSocialActivityContext(owner: string): string {
+  try {
+    return buildSocialContext(listRecent({ limit: 5, owner }));
+  } catch {
+    return "";
+  }
+}
+
 /** 两次「她刷到的」注入的最小间隔（缓存 TTL 30–60 分钟 + 注入节奏，避免每轮都提） */
 const BILIBILI_INJECT_MIN_GAP_MS = 90 * 60 * 1000;
 /** 单次最多注入几条（每日总量由 KAREN_BILIBILI_DAILY_MAX 控制） */
@@ -2034,6 +2045,9 @@ export async function processMessage(
   ];
   const bilibiliContext = await buildBilibiliContext(state.owner, userInput, biliKeywords, (line) => logs.push(line));
 
+  // 她最近自己在网上的动作（B 站评论/动态）；没有则空
+  const socialContext = buildSocialActivityContext(state.owner);
+
   // 结构化标签 + 风格参考 + RAG + 热点作为额外上下文
   const conflictNote = buildConflictNote(state);
   const crisisNote = crisis ? crisisSafetyNote() : "";
@@ -2052,6 +2066,7 @@ export async function processMessage(
     systemPrompt +
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
     bilibiliContext +
+    socialContext +
     conflictNote +
     crisisNote +
     t1ArcContext +
@@ -2540,6 +2555,9 @@ export async function* processMessageStream(
   ];
   const bilibiliContext = await buildBilibiliContext(state.owner, userInput, streamBiliKeywords, (line) => console.log(`  ${line}`));
 
+  // 她最近自己在网上的动作（与非流式对齐）
+  const socialContext = buildSocialActivityContext(state.owner);
+
   const memories = await retrieveWithLlmBoost(userInput, 8, {
     onLog: (line) => console.log(`  ${line}`),
   });
@@ -2569,6 +2587,7 @@ export async function* processMessageStream(
     systemPrompt +
     narrationContext(styleContext, trendingContext, interruptedNote, narrativeInject) +
     bilibiliContext +
+    socialContext +
     buildConflictNote(state) +
     (crisis ? crisisSafetyNote() : "") +
     t1ArcContext +

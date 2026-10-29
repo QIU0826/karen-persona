@@ -17,6 +17,7 @@ export interface SocialCommandDeps {
   approve(id: number): Promise<ExecuteSocialOutcome>;
   reject(id: number): { ok: boolean; reason: string };
   undo(id: number): Promise<ExecuteSocialOutcome>;
+  postDynamic?(content: string): Promise<ExecuteSocialOutcome>;
   pending?(limit?: number): SocialActionRecord[];
   runTick?(): Promise<SocialTickResult>;
   now?: number;
@@ -102,6 +103,7 @@ function helpText(): string {
     "/social approve <id> / reject <id> — 审批",
     "/social undo <id> — 撤销已发评论/动态（平台支持时）",
     "/social run — 手动跑一次自主 tick（仍受预算/安全/模式约束）",
+    "/social post <正文> — 手动发一条动态（主人显式命令，仍过安全闸门；dry-run 下只预览）",
   ].join("\n");
 }
 
@@ -151,6 +153,13 @@ export async function handleSocialCommand(text: string, deps: SocialCommandDeps)
     }
     const out = await deps.undo(id);
     return out.reason;
+  }
+  if (cmd === "post") {
+    if (!deps.postDynamic) return "当前没有接入手动发动态。";
+    const content = rest.replace(/^post\s*/i, "").trim();
+    if (!content) return "用法：/social post <动态正文>";
+    const out = await deps.postDynamic(content);
+    return `${out.reason}${out.result?.externalId ? `（外部 id：${out.result.externalId}）` : ""}`;
   }
   if (cmd === "run") {
     if (!deps.runTick) return "当前没有接入自主 tick。";

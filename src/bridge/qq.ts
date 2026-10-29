@@ -86,7 +86,7 @@ import { publishQzonePost, isQzoneEnabled } from "../qzone/qzone.js";
 import { handleSocialCommand } from "../social/command.js";
 import { effectiveSocialConfig, loadSocialRuntime, setSocialModeOverride } from "../social/runtime.js";
 import { runSocialTick } from "../social/runner.js";
-import { approveAndExecuteAction, undoSocialAction } from "../social/executor.js";
+import { approveAndExecuteAction, postDynamicManual, undoSocialAction } from "../social/executor.js";
 import { listPending, rejectAction } from "../social/store.js";
 import { maybeAutoPublishQzone, localDateKey, type QzoneAutoState } from "../qzone/qzone-auto.js";
 import { dataFile } from "../data/paths.js";
@@ -2473,6 +2473,7 @@ async function handlePrivateBatch(
             }
           },
           undo: (id) => undoSocialAction(id, effectiveSocialConfig()),
+          postDynamic: (content) => postDynamicManual(content, effectiveSocialConfig(), { owner: state.owner }),
           pending: (limit) => listPending({ limit: limit ?? 20 }),
           runTick: () => runSocialTick(state, { config: effectiveSocialConfig() }),
         });

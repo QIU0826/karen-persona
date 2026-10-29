@@ -4,7 +4,9 @@
  */
 import { createBilibiliAuthClient, type BilibiliAuthClient } from "./bilibili-auth.js";
 import { openCircuit } from "./runtime.js";
+import { validateSocialContent as validateSocialContentBase, SOCIAL_DYNAMIC_MAX_CHARS } from "./safety.js";
 import {
+  createDraft,
   approveAction,
   getAction,
   markFailed,
@@ -16,6 +18,8 @@ import type { SocialActionResult, SocialActionRecord, SocialConfig } from "./typ
 export interface ExecuteSocialOptions {
   auth?: BilibiliAuthClient;
   nowMs?: number;
+  /** 手动动作的 owner（审计用） */
+  owner?: string;
 }
 
 export interface ExecuteSocialOutcome {
@@ -121,4 +125,36 @@ export async function undoSocialAction(
   if (!result.ok) return { ok: false, action, result, reason: `撤销失败：${result.errorCode ?? "unknown"}` };
   const undone = markUndone(action.id, { actor: "owner", note: "undo" });
   return { ok: true, action: undone, result, reason: "已撤销" };
+}
+
+function validateSocialContentForDynamic(content: string) {
+  return validateSocialContentBase(content, {
+    maxChars: SOCIAL_DYNAMIC_MAX_CHARS,
+    maxLinks: 0,
+    maxHashtags: 0,
+    maxMentions: 0,
+  });
+}
+
+/** 手动发一条动态（主人显式命令）：仍走安全校验与审计；不占自动审批队列。 */
+export async function postDynamicManual(
+  content: string,
+  config: SocialConfig,
+  options: ExecuteSocialOptions = {},
+): Promise<ExecuteSocialOutcome> {
+  if (config.mode === "off") return { ok: false, action: null, reason: "社交总开关 off" };
+  const validation = validateSocialContentForDynamic(content);
+  if (!validation.ok) return { ok: false, action: null, reason: `内容不合规：${[...validation.problems, ...validation.categories].join(", ")}` };
+  const created = createDraft(
+    {
+      platform: "bilibili",
+      action: "dynamic",
+      target: { platform: "bilibili", targetType: "none", targetId: "" },
+      content: validation.sanitized,
+      reason: "owner manual /social post",
+      risk: "medium",
+    },
+    { owner: options.owner ?? "owner", skipDedupe: true },
+  );
+  return approveAndExecuteAction(created.action.id, config, options);
 }
