@@ -53,7 +53,8 @@ src/social/
 - `src/social/runner.ts`：一次 tick 一个动作；observe/approve/auto；
 - `/social` 命令：status/on/off/mode/pending/approve/reject/undo/run；
 - bridge 心跳接入：只有显式 `KAREN_SOCIAL` 或 `/social on` 才跑，默认不自动动；
-- 测试：全仓 164 文件 / 1878 用例通过；写客户端 48 例、policy/safety 90 例、store 19 例。
+- 测试：全仓 164 文件 / 1878 用例通过；写客户端 48 例、policy/safety 90 例、store 19 例；
+- 只读冒烟：`npm run social:smoke`（校验 Cookie/登录/读流/草稿安全，不写）。
 
 ## 上线顺序
 
