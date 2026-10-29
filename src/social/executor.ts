@@ -4,7 +4,12 @@
  */
 import { createBilibiliAuthClient, type BilibiliAuthClient } from "./bilibili-auth.js";
 import { openCircuit } from "./runtime.js";
-import { validateSocialContent as validateSocialContentBase, SOCIAL_DYNAMIC_MAX_CHARS } from "./safety.js";
+import {
+  validateSocialContent as validateSocialContentBase,
+  SOCIAL_COMMENT_MAX_CHARS,
+  SOCIAL_DYNAMIC_MAX_CHARS,
+} from "./safety.js";
+import { fetchBilibiliVideoDetail } from "../world/bilibili.js";
 import {
   createDraft,
   approveAction,
@@ -134,6 +139,46 @@ function validateSocialContentForDynamic(content: string) {
     maxHashtags: 0,
     maxMentions: 0,
   });
+}
+
+/** 手动评论一条视频（主人显式命令）：先解析视频 -> 安全校验 -> 审计 -> 执行。 */
+export async function postCommentManual(
+  ref: string,
+  content: string,
+  config: SocialConfig,
+  options: ExecuteSocialOptions = {},
+): Promise<ExecuteSocialOutcome> {
+  if (config.mode === "off") return { ok: false, action: null, reason: "社交总开关 off" };
+  const video = await fetchBilibiliVideoDetail(ref);
+  if (!video) return { ok: false, action: null, reason: `找不到视频：${ref}` };
+  const validation = validateSocialContentBase(content, {
+    maxChars: SOCIAL_COMMENT_MAX_CHARS,
+    maxLinks: 0,
+    maxHashtags: 0,
+    maxMentions: 0,
+  });
+  if (!validation.ok) {
+    return { ok: false, action: null, reason: `内容不合规：${[...validation.problems, ...validation.categories].join(", ")}` };
+  }
+  const created = createDraft(
+    {
+      platform: "bilibili",
+      action: "comment",
+      target: {
+        platform: "bilibili",
+        targetType: "video",
+        targetId: video.bvid,
+        title: video.title,
+        url: video.url,
+        aid: video.aid,
+      },
+      content: validation.sanitized,
+      reason: "owner manual /social comment",
+      risk: "medium",
+    },
+    { owner: options.owner ?? "owner", skipDedupe: true },
+  );
+  return approveAndExecuteAction(created.action.id, config, options);
 }
 
 /** 手动发一条动态（主人显式命令）：仍走安全校验与审计；不占自动审批队列。 */

@@ -18,6 +18,7 @@ export interface SocialCommandDeps {
   reject(id: number): { ok: boolean; reason: string };
   undo(id: number): Promise<ExecuteSocialOutcome>;
   postDynamic?(content: string): Promise<ExecuteSocialOutcome>;
+  comment?(ref: string, content: string): Promise<ExecuteSocialOutcome>;
   pending?(limit?: number): SocialActionRecord[];
   runTick?(): Promise<SocialTickResult>;
   now?: number;
@@ -104,6 +105,7 @@ function helpText(): string {
     "/social undo <id> — 撤销已发评论/动态（平台支持时）",
     "/social run — 手动跑一次自主 tick（仍受预算/安全/模式约束）",
     "/social post <正文> — 手动发一条动态（主人显式命令，仍过安全闸门；dry-run 下只预览）",
+    "/social comment <BV/av> <正文> — 手动评论（先解析视频；同样过安全闸门）",
   ].join("\n");
 }
 
@@ -153,6 +155,15 @@ export async function handleSocialCommand(text: string, deps: SocialCommandDeps)
     }
     const out = await deps.undo(id);
     return out.reason;
+  }
+  if (cmd === "comment") {
+    if (!deps.comment) return "当前没有接入手动评论。";
+    const commentRest = rest.replace(/^comment\s*/i, "").trim();
+    const [ref, ...contentParts] = commentRest.split(/\s+/);
+    const content = contentParts.join(" ").trim();
+    if (!ref || !content) return "用法：/social comment <BV/av> <评论正文>";
+    const out = await deps.comment(ref, content);
+    return `${out.reason}${out.result?.externalId ? `（外部 id：${out.result.externalId}）` : ""}`;
   }
   if (cmd === "post") {
     if (!deps.postDynamic) return "当前没有接入手动发动态。";

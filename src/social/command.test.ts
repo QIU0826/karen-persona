@@ -44,6 +44,7 @@ function deps(over: Partial<SocialCommandDeps> = {}): SocialCommandDeps {
     reject: vi.fn(() => ({ ok: true, reason: "已拒绝" })),
     undo: vi.fn(async () => ({ ok: true, action: action({ status: "undone" }), reason: "已撤销" })),
     postDynamic: vi.fn(async () => ({ ok: true, action: action({ action: "dynamic", status: "sent" }), result: { ok: true, platform: "bilibili" as const, action: "dynamic" as const, externalId: "dyn1" }, reason: "已发送" })),
+    comment: vi.fn(async () => ({ ok: true, action: action({ status: "sent" }), result: { ok: true, platform: "bilibili" as const, action: "comment" as const, externalId: "rpid2" }, reason: "已发送" })),
     pending: vi.fn(() => [action()]),
     runTick: vi.fn(async () => ({
       ran: true, mode: "approve" as const, reason: "等待主人审批", dryRun: true, logs: ["policy=approval_required"],
@@ -94,6 +95,13 @@ describe("social command", () => {
     expect(text).toContain("已发送");
     expect(text).toContain("dyn1");
     expect(d.postDynamic).toHaveBeenCalledWith("今天店里很安静");
+  });
+
+  it("/social comment 解析 BV 与正文", async () => {
+    const d = deps();
+    const text = await handleSocialCommand("/social comment BV1xx 这个镜头真好看", d);
+    expect(text).toContain("已发送");
+    expect(d.comment).toHaveBeenCalledWith("BV1xx", "这个镜头真好看");
   });
 
   it("run 返回 tick 结果", async () => {

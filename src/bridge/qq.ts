@@ -86,8 +86,9 @@ import { publishQzonePost, isQzoneEnabled } from "../qzone/qzone.js";
 import { handleSocialCommand } from "../social/command.js";
 import { effectiveSocialConfig, loadSocialRuntime, setSocialModeOverride } from "../social/runtime.js";
 import { runSocialTick } from "../social/runner.js";
-import { approveAndExecuteAction, postDynamicManual, undoSocialAction } from "../social/executor.js";
+import { approveAndExecuteAction, postCommentManual, postDynamicManual, undoSocialAction } from "../social/executor.js";
 import { listPending, rejectAction } from "../social/store.js";
+import { loadAndVerifyBilibiliLogin } from "../social/credentials.js";
 import { maybeAutoPublishQzone, localDateKey, type QzoneAutoState } from "../qzone/qzone-auto.js";
 import { dataFile } from "../data/paths.js";
 import { buildFirstContactDisclosure, shouldSendDisclosure } from "../persona/disclosure.js";
@@ -2459,9 +2460,19 @@ async function handlePrivateBatch(
       social: async (commandText) => {
         const runtime = loadSocialRuntime();
         const config = effectiveSocialConfig(process.env, runtime);
+        const loaded = await loadAndVerifyBilibiliLogin({ cookieFile: config.cookieFile });
+        const account = loaded.login
+          ? {
+              loggedIn: loaded.login.loggedIn,
+              ...(loaded.login.uid !== undefined ? { uid: loaded.login.uid } : {}),
+              ...(loaded.login.uname !== undefined ? { uname: loaded.login.uname } : {}),
+              fingerprint: loaded.login.fingerprint,
+            }
+          : null;
         return handleSocialCommand(commandText, {
           config,
           runtime,
+          account,
           setMode: (mode) => setSocialModeOverride(mode),
           approve: (id) => approveAndExecuteAction(id, effectiveSocialConfig()),
           reject: (id) => {
@@ -2474,6 +2485,7 @@ async function handlePrivateBatch(
           },
           undo: (id) => undoSocialAction(id, effectiveSocialConfig()),
           postDynamic: (content) => postDynamicManual(content, effectiveSocialConfig(), { owner: state.owner }),
+          comment: (ref, content) => postCommentManual(ref, content, effectiveSocialConfig(), { owner: state.owner }),
           pending: (limit) => listPending({ limit: limit ?? 20 }),
           runTick: () => runSocialTick(state, { config: effectiveSocialConfig() }),
         });
