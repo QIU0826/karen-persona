@@ -55,8 +55,10 @@ src/social/
 - 状态里显示 B 站登录账号（nav 校验）；手动 post/comment 仍过内容安全与审计；
 - 聊天 prompt 注入「她最近在网上」≤200 字（评论/动态，不泄露私聊）；
 - bridge 心跳接入：只有显式 `KAREN_SOCIAL` 或 `/social on` 才跑，默认不自动动；
-- 测试：全仓 164 文件 / 1881 用例通过；写客户端 48 例、policy/safety 90 例、store 19 例；
-- 只读冒烟：`npm run social:smoke`（校验 Cookie/登录/读流/草稿安全，不写）。
+- 测试：全仓 164 文件 / 1882 用例通过；写客户端 48 例、policy/safety 90 例、store 19 例；
+- 只读冒烟：`npm run social:smoke`（校验 Cookie/登录/读流/草稿安全，不写）；
+- 真号 SPIKE：`npm run social:spike`（默认 dry-run；真写需 `--confirm` + `KAREN_SOCIAL_SPIKE=1`，只在小号用）；
+- runner 兜底：没有评论/动态草稿时，可对感兴趣视频自动点赞（受 likes 预算）。
 
 ## 上线顺序
 

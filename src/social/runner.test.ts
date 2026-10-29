@@ -71,6 +71,7 @@ function auth(overrides: Partial<BilibiliAuthClient> = {}): BilibiliAuthClient {
     dryRun: true,
     verifyLogin: vi.fn(async () => ({ ok: true, loggedIn: true, fingerprint: "abcdef123456" })),
     comment: vi.fn(async () => ({ ok: true, platform: "bilibili", action: "comment", externalId: "rpid-1", undoable: true })),
+    like: vi.fn(async () => ({ ok: true, platform: "bilibili", action: "like", undoable: false })),
     postDynamic: vi.fn(async () => ({ ok: true, platform: "bilibili", action: "dynamic", externalId: "dyn-1", undoable: true })),
     ...overrides,
   } as unknown as BilibiliAuthClient;
@@ -142,10 +143,24 @@ describe("runSocialTick", () => {
     expect(a.comment).toHaveBeenCalledOnce();
   });
 
-  it("没有安全草稿时不动作", async () => {
+  it("没有评论/动态草稿时可兜底点赞", async () => {
     const { runSocialTick } = await import("./runner.js");
+    const a = auth();
     const r = await runSocialTick(state(), {
-      config: config("auto"), auth: auth(), digest, now: NOW,
+      config: config("auto"), auth: a, digest, now: NOW,
+      generateComment: async () => null,
+      generateDynamic: async () => null,
+    });
+    expect(r.sent?.action).toBe("like");
+    expect(a.like).toHaveBeenCalledOnce();
+  });
+
+  it("没有安全草稿且点赞预算为 0 时不动作", async () => {
+    const { runSocialTick } = await import("./runner.js");
+    const c = config("auto");
+    c.caps.likesPerDay = 0;
+    const r = await runSocialTick(state(), {
+      config: c, auth: auth(), digest, now: NOW,
       generateComment: async () => null,
       generateDynamic: async () => null,
     });

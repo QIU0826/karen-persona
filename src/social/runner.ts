@@ -225,6 +225,18 @@ export async function runSocialTick(state: ConversationState, deps: SocialTickDe
       draft = asDraft("dynamic", { platform: "bilibili", targetType: "none", targetId: "" }, generated, "今天的生活小事");
     } else logs.push("dynamic_draft_rejected");
   }
+  // 兜底：评论/动态都写不出来时，可以给一个真正喜欢的视频点个赞（不需要 LLM）。
+  if (!draft && candidate && countActionsToday("bilibili", "like", day) < config.caps.likesPerDay) {
+    draft = {
+      platform: "bilibili",
+      action: "like",
+      target: buildCommentTarget(candidate),
+      content: "",
+      reason: "刷到感兴趣的视频",
+      risk: "low",
+    };
+    logs.push("fallback_like");
+  }
   if (!draft) return { ...base, ran: true, reason: "没有可发的安全草稿" };
 
   // observe：安全草稿照常落库，但不进入预算/审批/执行。
