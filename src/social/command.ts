@@ -196,7 +196,7 @@ export async function handleSocialCommand(text: string, deps: SocialCommandDeps)
     return `${out.reason}${out.result?.externalId ? `（外部 id：${out.result.externalId}）` : ""}`;
   }
   if (cmd === "run") {
-    if (!deps.runTick) return "当前没有接入自主 tick。";
+    if (!deps.runTick) return "当前自动动态由 KAREN_QZONE_AUTO 控制（每日最多 1 条）；手动发用 /qzone 或 /social post。";
     const result = await deps.runTick();
     const action = result.pending ?? result.sent ?? result.action;
     return [

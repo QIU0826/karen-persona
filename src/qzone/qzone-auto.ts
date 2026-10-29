@@ -8,6 +8,7 @@ import { createLogger } from "../obs/logger.js";
 import { chat } from "../ai/chat.js";
 import { getTrendingTopicsAsync } from "../world/trending-fetcher.js";
 import { getBilibiliDigest } from "../world/bilibili.js";
+import { validateSocialContent } from "../social/safety.js";
 import type { ConversationState } from "../pipeline/orchestrator.js";
 import { publishQzonePost } from "./qzone.js";
 import { stripOutboundMediaMarkers } from "../persona/outbound-markers.js";
@@ -215,6 +216,20 @@ export async function maybeAutoPublishQzone(
   const candidates = listQzonePhotoCandidates(5);
   const draft = await generateQzoneDraft(state, topicTitle, candidates);
   if (!draft) return { posted: false, state: qzoneState, reason: "no_draft" };
+  const safety = validateSocialContent(draft.content, {
+    maxChars: 120,
+    maxLinks: 0,
+    maxHashtags: 0,
+    maxMentions: 0,
+  });
+  if (!safety.ok) {
+    log.warn("qzone.auto_safety_rejected", {
+      problems: safety.problems.join(","),
+      categories: safety.categories.join(","),
+    });
+    return { posted: false, state: qzoneState, reason: "unsafe_content" };
+  }
+  draft.content = safety.sanitized;
 
   let images: string[] | undefined;
   if (draft.photoPath) {

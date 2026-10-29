@@ -56,8 +56,10 @@ src/social/
 ## 已落地（2026-10-29）
 
 - Qzone 自动动态优先从 B 站热门取生活/娱乐题（`pickQzoneTopicFromBilibili`），失败回退热榜；
+- Qzone 草稿发布前再过一遍 `social/safety` 内容安全（和 B 站写同一套红线）；
 - Qzone 自动/手动发布写入 `social_actions` 审计；`/social post` 改走 Qzone；
 - 自动 Qzone 受 `/social off` 控制（runtime override off 时停）；
+- Qzone 自动每日最多 1 条（`shouldAttemptAutoPost` 硬限制），UGC right=64（仅自己可见）可显式改 1；
 - 用户选定范围：**不接 B 站写接口、不需要 B 站 Cookie**。
 
 - `src/social/bilibili-auth.ts`：Cookie+CSRF 写客户端（评论/动态/点赞/收藏/关注/转发/删除），dry-run 默认开；
