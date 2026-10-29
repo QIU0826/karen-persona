@@ -13,6 +13,10 @@ export interface SocialCommandDeps {
   runtime?: SocialRuntimeState;
   /** 当前账号（只读展示；不传则显示未连接） */
   account?: { loggedIn: boolean; uid?: number; uname?: string; fingerprint?: string } | null;
+  /** 当前平台范围说明（例如「QQ空间动态 + B站只读」） */
+  scopeNote?: string;
+  /** 当前范围下 Qzone 自动动态是否开启（仅展示） */
+  qzoneAutoEnabled?: boolean;
   setMode(mode: SocialMode): SocialConfig;
   approve(id: number): Promise<ExecuteSocialOutcome>;
   reject(id: number): { ok: boolean; reason: string };
@@ -65,16 +69,24 @@ export function buildSocialStatus(deps: SocialCommandDeps): string {
   const pending = deps.pending ? deps.pending(20) : listPending({ limit: 20, nowMs: now });
   const lines: string[] = ["【她的网上生活】"];
   lines.push(`模式：${modeText(deps.config.mode)}`);
+  if (deps.scopeNote) lines.push(`平台：${deps.scopeNote}`);
   lines.push(`Dry-run：${deps.config.dryRun ? "开（只预览，不真实写）" : "关（会真实发）"}`);
   if (deps.account) {
     lines.push(deps.account.loggedIn
       ? `账号：已登录${deps.account.uname ? ` @${deps.account.uname}` : ""}${deps.account.uid ? `（uid ${deps.account.uid}）` : ""}`
       : "账号：未登录/已失效（只读继续，写操作暂停）");
+  } else if (deps.scopeNote) {
+    lines.push("B 站：只读，不需要/不使用 Cookie");
+    lines.push(`QQ 空间自动动态：${deps.qzoneAutoEnabled ? "开（每日最多 1 条）" : "关（/qzone 仍可手动）"}`);
   } else {
     lines.push("账号：未连接（先配置 B 站 Cookie 才能写）");
   }
   const day = new Date(now).toLocaleDateString("en-CA");
-  lines.push(`今日预算上限：评论 ${deps.config.caps.commentsPerDay} · 动态 ${deps.config.caps.dynamicsPerDay} · 点赞 ${deps.config.caps.likesPerDay} · 总 ${deps.config.caps.totalPerDay}`);
+  if (!deps.scopeNote) {
+    lines.push(`今日预算上限：评论 ${deps.config.caps.commentsPerDay} · 动态 ${deps.config.caps.dynamicsPerDay} · 点赞 ${deps.config.caps.likesPerDay} · 总 ${deps.config.caps.totalPerDay}`);
+  } else {
+    lines.push(`今日审计：待审批 ${pending.length} 条；内容仍受安全护栏约束`);
+  }
   lines.push(`待审批：${pending.length} 条${pending.length ? "（/social pending）" : ""}`);
   if (runtime.circuitOpenUntil && runtime.circuitOpenUntil > now) {
     lines.push(`⚠ 风控冷却到 ${fmtTime(runtime.circuitOpenUntil)}（${runtime.lastError ?? "risk_control"}）`);
@@ -106,8 +118,8 @@ function helpText(): string {
     "/social undo <id> — 撤销已发评论/动态（平台支持时）",
     "/social reset-circuit — 主人复核后清除 24h 风控冷却",
     "/social run — 手动跑一次自主 tick（仍受预算/安全/模式约束）",
-    "/social post <正文> — 手动发一条动态（主人显式命令，仍过安全闸门；dry-run 下只预览）",
-    "/social comment <BV/av> <正文> — 手动评论（先解析视频；同样过安全闸门）",
+    "/social post <正文> — 手动发一条 QQ 空间动态（仍过安全闸门）",
+    "/social comment — B 站只读，不开放评论",
   ].join("\n");
 }
 

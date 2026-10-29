@@ -7,6 +7,7 @@ import fs from "node:fs";
 import { createLogger } from "../obs/logger.js";
 import { chat } from "../ai/chat.js";
 import { getTrendingTopicsAsync } from "../world/trending-fetcher.js";
+import { getBilibiliDigest } from "../world/bilibili.js";
 import type { ConversationState } from "../pipeline/orchestrator.js";
 import { publishQzonePost } from "./qzone.js";
 import { stripOutboundMediaMarkers } from "../persona/outbound-markers.js";
@@ -24,6 +25,11 @@ const QZONE_FRIENDLY_TOPIC_RE =
 
 export function pickQzoneFriendlyTopic<T extends { title: string }>(topics: T[]): T | undefined {
   return topics.find((t) => QZONE_FRIENDLY_TOPIC_RE.test(t.title));
+}
+
+/** B 站只读候选 → 适合她发 QQ 空间的生活/娱乐题；不硬蹭芯片/财经/国际。 */
+export function pickQzoneTopicFromBilibili<T extends { title: string }>(videos: T[]): T | undefined {
+  return videos.find((v) => v.title.trim().length >= 4 && QZONE_FRIENDLY_TOPIC_RE.test(v.title));
 }
 
 function attemptChance(): number {
@@ -176,14 +182,38 @@ export async function maybeAutoPublishQzone(
   state: ConversationState,
   qzoneState: QzoneAutoState,
   now = new Date(),
-): Promise<{ posted: boolean; state: QzoneAutoState; reason?: string }> {
+): Promise<{
+  posted: boolean;
+  state: QzoneAutoState;
+  reason?: string;
+  content?: string;
+  tid?: string;
+  source?: "bilibili" | "trending" | "none";
+}> {
   if (!shouldAttemptAutoPost({ now, lastDate: qzoneState.lastDate, enabled: true })) {
     return { posted: false, state: qzoneState };
   }
-  const topics = await getTrendingTopicsAsync();
-  const topic = pickQzoneFriendlyTopic(topics.filter((t) => t.title.trim().length >= 4));
+  // 先读 B 站热门找生活/娱乐题（只读、失败静默），没有再回退热榜。
+  let topicTitle = "";
+  let topicSource: "bilibili" | "trending" | "none" = "none";
+  try {
+    const digest = await getBilibiliDigest();
+    const biliTopic = digest ? pickQzoneTopicFromBilibili(digest.items) : undefined;
+    if (biliTopic) {
+      topicTitle = biliTopic.title;
+      topicSource = "bilibili";
+    }
+  } catch {
+    // B 站失败不影响 Qzone
+  }
+  if (!topicTitle) {
+    const topics = await getTrendingTopicsAsync();
+    const topic = pickQzoneFriendlyTopic(topics.filter((t) => t.title.trim().length >= 4));
+    topicTitle = topic?.title ?? "";
+    topicSource = topic ? "trending" : "none";
+  }
   const candidates = listQzonePhotoCandidates(5);
-  const draft = await generateQzoneDraft(state, topic?.title ?? "", candidates);
+  const draft = await generateQzoneDraft(state, topicTitle, candidates);
   if (!draft) return { posted: false, state: qzoneState, reason: "no_draft" };
 
   let images: string[] | undefined;
@@ -203,6 +233,7 @@ export async function maybeAutoPublishQzone(
     chars: Array.from(draft.content).length,
     with_photo: Boolean(images),
     tid: result.tid ? "yes" : "no",
+    topic_source: topicSource,
   });
   return {
     posted: true,
@@ -212,5 +243,8 @@ export async function maybeAutoPublishQzone(
       ...(result.tid ? { lastTid: result.tid } : {}),
       ...(draft.photoPath ? { lastPhoto: draft.photoPath.split("/").pop() } : {}),
     },
+    content: draft.content,
+    ...(result.tid ? { tid: result.tid } : {}),
+    source: topicSource,
   };
 }

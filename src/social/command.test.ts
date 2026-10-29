@@ -65,6 +65,13 @@ describe("social command", () => {
     expect(text).toContain("评论 3");
   });
 
+  it("Qzone 范围状态不展示 B 站账号/评论预算", () => {
+    const text = buildSocialStatus(deps({ scopeNote: "QQ空间动态 + B站只读", qzoneAutoEnabled: true, account: null }));
+    expect(text).toContain("B 站");
+    expect(text).toContain("QQ 空间自动动态：开");
+    expect(text).not.toContain("已登录 @小号");
+  });
+
   it("pending 列表含 id/动作/内容预览", () => {
     const text = buildPendingText([action()]);
     expect(text).toContain("#7");

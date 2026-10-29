@@ -5,6 +5,8 @@
 > 测试：`src/social/credentials.test.ts`（22 例）、`src/social/bilibili-auth.test.ts`（26 例），全部 mock fetch。
 > 端点依据：[bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect)（原仓库默认分支已归档为 `deprecated`，
 > 本次抓取 2026-10-29 的社区镜像 [pskdje/bilibili-API-collect](https://github.com/pskdje/bilibili-API-collect) 的 `master` 分支文档）。
+> **当前产品范围（2026-10-29）**：Karen 只读 B 站 + 只发 QQ 空间动态；本文件中的写客户端保留为实验代码，bridge 未接线、不需要 B 站 Cookie、不执行真实写。若以后恢复 B 站写，先按 §4 SPIKE 清单复验。
+>
 > 标注：**文档确认** = 文档给出 URL/方法/参数/返回值；**SPIKE** = 文档不完整/行为需真实 Cookie 验证；**未实测** = 本次没有真实调用。
 
 ---

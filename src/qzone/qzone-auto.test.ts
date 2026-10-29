@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localDateKey, parseQzoneDraftResponse, pickQzoneFriendlyTopic, sanitizeQzoneDraft, shouldAttemptAutoPost } from "./qzone-auto.js";
+import { localDateKey, parseQzoneDraftResponse, pickQzoneFriendlyTopic, pickQzoneTopicFromBilibili, sanitizeQzoneDraft, shouldAttemptAutoPost } from "./qzone-auto.js";
 
 describe("qzone-auto", () => {
   it("每天最多一次、只在 10–22 点尝试", () => {
@@ -33,6 +33,21 @@ describe("Qzone 配图选择", () => {
 
   it("非 JSON 回退为纯文字", () => {
     expect(parseQzoneDraftResponse("今天风很大", candidates)).toEqual({ content: "今天风很大" });
+  });
+});
+
+describe("Qzone 从 B 站取题", () => {
+  it("优先生活/娱乐题，跳过芯片/财经", () => {
+    const topic = pickQzoneTopicFromBilibili([
+      { title: "旗舰手机芯片大横评" },
+      { title: "2026年超搞笑的猫狗日常合集" },
+      { title: "A股大跌" },
+    ]);
+    expect(topic?.title).toContain("猫狗");
+  });
+
+  it("没有友好题时返回 undefined", () => {
+    expect(pickQzoneTopicFromBilibili([{ title: "国际局势分析" }])).toBeUndefined();
   });
 });
 

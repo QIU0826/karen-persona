@@ -13,7 +13,7 @@
 >
 >
 > **v0.9.32 进行中（2026-10-29）**：自拍画风统一切到宣传页人物（character-2 参考 + 5 张缓存重生成）；承诺账本、她的一天跨天闭环、关系缺席降温与事件里程碑、主动消息低频语音/照片、跨天一致性回放、长期记忆审计均已落地。下一阶段：B 站只读世界 + MOSS-Image 部署与人物一致性微调（见 [下一阶段路线](docs/ROADMAP_NEXT.md)）。
-> 仓库实测状态（2026-10-27）：`npm run typecheck` 0 错误；`npm test` **164 个测试文件 / 1884 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 59.21%）。**干净 checkout + 真实 `npm ci` 已复验**（v0.2.1 时）：122 个依赖约 40s 安装、typecheck 0 错误、doctor 在缺 config/.env 时给出可执行的修复指引；v0.3.0 新增 `silk-wasm`（纯 wasm，无原生构建）。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**；另用「本地模拟用户 + 真实 DeepSeek」跑过 30 轮长跑（记忆 6/6、复读对 0、错误 0、平均延迟 2047ms、成本 ¥0.147），见 [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md)。
+> 仓库实测状态（2026-10-27）：`npm run typecheck` 0 错误；`npm test` **165 个测试文件 / 1890 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 59.21%）。**干净 checkout + 真实 `npm ci` 已复验**（v0.2.1 时）：122 个依赖约 40s 安装、typecheck 0 错误、doctor 在缺 config/.env 时给出可执行的修复指引；v0.3.0 新增 `silk-wasm`（纯 wasm，无原生构建）。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**；另用「本地模拟用户 + 真实 DeepSeek」跑过 30 轮长跑（记忆 6/6、复读对 0、错误 0、平均延迟 2047ms、成本 ¥0.147），见 [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md)。
 
 ---
 
@@ -200,7 +200,7 @@ npm run dev
 | **MOSS-Image 部署（v0.9.32，shadow）** | 🚧 | GPU7 已跑通 MOSS-Image-SFT（27.23GB，50 步 832×1216/1024² 约 38–40s/张，峰值显存 28.2GB）；Node 客户端/健康探活/隧道 19114 已接，**生产默认不切换**，显式 `KAREN_IMAGE_BACKEND=moss-image` 才走；参考图编辑接口 501 待 Moss-Image-Edit；当前实测风格偏写实、人物一致性需 LoRA 微调，详见 [docs/MOSS_IMAGE.md](docs/MOSS_IMAGE.md) |
 | **Karen identity LoRA v2（v0.9.32，实验）** | 🚧 | kohya sd-scripts + MOSS-Image-SFT：30→59 张清洗角色图，rank32/1500 步（GPU6 约 37min）；同 prompt ArcFace base 0.250 → v1 0.673 → **v2 0.766**（ckpt1250，std 0.034），中蓝发色/水彩风格稳定。**Qwen 单参考 0.839 仍更高（差 0.0725）**；MOSS-Edit 参考编辑更低（0.122）。按人物一致性优先，**自拍继续 Qwen、MOSS 全部 shadow**，场景仍 Z-Image；混合 MOSS+Qwen 修脸实测 identity 0.805 但延迟约 110–205s、guard 3/5，不采用；详见 [docs/CHARACTER_LORA_TRAINING.md](docs/CHARACTER_LORA_TRAINING.md)、[docs/MOSS_EDIT.md](docs/MOSS_EDIT.md)、[docs/HYBRID_SELFIE.md](docs/HYBRID_SELFIE.md) |
 | **B 站只读世界（v0.9.32）** | ✅ | 热门/详情/评论 + BV/链接解析，全部 GET、**无 cookie / 无登录 / 不发评论弹幕点赞**；每 90 分钟最多注入 2 条「她今天刷到的」，每日上限 3；`KAREN_BILIBILI=off` 可关，`npm run bilibili:smoke` 真实冒烟；端点限制见 [docs/BILIBILI.md](docs/BILIBILI.md) |
-| **高权限社会化（实验，默认关）** | 🚧 | 已有 B 站写客户端（Cookie/CSRF/dry-run）、`/social` 审批/预算/审计、内容安全与自主 runner；**默认 approve + dry-run，未接生产**；模式/硬上限/风控见 [docs/SOCIAL_AUTONOMY.md](docs/SOCIAL_AUTONOMY.md)，端点见 [docs/SOCIAL_BILIBILI_API.md](docs/SOCIAL_BILIBILI_API.md) |
+| **Qzone 自主动态 + B 站只读（实验）** | 🚧 | B 站只读继续；Qzone 自动从 B 站生活/娱乐题取素材，每天最多 1 条（`KAREN_QZONE_AUTO=on`），动作进审计；`/qzone` 手动发；**B 站写接口未启用、不需要 Cookie**；详见 [docs/SOCIAL_AUTONOMY.md](docs/SOCIAL_AUTONOMY.md) |
 
 ### 记忆与数据
 
