@@ -43,6 +43,7 @@ function deps(over: Partial<SocialCommandDeps> = {}): SocialCommandDeps {
     approve: vi.fn(async () => ({ ok: true, action: action({ status: "sent" }), result: { ok: true, platform: "bilibili" as const, action: "comment" as const, externalId: "rpid1" }, reason: "已发送" })),
     reject: vi.fn(() => ({ ok: true, reason: "已拒绝" })),
     undo: vi.fn(async () => ({ ok: true, action: action({ status: "undone" }), reason: "已撤销" })),
+    resetCircuit: vi.fn(),
     postDynamic: vi.fn(async () => ({ ok: true, action: action({ action: "dynamic", status: "sent" }), result: { ok: true, platform: "bilibili" as const, action: "dynamic" as const, externalId: "dyn1" }, reason: "已发送" })),
     comment: vi.fn(async () => ({ ok: true, action: action({ status: "sent" }), result: { ok: true, platform: "bilibili" as const, action: "comment" as const, externalId: "rpid2" }, reason: "已发送" })),
     pending: vi.fn(() => [action()]),
@@ -95,6 +96,14 @@ describe("social command", () => {
     expect(text).toContain("已发送");
     expect(text).toContain("dyn1");
     expect(d.postDynamic).toHaveBeenCalledWith("今天店里很安静");
+  });
+
+  it("high 模式需二次确认；reset-circuit 可清冷却", async () => {
+    const d = deps();
+    expect(await handleSocialCommand("/social mode high", d)).toContain("confirm");
+    expect(await handleSocialCommand("/social mode high confirm", d)).toContain("high");
+    expect(await handleSocialCommand("/social reset-circuit", d)).toContain("已清除");
+    expect(d.resetCircuit).toHaveBeenCalled();
   });
 
   it("/social comment 解析 BV 与正文", async () => {

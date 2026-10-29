@@ -26,6 +26,13 @@ describe("social runtime", () => {
     expect(m.effectiveSocialConfig({}, m.loadSocialRuntime()).mode).toBe("auto");
   });
 
+  it("主人复核后可清除冷却", async () => {
+    const m = await import("./runtime.js");
+    m.openCircuit(2, "risk_control");
+    m.clearCircuit();
+    expect(m.isCircuitOpen(m.loadSocialRuntime())).toBe(false);
+  });
+
   it("风控冷却可开可判", async () => {
     const m = await import("./runtime.js");
     const now = 1_800_000_000_000;

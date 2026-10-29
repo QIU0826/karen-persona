@@ -17,6 +17,7 @@ export interface SocialCommandDeps {
   approve(id: number): Promise<ExecuteSocialOutcome>;
   reject(id: number): { ok: boolean; reason: string };
   undo(id: number): Promise<ExecuteSocialOutcome>;
+  resetCircuit?(): void;
   postDynamic?(content: string): Promise<ExecuteSocialOutcome>;
   comment?(ref: string, content: string): Promise<ExecuteSocialOutcome>;
   pending?(limit?: number): SocialActionRecord[];
@@ -103,6 +104,7 @@ function helpText(): string {
     "/social pending — 看待审批",
     "/social approve <id> / reject <id> — 审批",
     "/social undo <id> — 撤销已发评论/动态（平台支持时）",
+    "/social reset-circuit — 主人复核后清除 24h 风控冷却",
     "/social run — 手动跑一次自主 tick（仍受预算/安全/模式约束）",
     "/social post <正文> — 手动发一条动态（主人显式命令，仍过安全闸门；dry-run 下只预览）",
     "/social comment <BV/av> <正文> — 手动评论（先解析视频；同样过安全闸门）",
@@ -133,7 +135,11 @@ export async function handleSocialCommand(text: string, deps: SocialCommandDeps)
     const target = (args[0] ?? "").toLowerCase() as SocialMode;
     if (!MODES.includes(target)) return `模式无效：${args[0] ?? "（空）"}。可选 ${MODES.join(" / ")}。`;
     if (target === "high") {
-      return "high 需要你明确确认后改 .env KAREN_SOCIAL=high（或在设置里二次确认）；这里先不直接切换。";
+      if (args[1] !== "confirm") {
+        return "high 是高权限自动模式（关注/转发等高风险动作仍会入审批）。\n确认请发：/social mode high confirm";
+      }
+      const highCfg = deps.setMode("high");
+      return `⚠ 已切到 ${modeText(highCfg.mode)}。所有动作仍受代码级硬上限和内容安全约束；/social off 可立即停。`;
     }
     const cfg = deps.setMode(target);
     return `模式已切换：${modeText(cfg.mode)}。`;
@@ -164,6 +170,11 @@ export async function handleSocialCommand(text: string, deps: SocialCommandDeps)
     if (!ref || !content) return "用法：/social comment <BV/av> <评论正文>";
     const out = await deps.comment(ref, content);
     return `${out.reason}${out.result?.externalId ? `（外部 id：${out.result.externalId}）` : ""}`;
+  }
+  if (cmd === "reset-circuit") {
+    if (!deps.resetCircuit) return "当前没有接入风控冷却重置。";
+    deps.resetCircuit();
+    return "已清除风控冷却（写操作恢复；仍受预算/间隔/安全约束）。";
   }
   if (cmd === "post") {
     if (!deps.postDynamic) return "当前没有接入手动发动态。";

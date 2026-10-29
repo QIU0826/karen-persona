@@ -84,7 +84,7 @@ import { handleControlCommand } from "../commands/control.js";
 import { exportUserData } from "../data/user-export.js";
 import { publishQzonePost, isQzoneEnabled } from "../qzone/qzone.js";
 import { handleSocialCommand } from "../social/command.js";
-import { effectiveSocialConfig, loadSocialRuntime, setSocialModeOverride } from "../social/runtime.js";
+import { clearCircuit, effectiveSocialConfig, loadSocialRuntime, setSocialModeOverride } from "../social/runtime.js";
 import { runSocialTick } from "../social/runner.js";
 import { approveAndExecuteAction, postCommentManual, postDynamicManual, undoSocialAction } from "../social/executor.js";
 import { listPending, rejectAction } from "../social/store.js";
@@ -2484,6 +2484,7 @@ async function handlePrivateBatch(
             }
           },
           undo: (id) => undoSocialAction(id, effectiveSocialConfig()),
+          resetCircuit: () => clearCircuit(),
           postDynamic: (content) => postDynamicManual(content, effectiveSocialConfig(), { owner: state.owner }),
           comment: (ref, content) => postCommentManual(ref, content, effectiveSocialConfig(), { owner: state.owner }),
           pending: (limit) => listPending({ limit: limit ?? 20 }),

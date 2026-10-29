@@ -73,6 +73,15 @@ export function setSocialModeOverride(mode: SocialMode): SocialConfig {
   return effectiveSocialConfig(process.env, runtime);
 }
 
+/** 主人复核/处理完风控后清除冷却。 */
+export function clearCircuit(): SocialRuntimeState {
+  const runtime = loadSocialRuntime();
+  delete runtime.circuitOpenUntil;
+  delete runtime.lastError;
+  saveSocialRuntime(runtime);
+  return runtime;
+}
+
 export function isCircuitOpen(runtime: SocialRuntimeState, now = Date.now()): boolean {
   return typeof runtime.circuitOpenUntil === "number" && runtime.circuitOpenUntil > now;
 }
