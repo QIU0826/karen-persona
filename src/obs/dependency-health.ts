@@ -355,8 +355,39 @@ export interface DependencyMonitorOptions {
   intervalMs?: number;
   env?: NodeJS.ProcessEnv;
   probe?: ProbeOptions;
+  /** 连续失败多少次才标 down（默认 2，避免隧道/服务重启瞬间误报）。 */
+  failureThreshold?: number;
   /** 每次探活完成时回调（桥接用来告警；测试用来断言）。 */
   onSnapshot?: (snapshot: DependencySnapshot, previous: DependencySnapshot | null) => void;
+}
+
+/**
+ * 探活失败去抖：首次失败仍按 up 返回（只记 pending），连续 `threshold` 次失败才标 down；
+ * 一旦恢复立刻 up 并清空计数。纯函数、原地更新 failureCounts，便于测试/复用。
+ */
+export function stabilizeDependencySnapshot(
+  snapshot: DependencySnapshot,
+  failureCounts: Map<string, number>,
+  threshold = 2,
+): DependencySnapshot {
+  const limit = Math.max(1, Math.floor(threshold));
+  const statuses = snapshot.statuses.map((status) => {
+    if (status.up) {
+      failureCounts.delete(status.name);
+      return status;
+    }
+    const count = (failureCounts.get(status.name) ?? 0) + 1;
+    failureCounts.set(status.name, count);
+    if (count < limit) {
+      return { ...status, up: true, error: "probe_pending" };
+    }
+    return status;
+  });
+  return {
+    checkedAt: snapshot.checkedAt,
+    statuses,
+    degraded: statuses.filter((status) => !status.up),
+  };
 }
 
 export interface DependencyMonitorHandle {
@@ -373,6 +404,8 @@ export function startDependencyMonitor(
   let stopped = false;
   let running = false;
   let previous: DependencySnapshot | null = lastSnapshot;
+  const failureCounts = new Map<string, number>();
+  const failureThreshold = Math.max(1, Math.floor(options.failureThreshold ?? 2));
   const intervalMs = Math.max(5_000, Math.min(10 * 60_000, options.intervalMs ?? 60_000));
 
   const tick = async (): Promise<void> => {
@@ -384,7 +417,8 @@ export function startDependencyMonitor(
         previous = lastSnapshot;
         return;
       }
-      const next = await probeDependencies(specs, options.probe ?? {});
+      const raw = await probeDependencies(specs, options.probe ?? {});
+      const next = stabilizeDependencySnapshot(raw, failureCounts, failureThreshold);
       lastSnapshot = next;
       try {
         options.onSnapshot?.(next, previous);

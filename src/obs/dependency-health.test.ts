@@ -6,6 +6,7 @@ import {
   probeDependencies,
   resetDependencySnapshotForTest,
   startDependencyMonitor,
+  stabilizeDependencySnapshot,
   type DependencySnapshot,
   type DependencyStatus,
 } from "./dependency-health.js";
@@ -236,5 +237,44 @@ describe("startDependencyMonitor", () => {
     const before = getLastDependencySnapshot();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(getLastDependencySnapshot()).toBe(before);
+  });
+});
+
+
+describe("stabilizeDependencySnapshot：探活失败去抖", () => {
+  const down = (): DependencySnapshot => ({
+    checkedAt: 1,
+    statuses: [spec({ up: false, error: "timeout" })],
+    degraded: [spec({ up: false, error: "timeout" })],
+  });
+  const up = (): DependencySnapshot => ({
+    checkedAt: 2,
+    statuses: [spec({ up: true, error: undefined })],
+    degraded: [],
+  });
+
+  it("首次失败先按 up 隐藏，连续第二次才标 down", () => {
+    const counts = new Map<string, number>();
+    const first = stabilizeDependencySnapshot(down(), counts, 2);
+    expect(first.statuses[0]?.up).toBe(true);
+    expect(first.statuses[0]?.error).toBe("probe_pending");
+    expect(first.degraded).toEqual([]);
+
+    const second = stabilizeDependencySnapshot(down(), counts, 2);
+    expect(second.statuses[0]?.up).toBe(false);
+    expect(second.degraded).toHaveLength(1);
+  });
+
+  it("恢复后立刻 up 并清空失败计数", () => {
+    const counts = new Map<string, number>([["tts-voxcpm2", 1]]);
+    const recovered = stabilizeDependencySnapshot(up(), counts, 2);
+    expect(recovered.statuses[0]?.up).toBe(true);
+    expect(counts.size).toBe(0);
+  });
+
+  it("threshold=1 时首次失败直接 down（用于测试/严格模式）", () => {
+    const counts = new Map<string, number>();
+    const first = stabilizeDependencySnapshot(down(), counts, 1);
+    expect(first.degraded).toHaveLength(1);
   });
 });
