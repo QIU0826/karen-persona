@@ -46,6 +46,8 @@ export interface ControlDeps {
   exportData(): ExportSummary;
   /** /qzone：发 QQ 空间动态；未启用时不传 */
   publishQzone?: (content: string) => Promise<{ ok: boolean; tid?: string; reason?: string }>;
+  /** /social：社会化治理命令；未接入时不传 */
+  social?: (text: string) => Promise<string | null>;
 }
 
 export interface ParsedCommand {
@@ -219,6 +221,7 @@ export function buildHelpText(): string {
     "/fact: 查看她记得的关于你的事（可确认/否掉）",
     "/life: 她今天真实发生的小事（生活流）",
     "/qzone 内容: 发一条 QQ 空间动态（需 KAREN_QZONE=on）",
+    "/social: 看/管理她的 B 站动态、评论、审批与预算",
     "/age: 查看年龄确认状态",
     "/help: 这条帮助",
   ].join("\n");
@@ -384,6 +387,15 @@ export async function handleControlCommand(
         return true;
       }
       deps.reply("用法：/fact（列出）｜/fact ok <key>（确认）｜/fact no <key>（否掉）");
+      return true;
+    }
+    case "social": {
+      if (!deps.social) {
+        deps.reply("高权限社会化未接入：需要先配置 B 站 Cookie 并启用 KAREN_SOCIAL。");
+        return true;
+      }
+      const result = await deps.social(text);
+      deps.reply(result ?? "用法见 /social help");
       return true;
     }
     case "qzone": {

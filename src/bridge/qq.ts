@@ -83,6 +83,11 @@ import { checkMediaUrl } from "../ai/media-url.js";
 import { handleControlCommand } from "../commands/control.js";
 import { exportUserData } from "../data/user-export.js";
 import { publishQzonePost, isQzoneEnabled } from "../qzone/qzone.js";
+import { handleSocialCommand } from "../social/command.js";
+import { effectiveSocialConfig, loadSocialRuntime, setSocialModeOverride } from "../social/runtime.js";
+import { runSocialTick } from "../social/runner.js";
+import { approveAndExecuteAction, undoSocialAction } from "../social/executor.js";
+import { listPending, rejectAction } from "../social/store.js";
 import { maybeAutoPublishQzone, localDateKey, type QzoneAutoState } from "../qzone/qzone-auto.js";
 import { dataFile } from "../data/paths.js";
 import { buildFirstContactDisclosure, shouldSendDisclosure } from "../persona/disclosure.js";
@@ -937,6 +942,41 @@ async function main() {
     }
   };
 
+  // ── 高权限社会化自主 tick（默认不启用；显式 KAREN_SOCIAL 或 /social on 后）──
+  let socialRunning = false;
+  const maybeRunSocialAutonomy = async (): Promise<void> => {
+    if (socialRunning || getConnectionCount() === 0) return;
+    const runtime = loadSocialRuntime();
+    // 没有显式 opt-in 时不跑：默认 env 不设置，避免用户没配置就自动草拟/发评论
+    if (!process.env.KAREN_SOCIAL && !runtime.modeOverride) return;
+    const config = effectiveSocialConfig(process.env, runtime);
+    if (config.mode === "off") return;
+    const entry = userStates.entries().next().value as [number, ConversationState] | undefined;
+    if (!entry) return;
+    const [userId, state] = entry;
+    socialRunning = true;
+    try {
+      const result = await runSocialTick(state, { config, runtime });
+      const action = result.pending ?? result.sent;
+      if (!action) return;
+      const label = action.action === "dynamic" ? "动态" : action.action === "comment" ? "评论" : action.action;
+      if (result.pending) {
+        sendPrivateMsg(
+          userId,
+          `【想发个${label}，等你点头】#${action.id}\n${action.content.slice(0, 80)}\n/social approve ${action.id}｜/social reject ${action.id}`,
+        );
+        log.info("social.pending", { user_id: userId, action_id: action.id, action: action.action });
+      } else if (result.sent) {
+        sendPrivateMsg(userId, `【刚在B站${label}了】#${action.id} ${action.target.title ? `「${action.target.title.slice(0, 30)}」` : ""}`.trim());
+        log.info("social.sent", { user_id: userId, action_id: action.id, action: action.action });
+      }
+    } catch (err: unknown) {
+      log.warn("social.tick_failed", { error: errMessage(err) });
+    } finally {
+      socialRunning = false;
+    }
+  };
+
   // ── P1: 生活流心跳 ──────────────────────────
 
   // 每 15 分钟检查一次她的生活状态（天气/因果链/情绪/时间节点），
@@ -1075,6 +1115,8 @@ async function main() {
     }
     // Qzone 自动动态：心跳里低频尝试，每天最多一条；默认关。
     void maybeAutoQzone();
+    // 高权限社会化：默认关；显式开启后一次心跳最多一个动作。
+    void maybeRunSocialAutonomy();
   }, HEARTBEAT_MS);
 
   log.info("proactive.heartbeat_started", { interval_min: HEARTBEAT_MS / 60000 });
@@ -2414,6 +2456,27 @@ async function handlePrivateBatch(
           initialCloseness: state.persona.relationship.closeness,
         }),
       publishQzone: (content) => publishQzonePost({ content }),
+      social: async (commandText) => {
+        const runtime = loadSocialRuntime();
+        const config = effectiveSocialConfig(process.env, runtime);
+        return handleSocialCommand(commandText, {
+          config,
+          runtime,
+          setMode: (mode) => setSocialModeOverride(mode),
+          approve: (id) => approveAndExecuteAction(id, effectiveSocialConfig()),
+          reject: (id) => {
+            try {
+              rejectAction(id, { actor: "owner" });
+              return { ok: true, reason: `已拒绝 #${id}` };
+            } catch (err) {
+              return { ok: false, reason: err instanceof Error ? err.message : "拒绝失败" };
+            }
+          },
+          undo: (id) => undoSocialAction(id, effectiveSocialConfig()),
+          pending: (limit) => listPending({ limit: limit ?? 20 }),
+          runTick: () => runSocialTick(state, { config: effectiveSocialConfig() }),
+        });
+      },
     });
     if (!handled) {
       sendPrivateMsg(userId, "看不懂这个指令。/help 看看能做什么。");

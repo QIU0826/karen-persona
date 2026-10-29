@@ -1,6 +1,6 @@
 # 高权限社会化：她自己的网上生活（实施中）
 
-> 状态：2026-10-29 计划已批准，P1/P2 代码实施中；**默认 `approve` + `dry-run`，未接生产**。
+> 状态：2026-10-29 P1/P2 已落地（写客户端/policy/safety/store/runner/命令/心跳接线），**默认 `approve` + `dry-run`，未接生产**；等待用户提供 B 站 Cookie 后做实号 SPIKE。
 > 关联：`docs/BILIBILI.md`（只读）、`src/qzone/`（QQ空间）、`docs/OPTIMIZATION_AUDIT_2026-10-29.md`。
 
 ## 目标
@@ -44,6 +44,16 @@ src/social/
   context.ts     聊天 prompt 注入她最近网上活动（P3）
   approval.ts    审批队列（P3）
 ```
+
+## 已落地（2026-10-29）
+
+- `src/social/bilibili-auth.ts`：Cookie+CSRF 写客户端（评论/动态/点赞/收藏/关注/转发/删除），dry-run 默认开；
+- `src/social/store.ts`：动作状态机、审批 TTL、审计、预算、同目标去重、fingerprint（不存 Cookie）；
+- `src/social/policy.ts` / `safety.ts`：硬上限、静默、风控冷却、审批、13 类内容安全、注入、评论相关性；
+- `src/social/runner.ts`：一次 tick 一个动作；observe/approve/auto；
+- `/social` 命令：status/on/off/mode/pending/approve/reject/undo/run；
+- bridge 心跳接入：只有显式 `KAREN_SOCIAL` 或 `/social on` 才跑，默认不自动动；
+- 测试：全仓 164 文件 / 1878 用例通过；写客户端 48 例、policy/safety 90 例、store 19 例。
 
 ## 上线顺序
 
