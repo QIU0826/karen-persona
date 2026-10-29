@@ -57,6 +57,7 @@ src/social/
 
 - Qzone 自动动态优先从 B 站热门取生活/娱乐题（`pickQzoneTopicFromBilibili`），失败回退热榜；
 - Qzone 草稿发布前再过一遍 `social/safety` 内容安全（和 B 站写同一套红线）；
+- `maybeAutoPublishQzone` 支持依赖注入，新增 3 条 mock 测试覆盖「B站取题→草稿→安全→发布」与热榜回退；
 - Qzone 自动/手动发布写入 `social_actions` 审计；`/social post` 改走 Qzone；
 - 自动 Qzone 受 `/social off` 控制（runtime override off 时停）；
 - Qzone 自动每日最多 1 条（`shouldAttemptAutoPost` 硬限制），UGC right=64（仅自己可见）可显式改 1；
@@ -70,7 +71,7 @@ src/social/
 - 状态里显示 B 站登录账号（nav 校验）；手动 post/comment 仍过内容安全与审计；
 - 聊天 prompt 注入「她最近在网上」≤200 字（评论/动态，不泄露私聊）；
 - bridge 心跳接入：只有显式 `KAREN_SOCIAL` 或 `/social on` 才跑，默认不自动动；
-- 测试：全仓 165 文件 / 1890 用例通过；写客户端 48 例、policy/safety 90 例、store 19 例；
+- 测试：全仓 165 文件 / 1893 用例通过；写客户端 48 例、policy/safety 90 例、store 19 例；
 - 只读冒烟：`npm run social:smoke`（校验 Cookie/登录/读流/草稿安全，不写）；
 - 真号 SPIKE：`npm run social:spike`（默认 dry-run；真写需 `--confirm` + `KAREN_SOCIAL_SPIKE=1`，只在小号用）；
 - runner 兜底：没有评论/动态草稿时，可对感兴趣视频自动点赞（受 likes 预算）。

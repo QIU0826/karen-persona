@@ -13,7 +13,7 @@
 >
 >
 > **v0.9.32 进行中（2026-10-29）**：自拍画风统一切到宣传页人物（character-2 参考 + 5 张缓存重生成）；承诺账本、她的一天跨天闭环、关系缺席降温与事件里程碑、主动消息低频语音/照片、跨天一致性回放、长期记忆审计均已落地。下一阶段：B 站只读世界 + MOSS-Image 部署与人物一致性微调（见 [下一阶段路线](docs/ROADMAP_NEXT.md)）。
-> 仓库实测状态（2026-10-27）：`npm run typecheck` 0 错误；`npm test` **165 个测试文件 / 1890 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 59.21%）。**干净 checkout + 真实 `npm ci` 已复验**（v0.2.1 时）：122 个依赖约 40s 安装、typecheck 0 错误、doctor 在缺 config/.env 时给出可执行的修复指引；v0.3.0 新增 `silk-wasm`（纯 wasm，无原生构建）。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**；另用「本地模拟用户 + 真实 DeepSeek」跑过 30 轮长跑（记忆 6/6、复读对 0、错误 0、平均延迟 2047ms、成本 ¥0.147），见 [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md)。
+> 仓库实测状态（2026-10-27）：`npm run typecheck` 0 错误；`npm test` **165 个测试文件 / 1893 个用例**全部通过（vitest；审计基线为 11 文件 / 178 用例）。GitHub Actions CI 已接入类型检查、lint、单测与覆盖率基线（行覆盖 59.21%）。**干净 checkout + 真实 `npm ci` 已复验**（v0.2.1 时）：122 个依赖约 40s 安装、typecheck 0 错误、doctor 在缺 config/.env 时给出可执行的修复指引；v0.3.0 新增 `silk-wasm`（纯 wasm，无原生构建）。另有 **mock-OneBot 端到端集成测试**（真实 bridge 进程 + fake NapCat/DeepSeek，覆盖披露/年龄门/私聊/图片/群聊，CI 自动跑，见 [docs/QQ_E2E_TEST.md](docs/QQ_E2E_TEST.md)）与 **真实 QQ 长跑工具**（`npm run qq:watch`）：真机首轮 2 个完整回合平均延迟 2.9s、成本 ¥0.0057，暴露的「老用户披露缺失」「快速追问误延迟」已修复（见 [docs/QQ_REAL_RUN.md](docs/QQ_REAL_RUN.md)）；**样本仍少，真实 QQ 长跑继续进行中**；另用「本地模拟用户 + 真实 DeepSeek」跑过 30 轮长跑（记忆 6/6、复读对 0、错误 0、平均延迟 2047ms、成本 ¥0.147），见 [docs/LONGRUN_REGRESSION.md](docs/LONGRUN_REGRESSION.md)。
 
 ---
 

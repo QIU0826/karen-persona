@@ -175,14 +175,33 @@ export async function generateQzoneDraft(
   }
 }
 
+export interface QzoneAutoDeps {
+  /** 读 B 站热门（只读；测试注入） */
+  bilibiliDigest?: () => Promise<{ items: Array<{ title: string }> } | null>;
+  /** 热榜兜底（测试注入） */
+  trending?: () => Promise<Array<{ title: string }>>;
+  /** 草稿生成（测试注入） */
+  generateDraft?: (
+    state: ConversationState,
+    topicTitle: string,
+    candidates: QzonePhotoCandidate[],
+  ) => Promise<QzoneDraft | null>;
+  /** 照片候选（测试注入） */
+  photoCandidates?: () => QzonePhotoCandidate[];
+  /** 发布（测试注入；默认走 NapCat） */
+  publish?: (opts: { content: string; images?: string[] }) => Promise<{ ok: boolean; tid?: string; reason?: string }>;
+  random?: () => number;
+}
+
 /**
  * 自动发一条；返回是否发布。调用方负责限频（每天最多一次）。
- * `state` 只用于取 persona 和热榜素材。
+ * `state` 只用于取 persona 和热榜素材；外部依赖可注入，便于测试。
  */
 export async function maybeAutoPublishQzone(
   state: ConversationState,
   qzoneState: QzoneAutoState,
   now = new Date(),
+  deps: QzoneAutoDeps = {},
 ): Promise<{
   posted: boolean;
   state: QzoneAutoState;
@@ -191,14 +210,14 @@ export async function maybeAutoPublishQzone(
   tid?: string;
   source?: "bilibili" | "trending" | "none";
 }> {
-  if (!shouldAttemptAutoPost({ now, lastDate: qzoneState.lastDate, enabled: true })) {
+  if (!shouldAttemptAutoPost({ now, lastDate: qzoneState.lastDate, enabled: true, random: deps.random })) {
     return { posted: false, state: qzoneState };
   }
   // 先读 B 站热门找生活/娱乐题（只读、失败静默），没有再回退热榜。
   let topicTitle = "";
   let topicSource: "bilibili" | "trending" | "none" = "none";
   try {
-    const digest = await getBilibiliDigest();
+    const digest = await (deps.bilibiliDigest ?? getBilibiliDigest)();
     const biliTopic = digest ? pickQzoneTopicFromBilibili(digest.items) : undefined;
     if (biliTopic) {
       topicTitle = biliTopic.title;
@@ -208,13 +227,13 @@ export async function maybeAutoPublishQzone(
     // B 站失败不影响 Qzone
   }
   if (!topicTitle) {
-    const topics = await getTrendingTopicsAsync();
+    const topics = await (deps.trending ?? getTrendingTopicsAsync)();
     const topic = pickQzoneFriendlyTopic(topics.filter((t) => t.title.trim().length >= 4));
     topicTitle = topic?.title ?? "";
     topicSource = topic ? "trending" : "none";
   }
-  const candidates = listQzonePhotoCandidates(5);
-  const draft = await generateQzoneDraft(state, topicTitle, candidates);
+  const candidates = (deps.photoCandidates ?? (() => listQzonePhotoCandidates(5)))();
+  const draft = await (deps.generateDraft ?? generateQzoneDraft)(state, topicTitle, candidates);
   if (!draft) return { posted: false, state: qzoneState, reason: "no_draft" };
   const safety = validateSocialContent(draft.content, {
     maxChars: 120,
@@ -239,7 +258,9 @@ export async function maybeAutoPublishQzone(
       images = undefined;
     }
   }
-  const result = await publishQzonePost({ content: draft.content, ...(images ? { images } : {}) });
+  const result = await (deps.publish ?? ((opts: { content: string; images?: string[] }) => publishQzonePost(opts)))(
+    { content: draft.content, ...(images ? { images } : {}) },
+  );
   if (!result.ok) {
     log.warn("qzone.auto_failed", { reason: result.reason ?? "unknown" });
     return { posted: false, state: qzoneState, reason: result.reason };
