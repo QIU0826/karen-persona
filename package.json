@@ -81,7 +81,8 @@
     "consistency:eval": "tsx scripts/consistency-eval.ts",
     "bilibili:smoke": "tsx scripts/bilibili-smoke.ts",
     "social:smoke": "tsx scripts/social-smoke.ts",
-    "social:spike": "tsx scripts/social-spike.ts"
+    "social:spike": "tsx scripts/social-spike.ts",
+    "qzone:preview": "tsx scripts/qzone-preview.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",

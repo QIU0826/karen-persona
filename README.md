@@ -200,7 +200,7 @@ npm run dev
 | **MOSS-Image 部署（v0.9.32，shadow）** | 🚧 | GPU7 已跑通 MOSS-Image-SFT（27.23GB，50 步 832×1216/1024² 约 38–40s/张，峰值显存 28.2GB）；Node 客户端/健康探活/隧道 19114 已接，**生产默认不切换**，显式 `KAREN_IMAGE_BACKEND=moss-image` 才走；参考图编辑接口 501 待 Moss-Image-Edit；当前实测风格偏写实、人物一致性需 LoRA 微调，详见 [docs/MOSS_IMAGE.md](docs/MOSS_IMAGE.md) |
 | **Karen identity LoRA v2（v0.9.32，实验）** | 🚧 | kohya sd-scripts + MOSS-Image-SFT：30→59 张清洗角色图，rank32/1500 步（GPU6 约 37min）；同 prompt ArcFace base 0.250 → v1 0.673 → **v2 0.766**（ckpt1250，std 0.034），中蓝发色/水彩风格稳定。**Qwen 单参考 0.839 仍更高（差 0.0725）**；MOSS-Edit 参考编辑更低（0.122）。按人物一致性优先，**自拍继续 Qwen、MOSS 全部 shadow**，场景仍 Z-Image；混合 MOSS+Qwen 修脸实测 identity 0.805 但延迟约 110–205s、guard 3/5，不采用；详见 [docs/CHARACTER_LORA_TRAINING.md](docs/CHARACTER_LORA_TRAINING.md)、[docs/MOSS_EDIT.md](docs/MOSS_EDIT.md)、[docs/HYBRID_SELFIE.md](docs/HYBRID_SELFIE.md) |
 | **B 站只读世界（v0.9.32）** | ✅ | 热门/详情/评论 + BV/链接解析，全部 GET、**无 cookie / 无登录 / 不发评论弹幕点赞**；每 90 分钟最多注入 2 条「她今天刷到的」，每日上限 3；`KAREN_BILIBILI=off` 可关，`npm run bilibili:smoke` 真实冒烟；端点限制见 [docs/BILIBILI.md](docs/BILIBILI.md) |
-| **Qzone 自主动态 + B 站只读（实验）** | 🚧 | B 站只读继续；Qzone 自动从 B 站生活/娱乐题取素材，每天最多 1 条（`KAREN_QZONE_AUTO=on`），动作进审计；`/qzone` 手动发；**B 站写接口未启用、不需要 Cookie**；详见 [docs/SOCIAL_AUTONOMY.md](docs/SOCIAL_AUTONOMY.md) |
+| **Qzone 自主动态 + B 站只读（实验）** | 🚧 | B 站只读继续；Qzone 自动从 B 站生活/娱乐题取素材，每天最多 1 条（`KAREN_QZONE_AUTO=on`），动作进审计；`/qzone` 手动发；`npm run qzone:preview` 可预览不发布；**B 站写接口未启用、不需要 Cookie**；详见 [docs/SOCIAL_AUTONOMY.md](docs/SOCIAL_AUTONOMY.md) |
 
 ### 记忆与数据
 

@@ -59,8 +59,10 @@ src/social/
 - Qzone 草稿发布前再过一遍 `social/safety` 内容安全（和 B 站写同一套红线）；
 - `maybeAutoPublishQzone` 支持依赖注入，新增 3 条 mock 测试覆盖「B站取题→草稿→安全→发布」与热榜回退；
 - Qzone 自动/手动发布写入 `social_actions` 审计；`/social post` 改走 Qzone；
+- `npm run qzone:preview`：真实走 B 站取题→人设草稿→内容安全，但只预览不发布（临时目录，不碰 Qzone）；
 - 自动 Qzone 受 `/social off` 控制（runtime override off 时停）；
 - Qzone 自动每日最多 1 条（`shouldAttemptAutoPost` 硬限制），UGC right=64（仅自己可见）可显式改 1；
+- 2026-10-29 预览实测：B 站取题 → 66 字动态草稿安全通过（未发布）。
 - 用户选定范围：**不接 B 站写接口、不需要 B 站 Cookie**。
 
 - `src/social/bilibili-auth.ts`：Cookie+CSRF 写客户端（评论/动态/点赞/收藏/关注/转发/删除），dry-run 默认开；
