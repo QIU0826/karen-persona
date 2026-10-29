@@ -25,6 +25,8 @@ const DELIVER_RE =
   /(给你|带你|发你|给你录|给你拍|拍张|照片|自拍|语音|看看|见|去|吃|聊|回你|找你|买|请|录)/;
 const NEG_RE = /(不答应|没答应|不想|别|不用|没法|不能|算了|再说吧)/;
 const EVENT_RE = /(面试|考试|去医院|做手术|出差|搬家|过生日|生日|开会|见客户|签合同|体检|答辩|复试)/;
+/** 用户在问/质疑「你怎么知道」，不是他的日程；这类句子不能当 event。 */
+const EVENT_QUESTION_RE = /(怎么知道|你.{0,4}知道|知道我有|听谁|谁说的|是不是|有没有|吗[？?]?|？|\?)/;
 const EVENT_TRIGGER_RE = /(我|明天|后天|周末|下周)/;
 
 const MAX_LOOKBACK_MS = 48 * 60 * 60 * 1000;
@@ -92,6 +94,8 @@ export function extractPromises(
         seen.add(key);
         out.push({ kind, content: sentence, dueAt: inferDueAt(sentence, base), sourceRole: "assistant" });
       } else if (message.role === "user") {
+        // 问句/质疑句不是日程：「你怎么知道我有开会」这类不能记成他的事。
+        if (EVENT_QUESTION_RE.test(sentence)) continue;
         if (!EVENT_TRIGGER_RE.test(sentence) || !EVENT_RE.test(sentence)) continue;
         const key = `event|${sentence}`;
         if (seen.has(key)) continue;

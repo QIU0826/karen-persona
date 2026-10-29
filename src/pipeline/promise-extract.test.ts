@@ -47,6 +47,20 @@ describe("extractPromises", () => {
     expect(list[0]?.dueAt).toBeDefined();
   });
 
+  it("用户质疑/问句不记成日程（真机误报）", () => {
+    const list = extractPromises(
+      [
+        msg("user", "嗯？你怎么知道我有开会"),
+        msg("user", "我有开会吗"),
+        msg("user", "我明天下午面试"),
+      ],
+      NOW,
+    );
+    expect(list.filter((item) => item.content.includes("怎么知道"))).toEqual([]);
+    expect(list.filter((item) => item.content.includes("吗"))).toEqual([]);
+    expect(list.some((item) => item.content.includes("面试"))).toBe(true);
+  });
+
   it("否定句不记", () => {
     const list = extractPromises([msg("assistant", "我不答应给你录音")], NOW);
     expect(list).toEqual([]);
